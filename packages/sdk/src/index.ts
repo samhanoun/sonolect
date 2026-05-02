@@ -13,8 +13,8 @@ export class SonolectClient {
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${token}`,
-        ...(init.headers ?? {})
-      }
+        ...(init.headers ?? {}),
+      },
     });
 
     if (!response.ok) {

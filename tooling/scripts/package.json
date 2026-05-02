@@ -8,5 +8,7 @@
     "typecheck": "tsc --noEmit",
     "test": "echo \"No tooling tests yet\""
   },
-  "devDependencies": { "typescript": "^5.7.2" }
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
 }

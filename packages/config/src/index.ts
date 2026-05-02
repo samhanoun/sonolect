@@ -11,5 +11,5 @@ export const SECURITY_LOGGING_DENYLIST = [
   "api_key",
   "payment_data",
   "signed_url",
-  "sensitive_prompt"
+  "sensitive_prompt",
 ] as const;
