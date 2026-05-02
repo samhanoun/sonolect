@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { createApp } from "./index.js";
 import type { RefinementResult, TranscriptionJob } from "@sonolect/types";
 
-const app = await createApp({ logger: false });
+const app = await createApp({ logger: false, env: {} });
 
 try {
   const health = await app.inject({ method: "GET", url: "/health" });
@@ -11,6 +11,7 @@ try {
     health.json<{ service: string }>().service,
     "sonolect-audio-service",
   );
+  assert.equal(health.json<{ sttProvider: string }>().sttProvider, "mock");
 
   const created = await app.inject({
     method: "POST",
@@ -21,15 +22,34 @@ try {
         mimeType: "audio/webm",
       },
       language: "en-US",
-      provider: "google",
       metadata: { source: "smoke" },
     },
   });
   assert.equal(created.statusCode, 202, created.body);
   const job = created.json<TranscriptionJob>();
   assert.equal(job.status, "completed");
-  assert.equal(job.provider, "google");
-  assert.ok(job.transcriptText?.includes("placeholder"));
+  assert.equal(job.provider, "mock");
+  assert.ok(job.transcriptText?.includes("mock transcript"));
+
+  const googleNotConfigured = await app.inject({
+    method: "POST",
+    url: "/transcriptions",
+    payload: {
+      audio: {
+        uri: "gs://sonolect-dev-audio-temp/example.webm",
+        mimeType: "audio/webm",
+      },
+      language: "en-US",
+      provider: "google",
+      metadata: { source: "google-not-configured-regression" },
+    },
+  });
+  assert.equal(googleNotConfigured.statusCode, 202, googleNotConfigured.body);
+  const googleJob = googleNotConfigured.json<TranscriptionJob>();
+  assert.equal(googleJob.status, "failed");
+  assert.equal(googleJob.provider, "google");
+  assert.ok(googleJob.error?.includes("provider_not_configured"));
+  assert.ok(googleJob.error?.includes("GOOGLE_CLOUD_PROJECT"));
 
   const fetched = await app.inject({
     method: "GET",

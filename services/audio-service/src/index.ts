@@ -42,6 +42,29 @@ interface InMemoryStores {
 export interface CreateAppOptions {
   stores?: InMemoryStores;
   logger?: boolean;
+  env?: NodeJS.ProcessEnv;
+}
+
+class ProviderNotConfiguredError extends Error {
+  readonly code = "provider_not_configured";
+
+  constructor(provider: SttProviderName, missingEnv: string[]) {
+    super(
+      `${provider} STT provider_not_configured: missing required environment variable${missingEnv.length === 1 ? "" : "s"} ${missingEnv.join(
+        ", ",
+      )}`,
+    );
+    this.name = "ProviderNotConfiguredError";
+  }
+}
+
+type SttProviderEnv = Partial<
+  Pick<NodeJS.ProcessEnv, "STT_PROVIDER" | "GOOGLE_CLOUD_PROJECT">
+>;
+
+interface ProviderSelectionOptions {
+  requested?: SttProviderName | undefined;
+  env?: SttProviderEnv | undefined;
 }
 
 const createStores = (): InMemoryStores => ({
@@ -112,21 +135,46 @@ const googlePlaceholderProvider: SttProvider = {
   },
 };
 
-const resolveProvider = (requested?: SttProviderName): SttProvider => {
-  const selected =
-    requested ??
-    (process.env.STT_PROVIDER as SttProviderName | undefined) ??
-    "mock";
-  return selected === "google" ? googlePlaceholderProvider : mockProvider;
+const validateGoogleSttConfiguration = (env: SttProviderEnv): void => {
+  const missingEnv = ["GOOGLE_CLOUD_PROJECT"].filter(
+    (key) => !env[key as keyof SttProviderEnv],
+  );
+  if (missingEnv.length > 0) {
+    throw new ProviderNotConfiguredError("google", missingEnv);
+  }
+};
+
+const createGoogleProvider = (env: SttProviderEnv): SttProvider => ({
+  name: "google",
+  async transcribe(input) {
+    validateGoogleSttConfiguration(env);
+    return googlePlaceholderProvider.transcribe(input);
+  },
+});
+
+const resolveConfiguredProviderName = (
+  env: SttProviderEnv = process.env,
+): SttProviderName => {
+  const selected = env.STT_PROVIDER ?? "mock";
+  return selected === "google" ? "google" : "mock";
+};
+
+const resolveProvider = ({
+  requested,
+  env = process.env,
+}: ProviderSelectionOptions = {}): SttProvider => {
+  const selected = requested ?? resolveConfiguredProviderName(env);
+  return selected === "google" ? createGoogleProvider(env) : mockProvider;
 };
 
 const processTranscriptionJob = async (
   job: TranscriptionJob,
   input: TranscriptionJobInput,
+  env: SttProviderEnv = process.env,
 ): Promise<TranscriptionJob> => {
   if (job.status === "cancelled") return job;
   const now = new Date().toISOString();
-  const provider = resolveProvider(input.provider);
+  const provider = resolveProvider({ requested: input.provider, env });
   try {
     const result = await provider.transcribe(input);
     return {
@@ -175,6 +223,7 @@ export async function createApp(
   options: CreateAppOptions = {},
 ): Promise<FastifyInstance> {
   const stores = options.stores ?? createStores();
+  const env = options.env ?? process.env;
   const app = Fastify({ logger: options.logger ?? true });
 
   await app.register(helmet);
@@ -183,8 +232,7 @@ export async function createApp(
   app.get("/health", async () => ({
     status: "ok",
     service: serviceName,
-    sttProvider:
-      (process.env.STT_PROVIDER as SttProviderName | undefined) ?? "mock",
+    sttProvider: resolveConfiguredProviderName(env),
   }));
 
   app.post(
@@ -196,7 +244,7 @@ export async function createApp(
           transcriptionJobRequestSchema,
           request,
         );
-        const provider = resolveProvider(input.provider);
+        const provider = resolveProvider({ requested: input.provider, env });
         const now = new Date().toISOString();
         const job = {
           id: randomUUID(),
@@ -215,7 +263,7 @@ export async function createApp(
           }),
         } as TranscriptionJob;
         stores.transcriptionJobs.set(job.id, job);
-        const completed = await processTranscriptionJob(job, input);
+        const completed = await processTranscriptionJob(job, input, env);
         stores.transcriptionJobs.set(completed.id, completed);
         return reply.status(202).send(completed);
       } catch (error) {
