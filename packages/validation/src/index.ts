@@ -39,6 +39,12 @@ export const agentCommandTypeSchema = z.enum([
   "insert_text",
   "custom",
 ]);
+export const audioUploadSourceSchema = z.enum([
+  "desktop",
+  "web",
+  "mobile",
+  "api",
+]);
 
 export const createTranscriptSchema = z.object({
   title: z.string().min(1).max(200).optional(),
@@ -88,6 +94,17 @@ export const audioSourceSchema = z
     (value) => Boolean(value.uri || value.base64),
     "Either audio.uri or audio.base64 is required",
   );
+
+export const createAudioUploadJobSchema = z.object({
+  fileName: z.string().min(1).max(255).optional(),
+  mimeType: z
+    .string()
+    .regex(/^audio\/[a-z0-9.+-]+$/i, "mimeType must be an audio MIME type"),
+  sizeBytes: z.number().int().positive(),
+  durationMs: z.number().int().positive(),
+  source: audioUploadSourceSchema.default("desktop"),
+  transcriptTitle: z.string().min(1).max(200).optional(),
+});
 
 export const transcriptionJobRequestSchema = z.object({
   audio: audioSourceSchema,
@@ -190,6 +207,9 @@ export const createDictationSchema = createTranscriptSchema;
 export type CreateTranscriptInput = z.infer<typeof createTranscriptSchema>;
 export type UpdateTranscriptInput = z.infer<typeof updateTranscriptSchema>;
 export type ListTranscriptsQuery = z.infer<typeof listTranscriptsQuerySchema>;
+export type CreateAudioUploadJobInput = z.infer<
+  typeof createAudioUploadJobSchema
+>;
 export type CommandExecutionInput = z.infer<
   typeof commandExecutionRequestSchema
 >;
