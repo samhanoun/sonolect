@@ -14,9 +14,9 @@ module "sonolect" {
   postgres_disk_size_gb      = 20
   postgres_availability_type = "ZONAL"
 
-  cloud_run_min_instances  = 0
-  api_max_instances        = 3
-  worker_max_instances     = 2
+  cloud_run_min_instances   = 0
+  api_max_instances         = 3
+  worker_max_instances      = 2
   allow_unauthenticated_api = true
 
   api_image    = var.api_image
