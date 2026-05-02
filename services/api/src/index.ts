@@ -13,12 +13,23 @@ import {
   InMemoryTranscriptRepository,
   type TranscriptRepository,
 } from "./repositories.js";
+import {
+  registerAuthMiddleware,
+  type AuthOptions,
+  type AuthenticatedActor,
+} from "./auth.js";
 export {
   FileTranscriptRepository,
   InMemoryTranscriptRepository,
   type TranscriptRepository,
 } from "./repositories.js";
+export {
+  resolveAuthenticatedActor,
+  type AuthenticatedActor,
+  type VerifyToken,
+} from "./auth.js";
 import type {
+  AudioUploadJob,
   CommandExecutionResult,
   ListResponse,
   SyncManifest,
@@ -29,11 +40,13 @@ import type {
 } from "@sonolect/types";
 import {
   commandExecutionRequestSchema,
+  createAudioUploadJobSchema,
   createTranscriptSchema,
   listTranscriptsQuerySchema,
   syncManifestQuerySchema,
   updateTranscriptSchema,
   type CommandExecutionInput,
+  type CreateAudioUploadJobInput,
   type CreateTranscriptInput,
   type ListTranscriptsQuery,
   type SyncManifestQuery,
@@ -44,12 +57,13 @@ const serviceName = "sonolect-api";
 const localUserId = "local-user";
 const localNow = new Date().toISOString();
 
-type RouteContext = { userId: string };
+type RouteContext = { userId: string; actor: AuthenticatedActor };
 
 export interface InMemoryStores {
   users: Map<string, User>;
   transcripts: Map<string, Transcript>;
   commands: Map<string, CommandExecutionResult>;
+  audioJobs: Map<string, AudioUploadJob>;
 }
 
 const createStores = (): InMemoryStores => ({
@@ -68,14 +82,14 @@ const createStores = (): InMemoryStores => ({
   ]),
   transcripts: new Map<string, Transcript>(),
   commands: new Map<string, CommandExecutionResult>(),
+  audioJobs: new Map<string, AudioUploadJob>(),
 });
 
 const getRouteContext = (request: FastifyRequest): RouteContext => {
-  const header = request.headers["x-user-id"];
+  const actor = request.actor ?? { userId: localUserId, provider: "anonymous" };
   return {
-    userId: Array.isArray(header)
-      ? (header[0] ?? localUserId)
-      : (header ?? localUserId),
+    userId: actor.userId,
+    actor,
   };
 };
 
@@ -164,7 +178,7 @@ const toManifestItems = async (
   ].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
 };
 
-export interface CreateAppOptions {
+export interface CreateAppOptions extends AuthOptions {
   stores?: InMemoryStores;
   transcriptRepository?: TranscriptRepository;
   storePath?: string;
@@ -185,15 +199,16 @@ export async function createApp(
 
   await app.register(helmet);
   await app.register(cors, { origin: false });
+  registerAuthMiddleware(app, options);
 
   app.get("/health", async () => ({ status: "ok", service: serviceName }));
 
   app.get("/users/profile", async (request) => {
-    const { userId } = getRouteContext(request);
+    const { userId, actor } = getRouteContext(request);
     const now = new Date().toISOString();
     const user = stores.users.get(userId) ?? {
       id: userId,
-      email: `${userId}@local.sonolect.dev`,
+      email: actor.email ?? `${userId}@local.sonolect.dev`,
       plan: "free" as const,
       createdAt: now,
       updatedAt: now,
@@ -201,6 +216,70 @@ export async function createApp(
     stores.users.set(userId, user);
     return user;
   });
+
+  app.post(
+    "/audio/jobs",
+    async (request, reply): Promise<AudioUploadJob | FastifyReply> => {
+      try {
+        const { userId } = getRouteContext(request);
+        const input = parseBody<CreateAudioUploadJobInput>(
+          createAudioUploadJobSchema,
+          request,
+        );
+        const now = new Date().toISOString();
+        const transcript: Transcript = {
+          id: randomUUID(),
+          userId,
+          language: "en",
+          mode: "dictate",
+          privacyMode: false,
+          status: "processing",
+          tags: ["audio", "queued"],
+          createdAt: now,
+          updatedAt: now,
+          durationMs: input.durationMs,
+          ...optionalProps({ title: input.transcriptTitle }),
+        } as Transcript;
+        await transcriptRepository.save(transcript);
+
+        const job: AudioUploadJob = {
+          id: randomUUID(),
+          userId,
+          transcriptId: transcript.id,
+          status: "queued",
+          mimeType: input.mimeType,
+          sizeBytes: input.sizeBytes,
+          durationMs: input.durationMs,
+          source: input.source,
+          upload: {
+            strategy: "inline-metadata",
+            storage: "local-placeholder",
+          },
+          createdAt: now,
+          updatedAt: now,
+          ...optionalProps({ fileName: input.fileName }),
+        } as AudioUploadJob;
+        stores.audioJobs.set(job.id, job);
+        return reply.status(201).send(job);
+      } catch (error) {
+        return sendValidationError(reply, error);
+      }
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/audio/jobs/:id",
+    async (request, reply): Promise<AudioUploadJob | FastifyReply> => {
+      const { userId } = getRouteContext(request);
+      const job = stores.audioJobs.get(request.params.id);
+      if (!job || job.userId !== userId) {
+        return reply
+          .status(404)
+          .send({ error: "not_found", message: "Audio job not found" });
+      }
+      return job;
+    },
+  );
 
   app.get(
     "/transcripts",

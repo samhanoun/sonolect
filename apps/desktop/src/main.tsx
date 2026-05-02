@@ -4,7 +4,7 @@ import { create } from "zustand";
 import type { SonolectMode } from "@sonolect/types";
 import {
   isVoiceApiConfigured,
-  submitTranscriptJob,
+  submitCapturedAudio,
   type TranscriptJobResult,
   type VoiceCaptureMetadata,
 } from "./voiceApi";
@@ -255,7 +255,7 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
         activeChunks = [];
         set({ recordingState: "uploading" });
 
-        void submitTranscriptJob(blob, metadata)
+        void submitCapturedAudio(blob, metadata)
           .then((api) => {
             const objectUrl = URL.createObjectURL(blob);
             const capture: VoiceCaptureResult = {

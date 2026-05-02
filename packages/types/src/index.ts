@@ -12,6 +12,14 @@ export type SonolectMode =
   | "task_creation";
 export type TranscriptStatus = "draft" | "processing" | "completed" | "failed";
 export type SyncEntityType = "user" | "transcript" | "command" | "usage";
+export type AudioUploadJobStatus =
+  | "queued"
+  | "processing"
+  | "completed"
+  | "failed";
+export type AudioUploadSource = "desktop" | "web" | "mobile" | "api";
+export type AudioUploadStrategy = "inline-metadata";
+export type AudioUploadStorage = "local-placeholder";
 
 export type SttProviderName = "mock" | "google";
 export type TranscriptionJobStatus =
@@ -88,6 +96,33 @@ export interface AudioSource {
   sampleRateHertz?: number;
   channels?: number;
   durationMs?: number;
+}
+
+export interface CreateAudioUploadJobRequest {
+  fileName?: string;
+  mimeType: string;
+  sizeBytes: number;
+  durationMs: number;
+  source?: AudioUploadSource;
+  transcriptTitle?: string;
+}
+
+export interface AudioUploadJob {
+  id: string;
+  userId: string;
+  transcriptId: string;
+  status: AudioUploadJobStatus;
+  fileName?: string;
+  mimeType: string;
+  sizeBytes: number;
+  durationMs: number;
+  source: AudioUploadSource;
+  upload: {
+    strategy: AudioUploadStrategy;
+    storage: AudioUploadStorage;
+  };
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface TranscriptionJobRequest {
