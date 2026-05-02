@@ -8,6 +8,16 @@ import cors from "@fastify/cors";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import {
+  FileTranscriptRepository,
+  InMemoryTranscriptRepository,
+  type TranscriptRepository,
+} from "./repositories.js";
+export {
+  FileTranscriptRepository,
+  InMemoryTranscriptRepository,
+  type TranscriptRepository,
+} from "./repositories.js";
 import type {
   CommandExecutionResult,
   ListResponse,
@@ -36,7 +46,7 @@ const localNow = new Date().toISOString();
 
 type RouteContext = { userId: string };
 
-interface InMemoryStores {
+export interface InMemoryStores {
   users: Map<string, User>;
   transcripts: Map<string, Transcript>;
   commands: Map<string, CommandExecutionResult>;
@@ -122,16 +132,16 @@ const createTranscript = (
   } as Transcript;
 };
 
-const toManifestItems = (
+const toManifestItems = async (
+  transcriptRepository: TranscriptRepository,
   stores: InMemoryStores,
   userId: string,
   since?: string,
-): SyncManifestItem[] => {
+): Promise<SyncManifestItem[]> => {
   const changedAfter = since ? Date.parse(since) : 0;
-  const visibleTranscripts = [...stores.transcripts.values()].filter(
-    (transcript) =>
-      transcript.userId === userId &&
-      Date.parse(transcript.updatedAt) > changedAfter,
+  const visibleTranscripts = await transcriptRepository.listChangedForUser(
+    userId,
+    since,
   );
   const visibleCommands = [...stores.commands.values()].filter(
     (command) =>
@@ -156,6 +166,8 @@ const toManifestItems = (
 
 export interface CreateAppOptions {
   stores?: InMemoryStores;
+  transcriptRepository?: TranscriptRepository;
+  storePath?: string;
   logger?: boolean;
 }
 
@@ -163,6 +175,12 @@ export async function createApp(
   options: CreateAppOptions = {},
 ): Promise<FastifyInstance> {
   const stores = options.stores ?? createStores();
+  const storePath = options.storePath ?? process.env.SONOLECT_API_STORE_PATH;
+  const transcriptRepository =
+    options.transcriptRepository ??
+    (storePath
+      ? new FileTranscriptRepository(storePath)
+      : new InMemoryTranscriptRepository(stores.transcripts));
   const app = Fastify({ logger: options.logger ?? true });
 
   await app.register(helmet);
@@ -196,23 +214,14 @@ export async function createApp(
           listTranscriptsQuerySchema,
           request,
         );
-        const sorted = [...stores.transcripts.values()]
-          .filter((transcript) => transcript.userId === userId)
-          .filter((transcript) => query.includeDeleted || !transcript.deletedAt)
-          .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-        const start = query.cursor
-          ? Math.max(
-              0,
-              sorted.findIndex((item) => item.id === query.cursor) + 1,
-            )
-          : 0;
-        const items = sorted.slice(start, start + query.limit);
-        const lastItem = items.at(-1);
-        const nextCursor =
-          start + query.limit < sorted.length ? lastItem?.id : undefined;
+        const result = await transcriptRepository.listForUser(userId, {
+          includeDeleted: query.includeDeleted,
+          cursor: query.cursor,
+          limit: query.limit,
+        });
         return {
-          items,
-          ...optionalProps({ nextCursor }),
+          items: result.items,
+          ...optionalProps({ nextCursor: result.nextCursor }),
         } as ListResponse<Transcript>;
       } catch (error) {
         return sendValidationError(reply, error);
@@ -230,7 +239,7 @@ export async function createApp(
           request,
         );
         const transcript = createTranscript(userId, input);
-        stores.transcripts.set(transcript.id, transcript);
+        await transcriptRepository.save(transcript);
         return reply.status(201).send(transcript);
       } catch (error) {
         return sendValidationError(reply, error);
@@ -242,7 +251,7 @@ export async function createApp(
     "/transcripts/:id",
     async (request, reply) => {
       const { userId } = getRouteContext(request);
-      const transcript = stores.transcripts.get(request.params.id);
+      const transcript = await transcriptRepository.getById(request.params.id);
       if (!transcript || transcript.userId !== userId || transcript.deletedAt) {
         return reply
           .status(404)
@@ -257,7 +266,7 @@ export async function createApp(
     async (request, reply): Promise<Transcript | FastifyReply> => {
       try {
         const { userId } = getRouteContext(request);
-        const existing = stores.transcripts.get(request.params.id);
+        const existing = await transcriptRepository.getById(request.params.id);
         if (!existing || existing.userId !== userId || existing.deletedAt) {
           return reply
             .status(404)
@@ -272,7 +281,7 @@ export async function createApp(
           ...optionalProps(input),
           updatedAt: new Date().toISOString(),
         } as Transcript;
-        stores.transcripts.set(updated.id, updated);
+        await transcriptRepository.save(updated);
         return updated;
       } catch (error) {
         return sendValidationError(reply, error);
@@ -284,14 +293,14 @@ export async function createApp(
     "/transcripts/:id",
     async (request, reply) => {
       const { userId } = getRouteContext(request);
-      const existing = stores.transcripts.get(request.params.id);
+      const existing = await transcriptRepository.getById(request.params.id);
       if (!existing || existing.userId !== userId || existing.deletedAt) {
         return reply
           .status(404)
           .send({ error: "not_found", message: "Transcript not found" });
       }
       const now = new Date().toISOString();
-      stores.transcripts.set(existing.id, {
+      await transcriptRepository.save({
         ...existing,
         updatedAt: now,
         deletedAt: now,
@@ -310,7 +319,9 @@ export async function createApp(
           request,
         );
         if (input.transcriptId) {
-          const transcript = stores.transcripts.get(input.transcriptId);
+          const transcript = await transcriptRepository.getById(
+            input.transcriptId,
+          );
           if (
             !transcript ||
             transcript.userId !== userId ||
@@ -348,9 +359,8 @@ export async function createApp(
   app.get("/usage/quota", async (request): Promise<UsageQuotaSummary> => {
     const { userId } = getRouteContext(request);
     const user = stores.users.get(userId) ?? stores.users.get(localUserId)!;
-    const transcriptCount = [...stores.transcripts.values()].filter(
-      (item) => item.userId === userId && !item.deletedAt,
-    ).length;
+    const transcriptCount =
+      await transcriptRepository.countActiveForUser(userId);
     const commandCount = [...stores.commands.values()].filter(
       (item) => item.userId === userId,
     ).length;
@@ -388,7 +398,12 @@ export async function createApp(
         return {
           generatedAt: new Date().toISOString(),
           ...optionalProps({ since: query.since }),
-          items: toManifestItems(stores, userId, query.since),
+          items: await toManifestItems(
+            transcriptRepository,
+            stores,
+            userId,
+            query.since,
+          ),
         } as SyncManifest;
       } catch (error) {
         return sendValidationError(reply, error);

@@ -2,11 +2,29 @@ import React, { useEffect, useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import { create } from "zustand";
 import type { SonolectMode } from "@sonolect/types";
+import {
+  isVoiceApiConfigured,
+  submitTranscriptJob,
+  type TranscriptJobResult,
+  type VoiceCaptureMetadata,
+} from "./voiceApi";
 import "./styles.css";
 
 type PrivacyLevel = "local" | "cloud";
-type RecordingState = "idle" | "recording" | "processing";
+type RecordingState =
+  | "idle"
+  | "requesting-permission"
+  | "recording"
+  | "uploading"
+  | "completed"
+  | "error";
 type ViewId = "today" | "history" | "agents" | "settings";
+
+type VoiceCaptureResult = VoiceCaptureMetadata & {
+  objectUrl: string;
+  completedAt: string;
+  api: TranscriptJobResult;
+};
 
 type TranscriptSession = {
   id: string;
@@ -33,9 +51,13 @@ type DesktopState = {
   privacyLevel: PrivacyLevel;
   activeSessionId: string;
   transcript: string;
+  voiceCapture: VoiceCaptureResult | undefined;
+  voiceError: string | undefined;
   setCommandOpen: (open: boolean) => void;
   toggleRecording: () => void;
-  finishProcessing: () => void;
+  startVoiceCapture: () => Promise<void>;
+  stopVoiceCapture: () => void;
+  resetVoiceCapture: () => void;
   setActiveView: (view: ViewId) => void;
   setPrivacyLevel: (level: PrivacyLevel) => void;
   setActiveSession: (sessionId: string, transcript: string) => void;
@@ -104,20 +126,199 @@ const agentActions: AgentAction[] = [
 
 const initialTranscript = `Objectif : préparer une démonstration Sonolect desktop premium.\n\nMettre l’accent sur une expérience voix-first : raccourci global, overlay micro immédiat, transcription éditable, puis actions agentiques.\n\nTon souhaité : français professionnel, direct, élégant. Prochaine action : générer un brief investisseur et trois tickets Linear.`;
 
-const useDesktopStore = create<DesktopState>((set) => ({
+let activeRecorder: MediaRecorder | undefined;
+let activeStream: MediaStream | undefined;
+let activeChunks: BlobPart[] = [];
+let activeStartedAt = 0;
+
+const preferredAudioMimeTypes = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/mp4",
+  "audio/ogg;codecs=opus",
+];
+
+function supportedAudioMimeType() {
+  return preferredAudioMimeTypes.find((mimeType) =>
+    MediaRecorder.isTypeSupported(mimeType),
+  );
+}
+
+function formatDuration(durationMs: number) {
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0
+    ? `${minutes}m ${seconds.toString().padStart(2, "0")}s`
+    : `${seconds}s`;
+}
+
+function stopActiveStream() {
+  activeStream?.getTracks().forEach((track) => track.stop());
+  activeStream = undefined;
+}
+
+const useDesktopStore = create<DesktopState>((set, get) => ({
   commandOpen: false,
   recordingState: "idle",
   activeView: "today",
   privacyLevel: "local",
   activeSessionId: sessions[0]?.id ?? "session-1",
   transcript: initialTranscript,
+  voiceCapture: undefined,
+  voiceError: undefined,
   setCommandOpen: (open) => set({ commandOpen: open }),
-  toggleRecording: () =>
-    set((state) => ({
-      recordingState:
-        state.recordingState === "recording" ? "processing" : "recording",
-    })),
-  finishProcessing: () => set({ recordingState: "idle" }),
+  toggleRecording: () => {
+    const {
+      recordingState,
+      startVoiceCapture,
+      stopVoiceCapture,
+      resetVoiceCapture,
+    } = get();
+    if (recordingState === "recording") {
+      stopVoiceCapture();
+      return;
+    }
+    if (
+      recordingState === "requesting-permission" ||
+      recordingState === "uploading"
+    ) {
+      return;
+    }
+    if (recordingState === "completed" || recordingState === "error") {
+      resetVoiceCapture();
+    }
+    void startVoiceCapture();
+  },
+  startVoiceCapture: async () => {
+    if (!["idle", "completed", "error"].includes(get().recordingState)) return;
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      set({
+        recordingState: "error",
+        voiceError:
+          "La capture micro n’est pas disponible dans cet environnement.",
+      });
+      return;
+    }
+
+    if (typeof MediaRecorder === "undefined") {
+      set({
+        recordingState: "error",
+        voiceError: "MediaRecorder n’est pas supporté par ce runtime desktop.",
+      });
+      return;
+    }
+
+    set({
+      recordingState: "requesting-permission",
+      voiceError: undefined,
+      voiceCapture: undefined,
+    });
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = supportedAudioMimeType();
+      activeStream = stream;
+      activeChunks = [];
+      activeStartedAt = Date.now();
+      activeRecorder = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType } : undefined,
+      );
+
+      activeRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) activeChunks.push(event.data);
+      };
+
+      activeRecorder.onerror = () => {
+        stopActiveStream();
+        set({
+          recordingState: "error",
+          voiceError: "Erreur pendant l’enregistrement audio.",
+        });
+      };
+
+      activeRecorder.onstop = () => {
+        const recorderMimeType =
+          activeRecorder?.mimeType || mimeType || "audio/webm";
+        const durationMs = Date.now() - activeStartedAt;
+        const blob = new Blob(activeChunks, { type: recorderMimeType });
+        const metadata: VoiceCaptureMetadata = {
+          durationMs,
+          mimeType: blob.type || recorderMimeType,
+          sizeBytes: blob.size,
+        };
+
+        stopActiveStream();
+        activeRecorder = undefined;
+        activeChunks = [];
+        set({ recordingState: "uploading" });
+
+        void submitTranscriptJob(blob, metadata)
+          .then((api) => {
+            const objectUrl = URL.createObjectURL(blob);
+            const capture: VoiceCaptureResult = {
+              ...metadata,
+              objectUrl,
+              completedAt: new Date().toISOString(),
+              api,
+            };
+            const fallbackTranscript =
+              api.status === "offline"
+                ? `\n\n[Capture vocale locale] ${formatDuration(metadata.durationMs)} · ${metadata.mimeType} · ${Math.round(metadata.sizeBytes / 1024)} Ko. Backend non configuré (VITE_SONOLECT_API_URL).`
+                : `\n\n[Capture vocale envoyée] Job ${api.jobId ?? "en attente"} · ${formatDuration(metadata.durationMs)}.`;
+            set((state) => ({
+              recordingState: "completed",
+              voiceCapture: capture,
+              voiceError: undefined,
+              transcript: `${state.transcript}${api.transcript ? `\n\n${api.transcript}` : fallbackTranscript}`,
+            }));
+          })
+          .catch((error: unknown) => {
+            set({
+              recordingState: "error",
+              voiceError:
+                error instanceof Error
+                  ? error.message
+                  : "Impossible d’envoyer la capture au backend.",
+            });
+          });
+      };
+
+      activeRecorder.start();
+      set({ recordingState: "recording" });
+    } catch (error) {
+      stopActiveStream();
+      activeRecorder = undefined;
+      set({
+        recordingState: "error",
+        voiceError:
+          error instanceof Error
+            ? error.message
+            : "Permission micro refusée ou indisponible.",
+      });
+    }
+  },
+  stopVoiceCapture: () => {
+    if (activeRecorder?.state === "recording") {
+      activeRecorder.stop();
+      return;
+    }
+    stopActiveStream();
+    activeRecorder = undefined;
+    set({ recordingState: "idle" });
+  },
+  resetVoiceCapture: () =>
+    set((state) => {
+      if (state.voiceCapture?.objectUrl)
+        URL.revokeObjectURL(state.voiceCapture.objectUrl);
+      return {
+        recordingState: "idle",
+        voiceError: undefined,
+        voiceCapture: undefined,
+      };
+    }),
   setActiveView: (view) => set({ activeView: view }),
   setPrivacyLevel: (level) => set({ privacyLevel: level }),
   setActiveSession: (sessionId, transcript) =>
@@ -127,10 +328,8 @@ const useDesktopStore = create<DesktopState>((set) => ({
 
 function App() {
   const commandOpen = useDesktopStore((state) => state.commandOpen);
-  const recordingState = useDesktopStore((state) => state.recordingState);
   const setCommandOpen = useDesktopStore((state) => state.setCommandOpen);
   const toggleRecording = useDesktopStore((state) => state.toggleRecording);
-  const finishProcessing = useDesktopStore((state) => state.finishProcessing);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -154,12 +353,6 @@ function App() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [setCommandOpen, toggleRecording]);
-
-  useEffect(() => {
-    if (recordingState !== "processing") return;
-    const timer = window.setTimeout(finishProcessing, 1200);
-    return () => window.clearTimeout(timer);
-  }, [finishProcessing, recordingState]);
 
   return (
     <main className="desktop-shell">
@@ -267,7 +460,8 @@ function TopBar() {
       </div>
       <div className="topbar-actions">
         <span className="status-chip">
-          {privacyLevel === "local" ? "Local-first" : "Cloud assisté"}
+          {privacyLevel === "local" ? "Local-first" : "Cloud assisté"} ·{" "}
+          {isVoiceApiConfigured() ? "API prête" : "Offline"}
         </span>
         <button
           className="ghost-button"
@@ -398,9 +592,15 @@ function AgentActions() {
 
 function VoiceRecorderOverlay() {
   const recordingState = useDesktopStore((state) => state.recordingState);
+  const voiceCapture = useDesktopStore((state) => state.voiceCapture);
+  const voiceError = useDesktopStore((state) => state.voiceError);
   const toggleRecording = useDesktopStore((state) => state.toggleRecording);
+  const resetVoiceCapture = useDesktopStore((state) => state.resetVoiceCapture);
 
   if (recordingState === "idle") return null;
+
+  const isRecording = recordingState === "recording";
+  const copy = voiceStateCopy(recordingState, voiceCapture, voiceError);
 
   return (
     <div
@@ -409,28 +609,103 @@ function VoiceRecorderOverlay() {
       aria-label="Enregistreur vocal Sonolect"
     >
       <div className="recorder-card">
-        <div className="mic-orb" />
+        <div className={isRecording ? "mic-orb active" : "mic-orb"} />
         <div>
-          <p className="eyebrow">
-            {recordingState === "recording" ? "Écoute active" : "Traitement"}
-          </p>
-          <h3>
-            {recordingState === "recording"
-              ? "Parlez, Sonolect structure vos idées"
-              : "Transcription en cours…"}
-          </h3>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h3>{copy.title}</h3>
         </div>
-        <Waveform active={recordingState === "recording"} />
-        <button
-          className="primary-button"
-          onClick={toggleRecording}
-          type="button"
-        >
-          {recordingState === "recording" ? "Terminer la capture" : "Reprendre"}
-        </button>
+        <Waveform active={isRecording} />
+        <p className="recorder-status">{copy.detail}</p>
+        {voiceCapture ? (
+          <div className="capture-meta">
+            <span>{formatDuration(voiceCapture.durationMs)}</span>
+            <span>{voiceCapture.mimeType}</span>
+            <span>{Math.round(voiceCapture.sizeBytes / 1024)} Ko</span>
+            <a href={voiceCapture.objectUrl} download="sonolect-capture.webm">
+              Écouter / télécharger
+            </a>
+          </div>
+        ) : null}
+        <div className="recorder-actions">
+          {recordingState === "completed" || recordingState === "error" ? (
+            <button
+              className="ghost-button"
+              onClick={resetVoiceCapture}
+              type="button"
+            >
+              Fermer
+            </button>
+          ) : null}
+          <button
+            className="primary-button"
+            disabled={
+              recordingState === "requesting-permission" ||
+              recordingState === "uploading"
+            }
+            onClick={toggleRecording}
+            type="button"
+          >
+            {isRecording ? "Terminer la capture" : "Nouvelle capture"}
+          </button>
+        </div>
       </div>
     </div>
   );
+}
+
+function voiceStateCopy(
+  state: RecordingState,
+  capture?: VoiceCaptureResult,
+  error?: string,
+) {
+  switch (state) {
+    case "requesting-permission":
+      return {
+        eyebrow: "Permission micro",
+        title: "Autorisez l’accès au microphone",
+        detail:
+          "Sonolect demande navigator.mediaDevices.getUserMedia({ audio: true }).",
+      };
+    case "recording":
+      return {
+        eyebrow: "Écoute active",
+        title: "Parlez, Sonolect capture votre voix",
+        detail:
+          "MediaRecorder collecte les fragments audio localement jusqu’à l’arrêt.",
+      };
+    case "uploading":
+      return {
+        eyebrow: "Envoi transcription",
+        title: "Préparation du job backend…",
+        detail: isVoiceApiConfigured()
+          ? "Capture terminée : envoi au endpoint configuré par VITE_SONOLECT_API_URL."
+          : "Aucun backend configuré : bascule vers le mode local/offline explicite.",
+      };
+    case "completed":
+      return {
+        eyebrow:
+          capture?.api.status === "offline" ? "Terminé · offline" : "Terminé",
+        title:
+          capture?.api.status === "offline"
+            ? "Capture locale prête"
+            : "Capture envoyée",
+        detail:
+          capture?.api.message ??
+          "Blob audio, durée, type MIME et URL locale ont été créés.",
+      };
+    case "error":
+      return {
+        eyebrow: "Erreur capture",
+        title: "Impossible de finaliser l’enregistrement",
+        detail: error ?? "Une erreur inconnue est survenue.",
+      };
+    default:
+      return {
+        eyebrow: "Prêt",
+        title: "Capture vocale",
+        detail: "Cliquez pour commencer.",
+      };
+  }
 }
 
 function Waveform({ active }: { active: boolean }) {
