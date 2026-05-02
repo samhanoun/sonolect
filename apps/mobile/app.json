@@ -3,7 +3,16 @@
     "name": "Sonolect",
     "slug": "sonolect",
     "scheme": "sonolect",
-    "ios": { "bundleIdentifier": "com.sonolect.app" },
-    "android": { "package": "com.sonolect.app" }
+    "ios": {
+      "bundleIdentifier": "com.sonolect.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Sonolect utilise le microphone pour capturer vos dictées vocales.",
+        "NSSpeechRecognitionUsageDescription": "Sonolect prépare la transcription vocale lorsque la reconnaissance vocale est activée."
+      }
+    },
+    "android": {
+      "package": "com.sonolect.app",
+      "permissions": ["RECORD_AUDIO", "POST_NOTIFICATIONS"]
+    }
   }
 }
