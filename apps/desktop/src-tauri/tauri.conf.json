@@ -3,6 +3,11 @@
   "productName": "Sonolect",
   "version": "0.1.0",
   "identifier": "com.sonolect.app",
-  "build": { "beforeDevCommand": "pnpm dev", "devUrl": "http://localhost:5173", "beforeBuildCommand": "pnpm build", "frontendDist": "../dist" },
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
   "app": { "windows": [{ "title": "Sonolect", "width": 1200, "height": 800 }] }
 }
