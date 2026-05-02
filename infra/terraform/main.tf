@@ -38,18 +38,18 @@ locals {
 
   cloud_run_services = {
     api = {
-      image         = var.api_image
-      cpu           = var.api_cpu
-      memory        = var.api_memory
+      image          = var.api_image
+      cpu            = var.api_cpu
+      memory         = var.api_memory
       container_port = 8080
-      max_instances = var.api_max_instances
+      max_instances  = var.api_max_instances
     }
     worker = {
-      image         = var.worker_image
-      cpu           = var.worker_cpu
-      memory        = var.worker_memory
+      image          = var.worker_image
+      cpu            = var.worker_cpu
+      memory         = var.worker_memory
       container_port = 8080
-      max_instances = var.worker_max_instances
+      max_instances  = var.worker_max_instances
     }
   }
 

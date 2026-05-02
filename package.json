@@ -18,5 +18,13 @@
     "prettier": "^3.4.2",
     "turbo": "^2.3.3",
     "typescript": "^5.7.2"
+  },
+  "pnpm": {
+    "overrides": {
+      "@xmldom/xmldom": ">=0.8.13",
+      "postcss": ">=8.5.10",
+      "tar": ">=7.5.11",
+      "uuid": ">=14.0.0"
+    }
   }
 }
