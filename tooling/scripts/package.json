@@ -1,0 +1,12 @@
+{
+  "name": "@sonolect/scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"No tooling tests yet\""
+  },
+  "devDependencies": { "typescript": "^5.7.2" }
+}

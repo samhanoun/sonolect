@@ -1,0 +1,9 @@
+{
+  "expo": {
+    "name": "Sonolect",
+    "slug": "sonolect",
+    "scheme": "sonolect",
+    "ios": { "bundleIdentifier": "com.sonolect.app" },
+    "android": { "package": "com.sonolect.app" }
+  }
+}

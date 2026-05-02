@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+coverage/
+.turbo/
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+apps/desktop/src-tauri/target/
+apps/mobile/.expo/
+infra/terraform/**/.terraform/
+infra/terraform/**/*.tfstate
+infra/terraform/**/*.tfstate.*
