@@ -446,7 +446,7 @@ function App() {
           <TranscriptEditor />
         </div>
       </section>
-      <VoiceRecorderOverlay />
+      <VoiceRecorderPill />
       {commandOpen ? <CommandPalette /> : null}
       <ToastContainer />
     </main>
@@ -760,68 +760,91 @@ function SettingsPrivacy() {
   );
 }
 
-function VoiceRecorderOverlay() {
+function VoiceRecorderPill() {
   const recordingState = useDesktopStore((state) => state.recordingState);
   const voiceCapture = useDesktopStore((state) => state.voiceCapture);
   const voiceError = useDesktopStore((state) => state.voiceError);
   const toggleRecording = useDesktopStore((state) => state.toggleRecording);
   const resetVoiceCapture = useDesktopStore((state) => state.resetVoiceCapture);
+  const addToast = useDesktopStore((state) => state.addToast);
   const t = useT();
+  const [elapsed, setElapsed] = React.useState(0);
+
+  useEffect(() => {
+    if (recordingState !== "recording") {
+      setElapsed(0);
+      return;
+    }
+    const start = Date.now();
+    const id = setInterval(() => setElapsed(Date.now() - start), 200);
+    return () => clearInterval(id);
+  }, [recordingState]);
 
   if (recordingState === "idle") return null;
 
   const isRecording = recordingState === "recording";
-  const copy = voiceStateCopy(recordingState, t, voiceCapture, voiceError);
+  const isProcessing =
+    recordingState === "requesting-permission" ||
+    recordingState === "uploading";
+  const isDone = recordingState === "completed" || recordingState === "error";
+
+  const statusLabel = (() => {
+    switch (recordingState) {
+      case "requesting-permission":
+        return t("pill.permitting");
+      case "recording":
+        return formatDuration(elapsed);
+      case "uploading":
+        return t("pill.processing");
+      case "completed":
+        return t("pill.done");
+      case "error":
+        return t("pill.error");
+      default:
+        return "";
+    }
+  })();
 
   return (
     <div
-      className="recorder-overlay"
-      role="dialog"
+      className="recorder-pill"
+      role="status"
       aria-label={t("recorder.ariaLabel")}
     >
-      <div className="recorder-card">
-        <div className={isRecording ? "mic-orb active" : "mic-orb"} />
-        <div>
-          <p className="eyebrow">{copy.eyebrow}</p>
-          <h3>{copy.title}</h3>
-        </div>
-        <Waveform active={isRecording} />
-        <p className="recorder-status">{copy.detail}</p>
-        {voiceCapture ? (
-          <div className="capture-meta">
-            <span>{formatDuration(voiceCapture.durationMs)}</span>
-            <span>{voiceCapture.mimeType}</span>
-            <span>
-              {Math.round(voiceCapture.sizeBytes / 1024)} {t("recorder.kb")}
-            </span>
-            <a href={voiceCapture.objectUrl} download="sonolect-capture.webm">
-              {t("recorder.listenDownload")}
-            </a>
-          </div>
-        ) : null}
-        <div className="recorder-actions">
-          {recordingState === "completed" || recordingState === "error" ? (
-            <button
-              className="ghost-button"
-              onClick={resetVoiceCapture}
-              type="button"
-            >
-              {t("recorder.close")}
-            </button>
-          ) : null}
-          <button
-            className="primary-button"
-            disabled={
-              recordingState === "requesting-permission" ||
-              recordingState === "uploading"
-            }
-            onClick={toggleRecording}
-            type="button"
-          >
-            {isRecording ? t("recorder.stopCapture") : t("recorder.newCapture")}
-          </button>
-        </div>
-      </div>
+      <div className={isRecording ? "pill-orb active" : "pill-orb"} />
+      <Waveform active={isRecording} />
+      <span className="pill-status">{statusLabel}</span>
+      {voiceError && isDone ? (
+        <span className="pill-error">{voiceError}</span>
+      ) : null}
+      {voiceCapture && isDone ? (
+        <a
+          className="pill-link"
+          href={voiceCapture.objectUrl}
+          download="sonolect-capture.webm"
+          title={t("recorder.listenDownload")}
+        >
+          ↓
+        </a>
+      ) : null}
+      {isDone ? (
+        <button
+          className="pill-btn pill-btn-ghost"
+          onClick={resetVoiceCapture}
+          type="button"
+          title={t("recorder.close")}
+        >
+          ✕
+        </button>
+      ) : null}
+      <button
+        className="pill-btn pill-btn-primary"
+        disabled={isProcessing}
+        onClick={toggleRecording}
+        type="button"
+      >
+        {isRecording ? t("pill.stop") : isDone ? t("pill.again") : "…"}
+      </button>
     </div>
   );
 }
