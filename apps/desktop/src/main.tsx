@@ -418,6 +418,7 @@ function App() {
         event.preventDefault();
         setCommandOpen(true);
       }
+      // Hands-free toggle: ⌘⇧M — press to start, press to stop
       if (
         (event.metaKey || event.ctrlKey) &&
         event.shiftKey &&
@@ -426,13 +427,43 @@ function App() {
         event.preventDefault();
         toggleRecording();
       }
+      // Push-to-talk: ⌘⇧V — hold to record
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        event.key.toLowerCase() === "v" &&
+        !event.repeat
+      ) {
+        event.preventDefault();
+        const { recordingState: rs } = useDesktopStore.getState();
+        if (rs === "idle" || rs === "completed" || rs === "error") {
+          if (rs === "completed" || rs === "error") {
+            useDesktopStore.getState().resetVoiceCapture();
+          }
+          void useDesktopStore.getState().startVoiceCapture();
+        }
+      }
       if (event.key === "Escape") {
         setCommandOpen(false);
       }
     };
 
+    // Push-to-talk release: stop recording when ⌘⇧V is released
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() === "v") {
+        const { recordingState: rs } = useDesktopStore.getState();
+        if (rs === "recording") {
+          useDesktopStore.getState().stopVoiceCapture();
+        }
+      }
+    };
+
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
   }, [setCommandOpen, toggleRecording]);
 
   return (
@@ -499,7 +530,10 @@ function Sidebar() {
         type="button"
       >
         <span className="record-dot" /> {t("sidebar.recordNow")}
-        <kbd>⌘⇧M</kbd>
+        <span className="shortcut-group">
+          <kbd title="Hands-free toggle">⌘⇧M</kbd>
+          <kbd title="Push to talk (hold)">⌘⇧V</kbd>
+        </span>
       </button>
 
       <nav className="nav-list" aria-label="Navigation principale">
@@ -779,6 +813,13 @@ function VoiceRecorderPill() {
     const id = setInterval(() => setElapsed(Date.now() - start), 200);
     return () => clearInterval(id);
   }, [recordingState]);
+
+  // Auto-dismiss pill 3s after completed/error
+  useEffect(() => {
+    if (recordingState !== "completed" && recordingState !== "error") return;
+    const id = setTimeout(() => resetVoiceCapture(), 3000);
+    return () => clearTimeout(id);
+  }, [recordingState, resetVoiceCapture]);
 
   if (recordingState === "idle") return null;
 
