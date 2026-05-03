@@ -141,6 +141,21 @@ export const en = {
     "VITE_SONOLECT_API_URL missing: capture kept locally without backend upload.",
   "voiceApi.backendUnavailable":
     "Local backend unavailable: capture kept locally",
+
+  // Toast
+  "toast.transformComplete": "Transcript transformed successfully",
+  "toast.copySuccess": "Transcript copied to clipboard",
+
+  // Transform
+  "editor.transforming": "Transforming…",
+
+  // Export
+  "editor.copy": "Copy",
+  "editor.download": "Download",
+
+  // Command palette search
+  "palette.searchPlaceholder": "Search commands…",
+  "palette.noResults": "No results",
 } as const;
 
 export type LocaleKeys = keyof typeof en;
