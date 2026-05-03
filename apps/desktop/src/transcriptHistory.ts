@@ -4,6 +4,7 @@ import type {
   TranscriptStatus,
 } from "@sonolect/types";
 import { resolveDesktopAuthConfig } from "./localDevAuth";
+import { getLocale } from "./i18n";
 
 export type TranscriptHistoryStatus = TranscriptStatus | "synced" | "actioned";
 
@@ -192,7 +193,8 @@ export function formatTranscriptDuration(durationMs?: number) {
 function formatTranscriptTimestamp(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Date inconnue";
-  return new Intl.DateTimeFormat("fr-FR", {
+  const locale = getLocale() === "fr" ? "fr-FR" : "en-US";
+  return new Intl.DateTimeFormat(locale, {
     timeZone: "UTC",
     day: "numeric",
     month: "short",

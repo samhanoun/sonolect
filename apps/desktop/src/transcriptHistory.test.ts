@@ -33,7 +33,7 @@ describe("transcript history helpers", () => {
       title: "Daily standup",
       preview: "Final notes from the call",
       transcript: "Final notes from the call",
-      timestamp: "2 mai 2026, 09:42",
+      timestamp: "May 2, 2026, 09:42 AM",
       duration: "2m 05s",
       mode: "summarize",
       status: "completed",
