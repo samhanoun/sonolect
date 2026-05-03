@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import type { AudioUploadJob, Transcript } from "@sonolect/types";
 import { createApp } from "./index.js";
@@ -70,18 +70,22 @@ try {
   assert.equal(beforeWorker.transcripts?.[0]?.id, createdJob.transcriptId);
   assert.equal(beforeWorker.transcripts?.[0]?.status, "processing");
 
+  const localSttCommand = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(
+    "const path = require('node:path'); const [audioPath, mimeType, language] = process.argv.slice(1); console.log('Offline transcript for ' + path.basename(audioPath) + ' in ' + language + ' from ' + mimeType + '.');",
+  )} {audioPath} {mimeType} {language}`;
   const processed = await processNextQueuedAudioJob({
     storePath,
     now: () => new Date("2026-01-02T03:04:05.000Z"),
+    localSttCommand,
   });
   assert.equal(processed?.job.id, createdJob.id);
   assert.equal(processed?.job.status, "completed");
   assert.equal(processed?.transcript?.id, createdJob.transcriptId);
   assert.equal(processed?.transcript?.status, "completed");
-  assert.equal(
-    processed?.transcript?.finalText,
-    "Mock transcript for daily-note.webm (12.5 seconds).",
-  );
+  const expectedTranscriptText = `Offline transcript for ${basename(
+    uploadedJob.upload.localPath ?? "",
+  )} in en from audio/webm.`;
+  assert.equal(processed?.transcript?.finalText, expectedTranscriptText);
 
   const fetchedJob = await app.inject({
     method: "GET",
@@ -102,11 +106,12 @@ try {
   const completedTranscript = fetchedTranscript.json<Transcript>();
   assert.equal(completedTranscript.status, "completed");
   assert.equal(completedTranscript.title, "Daily note");
-  assert.equal(
-    completedTranscript.finalText,
-    "Mock transcript for daily-note.webm (12.5 seconds).",
-  );
-  assert.deepEqual(completedTranscript.tags, ["audio", "mock-transcribed"]);
+  assert.equal(completedTranscript.finalText, expectedTranscriptText);
+  assert.deepEqual(completedTranscript.tags, [
+    "audio",
+    "local-stt",
+    "offline-transcribed",
+  ]);
 
   const listed = await app.inject({
     method: "GET",

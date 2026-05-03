@@ -5,7 +5,7 @@ import Fastify, {
 } from "fastify";
 import helmet from "@fastify/helmet";
 import cors from "@fastify/cors";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
@@ -158,12 +158,20 @@ const parsePositiveInteger = (
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-const getAudioDir = (optionValue: string | undefined): string =>
-  resolve(
+export const getAudioDir = (optionValue: string | undefined): string => {
+  const rawValue =
     optionValue ??
-      process.env.SONOLECT_API_AUDIO_DIR ??
-      join(tmpdir(), "sonolect-api-audio"),
-  );
+    process.env.SONOLECT_API_AUDIO_DIR ??
+    join(tmpdir(), "sonolect-api-audio");
+  const trimmed = rawValue.trim();
+  if (!trimmed || trimmed.includes("\0")) {
+    throw Object.assign(new Error("Invalid audio storage root"), {
+      statusCode: 500,
+      errorCode: "storage_path_error",
+    });
+  }
+  return resolve(trimmed);
+};
 
 const getAudioMaxBytes = (optionValue: number | undefined): number =>
   optionValue && Number.isSafeInteger(optionValue) && optionValue > 0
@@ -186,8 +194,11 @@ const getAudioMimeType = (request: FastifyRequest): string | undefined =>
 const isAudioMimeType = (value: string | undefined): value is string =>
   Boolean(value && /^audio\/[a-z0-9.+-]+$/i.test(value));
 
-const safePathSegment = (value: string): string => {
-  const safe = value.replace(/[^a-zA-Z0-9._-]/g, "_");
+export const safePathSegment = (value: string): string => {
+  let safe = value.replace(/[^a-zA-Z0-9._-]/g, "_");
+  while (safe.includes("..")) {
+    safe = safe.replace(/\.\./g, "__");
+  }
   return safe && safe !== "." && safe !== ".." ? safe : "_";
 };
 
@@ -196,7 +207,20 @@ const extensionForAudioMimeType = (mimeType: string): string => {
   return safePathSegment(subtype) || "bin";
 };
 
-const assertPathInside = (root: string, target: string): string => {
+const storageFileNameForAudioJob = (
+  job: AudioUploadJob,
+  mimeType: string,
+): string => {
+  const configuredFileName = job.fileName?.trim();
+  const safeJobId = safePathSegment(job.id);
+  if (configuredFileName) {
+    return `${safeJobId}-${safePathSegment(configuredFileName)}`;
+  }
+  const extension = extensionForAudioMimeType(mimeType);
+  return `${safeJobId}.${extension}`;
+};
+
+export const assertPathInside = (root: string, target: string): string => {
   const resolvedRoot = resolve(root);
   const resolvedTarget = resolve(target);
   if (
@@ -209,6 +233,53 @@ const assertPathInside = (root: string, target: string): string => {
     });
   }
   return resolvedTarget;
+};
+
+const ensureAudioStorageRoot = async (root: string): Promise<string> => {
+  const resolvedRoot = assertPathInside(root, root);
+  try {
+    const existingStats = await stat(resolvedRoot);
+    if (!existingStats.isDirectory()) {
+      throw Object.assign(new Error("Audio storage root is not a directory"), {
+        statusCode: 500,
+        errorCode: "storage_path_error",
+      });
+    }
+    return resolvedRoot;
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    if (code !== "ENOENT") {
+      throw error;
+    }
+  }
+  await mkdir(resolvedRoot, { recursive: true });
+  const rootStats = await stat(resolvedRoot);
+  if (!rootStats.isDirectory()) {
+    throw Object.assign(new Error("Audio storage root is not a directory"), {
+      statusCode: 500,
+      errorCode: "storage_path_error",
+    });
+  }
+  return resolvedRoot;
+};
+
+const writeFileAtomic = async (
+  root: string,
+  targetPath: string,
+  body: Buffer,
+): Promise<void> => {
+  const resolvedTarget = assertPathInside(root, targetPath);
+  const tempPath = assertPathInside(
+    root,
+    `${resolvedTarget}.${process.pid}.${randomUUID()}.tmp`,
+  );
+  await writeFile(tempPath, body, { flag: "wx" });
+  try {
+    await rename(tempPath, resolvedTarget);
+  } catch (error) {
+    await rm(tempPath, { force: true });
+    throw error;
+  }
 };
 
 const createTranscript = (
@@ -285,7 +356,7 @@ export async function createApp(
   const stores = options.stores ?? createStores(resolvedLocalUserId);
   const authOptions = { ...options, localUserId: resolvedLocalUserId };
   const storePath = options.storePath ?? process.env.SONOLECT_API_STORE_PATH;
-  const audioDir = getAudioDir(options.audioDir);
+  const audioDir = await ensureAudioStorageRoot(getAudioDir(options.audioDir));
   const audioMaxBytes = getAudioMaxBytes(options.audioMaxBytes);
   const transcriptRepository =
     options.transcriptRepository ??
@@ -305,9 +376,21 @@ export async function createApp(
   const persistAudioJobsToFileStore = async (): Promise<void> => {
     if (!storePath) return;
     const payload = await readFileStore(storePath);
+    const mergedAudioJobs = new Map<string, AudioUploadJob>();
+    for (const job of payload.audioJobs ?? []) {
+      mergedAudioJobs.set(job.id, job);
+    }
+    for (const job of Array.from(stores.audioJobs.values())) {
+      const existing = mergedAudioJobs.get(job.id);
+      const existingUpdatedAt = existing ? Date.parse(existing.updatedAt) : -1;
+      const nextUpdatedAt = Date.parse(job.updatedAt);
+      if (!existing || nextUpdatedAt >= existingUpdatedAt) {
+        mergedAudioJobs.set(job.id, job);
+      }
+    }
     await writeFileStore(storePath, {
       ...payload,
-      audioJobs: [...stores.audioJobs.values()].sort((a, b) =>
+      audioJobs: Array.from(mergedAudioJobs.values()).sort((a, b) =>
         a.createdAt.localeCompare(b.createdAt),
       ),
     });
@@ -452,13 +535,12 @@ export async function createApp(
         audioDir,
         join(audioDir, safePathSegment(userId)),
       );
-      const extension = extensionForAudioMimeType(mimeType);
       const audioPath = assertPathInside(
         audioDir,
-        join(userDir, `${safePathSegment(job.id)}.${extension}`),
+        join(userDir, storageFileNameForAudioJob(job, mimeType)),
       );
       await mkdir(userDir, { recursive: true });
-      await writeFile(audioPath, audioBody);
+      await writeFileAtomic(audioDir, audioPath, audioBody);
 
       const now = new Date().toISOString();
       const updatedJob: AudioUploadJob = {
