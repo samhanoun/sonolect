@@ -5,13 +5,18 @@ import Fastify, {
 } from "fastify";
 import helmet from "@fastify/helmet";
 import cors from "@fastify/cors";
+import { mkdir, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
   FileTranscriptRepository,
   InMemoryTranscriptRepository,
+  readFileStore,
   type TranscriptRepository,
+  writeFileStore,
 } from "./repositories.js";
 import {
   registerAuthMiddleware,
@@ -21,7 +26,9 @@ import {
 export {
   FileTranscriptRepository,
   InMemoryTranscriptRepository,
+  readFileStore,
   type TranscriptRepository,
+  writeFileStore,
 } from "./repositories.js";
 export {
   resolveAuthenticatedActor,
@@ -54,8 +61,9 @@ import {
 } from "@sonolect/validation";
 
 const serviceName = "sonolect-api";
-const localUserId = "local-user";
+const defaultLocalUserId = "local-user";
 const localNow = new Date().toISOString();
+const defaultAudioMaxBytes = 100 * 1024 * 1024;
 
 type RouteContext = { userId: string; actor: AuthenticatedActor };
 
@@ -66,14 +74,32 @@ export interface InMemoryStores {
   audioJobs: Map<string, AudioUploadJob>;
 }
 
-const createStores = (): InMemoryStores => ({
+const sanitizeLocalUserId = (value: string | undefined): string => {
+  const trimmed = value?.trim();
+  return trimmed && /^[a-zA-Z0-9._-]+$/.test(trimmed)
+    ? trimmed
+    : defaultLocalUserId;
+};
+
+const getLocalUserId = (options: Pick<CreateAppOptions, "localUserId">) =>
+  sanitizeLocalUserId(
+    options.localUserId ?? process.env.SONOLECT_LOCAL_USER_ID,
+  );
+
+const createStores = (localUserId = defaultLocalUserId): InMemoryStores => ({
   users: new Map<string, User>([
     [
       localUserId,
       {
         id: localUserId,
-        email: "local@sonolect.dev",
-        name: "Local Sonolect User",
+        email:
+          localUserId === defaultLocalUserId
+            ? "local@sonolect.dev"
+            : `${localUserId}@local.sonolect.dev`,
+        name:
+          localUserId === defaultLocalUserId
+            ? "Local Sonolect User"
+            : `Local Sonolect User (${localUserId})`,
         plan: "pro",
         createdAt: localNow,
         updatedAt: localNow,
@@ -86,7 +112,10 @@ const createStores = (): InMemoryStores => ({
 });
 
 const getRouteContext = (request: FastifyRequest): RouteContext => {
-  const actor = request.actor ?? { userId: localUserId, provider: "anonymous" };
+  const actor = request.actor ?? {
+    userId: defaultLocalUserId,
+    provider: "anonymous",
+  };
   return {
     userId: actor.userId,
     actor,
@@ -119,6 +148,68 @@ const optionalProps = (
   Object.fromEntries(
     Object.entries(value).filter(([, prop]) => prop !== undefined),
   );
+
+const parsePositiveInteger = (
+  value: string | undefined,
+  fallback: number,
+): number => {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const getAudioDir = (optionValue: string | undefined): string =>
+  resolve(
+    optionValue ??
+      process.env.SONOLECT_API_AUDIO_DIR ??
+      join(tmpdir(), "sonolect-api-audio"),
+  );
+
+const getAudioMaxBytes = (optionValue: number | undefined): number =>
+  optionValue && Number.isSafeInteger(optionValue) && optionValue > 0
+    ? optionValue
+    : parsePositiveInteger(
+        process.env.SONOLECT_API_AUDIO_MAX_BYTES,
+        defaultAudioMaxBytes,
+      );
+
+const getSingleHeader = (
+  value: string | string[] | undefined,
+): string | undefined => (Array.isArray(value) ? value[0] : value);
+
+const getAudioMimeType = (request: FastifyRequest): string | undefined =>
+  getSingleHeader(request.headers["content-type"])
+    ?.split(";")[0]
+    ?.trim()
+    .toLowerCase();
+
+const isAudioMimeType = (value: string | undefined): value is string =>
+  Boolean(value && /^audio\/[a-z0-9.+-]+$/i.test(value));
+
+const safePathSegment = (value: string): string => {
+  const safe = value.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return safe && safe !== "." && safe !== ".." ? safe : "_";
+};
+
+const extensionForAudioMimeType = (mimeType: string): string => {
+  const subtype = mimeType.split("/")[1]?.split("+")[0] ?? "bin";
+  return safePathSegment(subtype) || "bin";
+};
+
+const assertPathInside = (root: string, target: string): string => {
+  const resolvedRoot = resolve(root);
+  const resolvedTarget = resolve(target);
+  if (
+    resolvedTarget !== resolvedRoot &&
+    !resolvedTarget.startsWith(`${resolvedRoot}${sep}`)
+  ) {
+    throw Object.assign(new Error("Unsafe audio storage path"), {
+      statusCode: 500,
+      errorCode: "storage_path_error",
+    });
+  }
+  return resolvedTarget;
+};
 
 const createTranscript = (
   userId: string,
@@ -182,24 +273,56 @@ export interface CreateAppOptions extends AuthOptions {
   stores?: InMemoryStores;
   transcriptRepository?: TranscriptRepository;
   storePath?: string;
+  audioDir?: string;
+  audioMaxBytes?: number;
   logger?: boolean;
 }
 
 export async function createApp(
   options: CreateAppOptions = {},
 ): Promise<FastifyInstance> {
-  const stores = options.stores ?? createStores();
+  const resolvedLocalUserId = getLocalUserId(options);
+  const stores = options.stores ?? createStores(resolvedLocalUserId);
+  const authOptions = { ...options, localUserId: resolvedLocalUserId };
   const storePath = options.storePath ?? process.env.SONOLECT_API_STORE_PATH;
+  const audioDir = getAudioDir(options.audioDir);
+  const audioMaxBytes = getAudioMaxBytes(options.audioMaxBytes);
   const transcriptRepository =
     options.transcriptRepository ??
     (storePath
       ? new FileTranscriptRepository(storePath)
       : new InMemoryTranscriptRepository(stores.transcripts));
+  const syncAudioJobsFromFileStore = async (): Promise<void> => {
+    if (!storePath) return;
+    const payload = await readFileStore(storePath);
+    stores.audioJobs.clear();
+    for (const job of payload.audioJobs ?? []) {
+      if (job?.id) {
+        stores.audioJobs.set(job.id, job);
+      }
+    }
+  };
+  const persistAudioJobsToFileStore = async (): Promise<void> => {
+    if (!storePath) return;
+    const payload = await readFileStore(storePath);
+    await writeFileStore(storePath, {
+      ...payload,
+      audioJobs: [...stores.audioJobs.values()].sort((a, b) =>
+        a.createdAt.localeCompare(b.createdAt),
+      ),
+    });
+  };
   const app = Fastify({ logger: options.logger ?? true });
+
+  app.addContentTypeParser(
+    /^audio\/[a-z0-9.+-]+$/i,
+    { parseAs: "buffer", bodyLimit: audioMaxBytes },
+    (_request, body, done) => done(null, body),
+  );
 
   await app.register(helmet);
   await app.register(cors, { origin: false });
-  registerAuthMiddleware(app, options);
+  registerAuthMiddleware(app, authOptions);
 
   app.get("/health", async () => ({ status: "ok", service: serviceName }));
 
@@ -260,6 +383,7 @@ export async function createApp(
           ...optionalProps({ fileName: input.fileName }),
         } as AudioUploadJob;
         stores.audioJobs.set(job.id, job);
+        await persistAudioJobsToFileStore();
         return reply.status(201).send(job);
       } catch (error) {
         return sendValidationError(reply, error);
@@ -271,6 +395,7 @@ export async function createApp(
     "/audio/jobs/:id",
     async (request, reply): Promise<AudioUploadJob | FastifyReply> => {
       const { userId } = getRouteContext(request);
+      await syncAudioJobsFromFileStore();
       const job = stores.audioJobs.get(request.params.id);
       if (!job || job.userId !== userId) {
         return reply
@@ -278,6 +403,81 @@ export async function createApp(
           .send({ error: "not_found", message: "Audio job not found" });
       }
       return job;
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/audio/jobs/:id/audio",
+    async (request, reply): Promise<AudioUploadJob | FastifyReply> => {
+      const { userId } = getRouteContext(request);
+      await syncAudioJobsFromFileStore();
+      const job = stores.audioJobs.get(request.params.id);
+      if (!job || job.userId !== userId) {
+        return reply
+          .status(404)
+          .send({ error: "not_found", message: "Audio job not found" });
+      }
+
+      const mimeType = getAudioMimeType(request);
+      if (!isAudioMimeType(mimeType)) {
+        return reply.status(415).send({
+          error: "unsupported_media_type",
+          message: "Audio upload requires an audio/* Content-Type",
+        });
+      }
+
+      if (!Buffer.isBuffer(request.body)) {
+        return reply.status(400).send({
+          error: "invalid_audio_body",
+          message: "Audio upload requires a binary request body",
+        });
+      }
+
+      const audioBody = request.body;
+      if (audioBody.length === 0) {
+        return reply.status(400).send({
+          error: "invalid_audio_body",
+          message: "Audio upload body cannot be empty",
+        });
+      }
+
+      if (audioBody.length > audioMaxBytes) {
+        return reply.status(413).send({
+          error: "payload_too_large",
+          message: `Audio upload exceeds the ${audioMaxBytes} byte limit`,
+        });
+      }
+
+      const userDir = assertPathInside(
+        audioDir,
+        join(audioDir, safePathSegment(userId)),
+      );
+      const extension = extensionForAudioMimeType(mimeType);
+      const audioPath = assertPathInside(
+        audioDir,
+        join(userDir, `${safePathSegment(job.id)}.${extension}`),
+      );
+      await mkdir(userDir, { recursive: true });
+      await writeFile(audioPath, audioBody);
+
+      const now = new Date().toISOString();
+      const updatedJob: AudioUploadJob = {
+        ...job,
+        mimeType,
+        sizeBytes: audioBody.length,
+        upload: {
+          strategy: "binary-local",
+          storage: "local-file",
+          localPath: audioPath,
+          mimeType,
+          sizeBytes: audioBody.length,
+          uploadedAt: now,
+        },
+        updatedAt: now,
+      };
+      stores.audioJobs.set(updatedJob.id, updatedJob);
+      await persistAudioJobsToFileStore();
+      return updatedJob;
     },
   );
 
@@ -437,7 +637,8 @@ export async function createApp(
 
   app.get("/usage/quota", async (request): Promise<UsageQuotaSummary> => {
     const { userId } = getRouteContext(request);
-    const user = stores.users.get(userId) ?? stores.users.get(localUserId)!;
+    const user =
+      stores.users.get(userId) ?? stores.users.get(resolvedLocalUserId)!;
     const transcriptCount =
       await transcriptRepository.countActiveForUser(userId);
     const commandCount = [...stores.commands.values()].filter(

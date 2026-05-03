@@ -1,8 +1,12 @@
 import { strict as assert } from "node:assert";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { join, relative } from "node:path";
+import { tmpdir } from "node:os";
 import { createApp } from "./index.js";
 import type { AudioUploadJob, Transcript } from "@sonolect/types";
 
-const app = await createApp({ logger: false });
+const audioDir = await mkdtemp(join(tmpdir(), "sonolect-api-audio-test-"));
+const app = await createApp({ logger: false, audioDir, audioMaxBytes: 1_024 });
 
 try {
   const created = await app.inject({
@@ -41,6 +45,79 @@ try {
   assert.equal(fetchedJob.statusCode, 200, fetchedJob.body);
   assert.equal(fetchedJob.json<AudioUploadJob>().id, job.id);
 
+  const audioPayload = Buffer.from("fake webm audio bytes");
+  const uploaded = await app.inject({
+    method: "POST",
+    url: `/audio/jobs/${job.id}/audio`,
+    headers: {
+      "x-user-id": "audio-user",
+      "content-type": "audio/webm",
+    },
+    payload: audioPayload,
+  });
+  assert.equal(uploaded.statusCode, 200, uploaded.body);
+  const uploadedJob = uploaded.json<AudioUploadJob>();
+  assert.equal(uploadedJob.id, job.id);
+  assert.equal(uploadedJob.mimeType, "audio/webm");
+  assert.equal(uploadedJob.sizeBytes, audioPayload.length);
+  assert.equal(uploadedJob.upload.strategy, "binary-local");
+  assert.equal(uploadedJob.upload.storage, "local-file");
+  assert.equal(uploadedJob.upload.mimeType, "audio/webm");
+  assert.equal(uploadedJob.upload.sizeBytes, audioPayload.length);
+  assert.ok(uploadedJob.upload.localPath);
+  assert.equal(
+    relative(audioDir, uploadedJob.upload.localPath).startsWith(".."),
+    false,
+  );
+  assert.deepEqual(await readFile(uploadedJob.upload.localPath), audioPayload);
+  assert.equal(
+    (await stat(uploadedJob.upload.localPath)).size,
+    audioPayload.length,
+  );
+
+  const fetchedUploaded = await app.inject({
+    method: "GET",
+    url: `/audio/jobs/${job.id}`,
+    headers: { "x-user-id": "audio-user" },
+  });
+  assert.equal(fetchedUploaded.statusCode, 200, fetchedUploaded.body);
+  assert.deepEqual(
+    fetchedUploaded.json<AudioUploadJob>().upload,
+    uploadedJob.upload,
+  );
+
+  const wrongOwnerUpload = await app.inject({
+    method: "POST",
+    url: `/audio/jobs/${job.id}/audio`,
+    headers: { "x-user-id": "other-user", "content-type": "audio/webm" },
+    payload: Buffer.from("other audio"),
+  });
+  assert.equal(wrongOwnerUpload.statusCode, 404, wrongOwnerUpload.body);
+
+  const missingJobUpload = await app.inject({
+    method: "POST",
+    url: "/audio/jobs/../../etc/passwd/audio",
+    headers: { "x-user-id": "audio-user", "content-type": "audio/webm" },
+    payload: Buffer.from("unsafe"),
+  });
+  assert.equal(missingJobUpload.statusCode, 404, missingJobUpload.body);
+
+  const invalidContentType = await app.inject({
+    method: "POST",
+    url: `/audio/jobs/${job.id}/audio`,
+    headers: { "x-user-id": "audio-user", "content-type": "text/plain" },
+    payload: Buffer.from("not audio"),
+  });
+  assert.equal(invalidContentType.statusCode, 415, invalidContentType.body);
+
+  const tooLarge = await app.inject({
+    method: "POST",
+    url: `/audio/jobs/${job.id}/audio`,
+    headers: { "x-user-id": "audio-user", "content-type": "audio/webm" },
+    payload: Buffer.alloc(1_025),
+  });
+  assert.equal(tooLarge.statusCode, 413, tooLarge.body);
+
   const fetchedTranscript = await app.inject({
     method: "GET",
     url: `/transcripts/${job.transcriptId}`,
@@ -75,6 +152,7 @@ try {
   assert.equal(invalidMimeType.statusCode, 400, invalidMimeType.body);
 } finally {
   await app.close();
+  await rm(audioDir, { recursive: true, force: true });
 }
 
 console.log("API audio upload job smoke test passed");

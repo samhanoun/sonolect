@@ -222,12 +222,27 @@ kbd {
 }
 
 .history-meta,
+.history-status,
+.history-helper,
+.editor-meta,
 .glass-card p,
 .agent-card p,
 .command-list small {
   color: #929bad;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.history-status {
+  color: #7c88a0;
+}
+
+.history-helper {
+  margin: 0;
+}
+
+.history-helper.error {
+  color: #ffb4b4;
 }
 
 .workspace {
