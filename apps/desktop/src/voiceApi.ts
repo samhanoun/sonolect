@@ -26,6 +26,7 @@ export type TranscriptJobResult = {
 type SubmitCapturedAudioOptions = {
   apiUrl?: string;
   fetchImpl?: typeof fetch;
+  language?: string;
 };
 
 const API_URL = import.meta.env?.VITE_SONOLECT_API_URL?.trim();
@@ -38,8 +39,9 @@ export function isVoiceApiConfigured() {
 export function createCapturedAudioJobPayload(
   audio: Blob,
   metadata: VoiceCaptureMetadata,
+  language?: string,
 ) {
-  return {
+  const payload: Record<string, unknown> = {
     fileName: `sonolect-capture.${extensionForMime(metadata.mimeType)}`,
     mimeType: metadata.mimeType,
     sizeBytes: metadata.sizeBytes || audio.size,
@@ -47,6 +49,10 @@ export function createCapturedAudioJobPayload(
     source: "desktop" as const,
     transcriptTitle: "Desktop voice capture",
   };
+  if (language && language !== "auto") {
+    payload.language = language;
+  }
+  return payload;
 }
 
 export async function submitCapturedAudio(
@@ -73,7 +79,9 @@ export async function submitCapturedAudio(
     const response = await fetchImpl(endpoint, {
       method: "POST",
       headers,
-      body: JSON.stringify(createCapturedAudioJobPayload(audio, metadata)),
+      body: JSON.stringify(
+        createCapturedAudioJobPayload(audio, metadata, options.language),
+      ),
     });
 
     if (!response.ok) {

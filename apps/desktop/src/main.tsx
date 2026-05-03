@@ -15,6 +15,8 @@ import {
   type TranscriptHistoryRow,
 } from "./transcriptHistory";
 import { resolveDesktopAuthConfig } from "./localDevAuth";
+import { useT, useI18nStore, type SupportedLocale } from "./i18n";
+import type { LocaleKeys } from "./locales/en";
 import "./styles.css";
 
 type PrivacyLevel = "local" | "cloud";
@@ -37,8 +39,8 @@ type TranscriptSession = TranscriptHistoryRow;
 
 type AgentAction = {
   id: string;
-  title: string;
-  description: string;
+  titleKey: LocaleKeys;
+  descriptionKey: LocaleKeys;
   app: string;
   tone: "violet" | "cyan" | "amber";
 };
@@ -56,6 +58,10 @@ type DesktopState = {
   transcriptHistoryError: string | undefined;
   voiceCapture: VoiceCaptureResult | undefined;
   voiceError: string | undefined;
+  locale: SupportedLocale;
+  setLocale: (locale: SupportedLocale) => void;
+  sttLanguage: string;
+  setSttLanguage: (lang: string) => void;
   setCommandOpen: (open: boolean) => void;
   toggleRecording: () => void;
   startVoiceCapture: () => Promise<void>;
@@ -77,31 +83,26 @@ const sessions: TranscriptSession[] = offlineTranscriptHistory;
 const agentActions: AgentAction[] = [
   {
     id: "notion",
-    title: "Créer une note Notion",
-    description:
-      "Publie le compte-rendu structuré avec décisions, risques et prochaines étapes.",
+    titleKey: "agents.notion.title",
+    descriptionKey: "agents.notion.description",
     app: "Notion",
     tone: "violet",
   },
   {
     id: "linear",
-    title: "Ouvrir 3 tickets Linear",
-    description:
-      "Découpe la transcription en issues avec priorités, labels et responsables proposés.",
+    titleKey: "agents.linear.title",
+    descriptionKey: "agents.linear.description",
     app: "Linear",
     tone: "cyan",
   },
   {
     id: "mail",
-    title: "Rédiger un email premium",
-    description:
-      "Convertit le brouillon vocal en message clair, chaleureux et prêt à envoyer.",
+    titleKey: "agents.mail.title",
+    descriptionKey: "agents.mail.description",
     app: "Gmail",
     tone: "amber",
   },
 ];
-
-const initialTranscript = `Objectif : préparer une démonstration Sonolect desktop premium.\n\nMettre l’accent sur une expérience voix-first : raccourci global, overlay micro immédiat, transcription éditable, puis actions agentiques.\n\nTon souhaité : français professionnel, direct, élégant. Prochaine action : générer un brief investisseur et trois tickets Linear.`;
 
 let activeRecorder: MediaRecorder | undefined;
 let activeStream: MediaStream | undefined;
@@ -141,13 +142,20 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
   activeView: "today",
   privacyLevel: "local",
   activeSessionId: sessions[0]?.id ?? "session-1",
-  transcript: initialTranscript,
+  transcript: "",
   transcriptHistory: sessions,
   transcriptHistorySource: "offline",
   transcriptHistoryLoading: false,
   transcriptHistoryError: undefined,
   voiceCapture: undefined,
   voiceError: undefined,
+  locale: useI18nStore.getState().locale,
+  setLocale: (locale) => {
+    useI18nStore.getState().setLocale(locale);
+    set({ locale });
+  },
+  sttLanguage: "auto",
+  setSttLanguage: (lang) => set({ sttLanguage: lang }),
   setCommandOpen: (open) => set({ commandOpen: open }),
   toggleRecording: () => {
     const {
@@ -177,8 +185,7 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
     if (!navigator.mediaDevices?.getUserMedia) {
       set({
         recordingState: "error",
-        voiceError:
-          "La capture micro n’est pas disponible dans cet environnement.",
+        voiceError: "error.micUnavailable",
       });
       return;
     }
@@ -186,7 +193,7 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
     if (typeof MediaRecorder === "undefined") {
       set({
         recordingState: "error",
-        voiceError: "MediaRecorder n’est pas supporté par ce runtime desktop.",
+        voiceError: "error.mediaRecorderUnsupported",
       });
       return;
     }
@@ -216,7 +223,7 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
         stopActiveStream();
         set({
           recordingState: "error",
-          voiceError: "Erreur pendant l’enregistrement audio.",
+          voiceError: "error.recordingError",
         });
       };
 
@@ -247,8 +254,8 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
             };
             const fallbackTranscript =
               api.status === "offline"
-                ? `\n\n[Capture vocale locale] ${formatDuration(metadata.durationMs)} · ${metadata.mimeType} · ${Math.round(metadata.sizeBytes / 1024)} Ko. Backend non configuré (VITE_SONOLECT_API_URL).`
-                : `\n\n[Capture vocale envoyée] Job ${api.jobId ?? "en attente"} · ${formatDuration(metadata.durationMs)}.`;
+                ? `\n\n[${formatDuration(metadata.durationMs)} · ${metadata.mimeType} · ${Math.round(metadata.sizeBytes / 1024)} KB]`
+                : `\n\n[Job ${api.jobId ?? "pending"} · ${formatDuration(metadata.durationMs)}]`;
             set((state) => ({
               recordingState: "completed",
               voiceCapture: capture,
@@ -260,9 +267,7 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
             set({
               recordingState: "error",
               voiceError:
-                error instanceof Error
-                  ? error.message
-                  : "Impossible d’envoyer la capture au backend.",
+                error instanceof Error ? error.message : "error.sendFailed",
             });
           });
       };
@@ -275,9 +280,7 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
       set({
         recordingState: "error",
         voiceError:
-          error instanceof Error
-            ? error.message
-            : "Permission micro refusée ou indisponible.",
+          error instanceof Error ? error.message : "error.micPermissionDenied",
       });
     }
   },
@@ -324,9 +327,7 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
         transcriptHistorySource: "offline",
         transcriptHistoryLoading: false,
         transcriptHistoryError:
-          error instanceof Error
-            ? error.message
-            : "Impossible de charger l’historique des transcriptions.",
+          error instanceof Error ? error.message : "error.historyLoadFailed",
       });
     }
   },
@@ -355,9 +356,7 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
     } catch (error) {
       set({
         transcriptHistoryError:
-          error instanceof Error
-            ? error.message
-            : "Impossible d’ouvrir le détail de transcription.",
+          error instanceof Error ? error.message : "error.detailLoadFailed",
       });
     }
   },
@@ -373,6 +372,15 @@ function App() {
   const loadTranscriptHistory = useDesktopStore(
     (state) => state.loadTranscriptHistory,
   );
+  const t = useT();
+
+  // Set initial transcript based on locale
+  useEffect(() => {
+    const store = useDesktopStore.getState();
+    if (!store.transcript) {
+      store.setTranscript(t("initialTranscript"));
+    }
+  }, [t]);
 
   useEffect(() => {
     void loadTranscriptHistory();
@@ -406,7 +414,7 @@ function App() {
       <div className="ambient-grid" aria-hidden="true" />
       <div className="signal-rings" aria-hidden="true" />
       <Sidebar />
-      <section className="workspace" aria-label="Espace de travail Sonolect">
+      <section className="workspace" aria-label={t("workspace.ariaLabel")}>
         <TopBar />
         <div className="workspace-grid">
           <TranscriptEditor />
@@ -436,13 +444,19 @@ function Sidebar() {
   const selectTranscriptSession = useDesktopStore(
     (state) => state.selectTranscriptSession,
   );
+  const t = useT();
 
-  const navItems: Array<{ id: ViewId; label: string; count?: number }> = [
-    { id: "today", label: "Aujourd’hui", count: transcriptHistory.length },
-    { id: "history", label: "Historique", count: transcriptHistory.length },
-    { id: "agents", label: "Agents" },
-    { id: "settings", label: "Réglages" },
-  ];
+  const navItems: Array<{ id: ViewId; labelKey: LocaleKeys; count?: number }> =
+    [
+      { id: "today", labelKey: "nav.today", count: transcriptHistory.length },
+      {
+        id: "history",
+        labelKey: "nav.history",
+        count: transcriptHistory.length,
+      },
+      { id: "agents", labelKey: "nav.agents" },
+      { id: "settings", labelKey: "nav.settings" },
+    ];
 
   return (
     <aside className="sidebar">
@@ -459,7 +473,7 @@ function Sidebar() {
         onClick={() => useDesktopStore.getState().toggleRecording()}
         type="button"
       >
-        <span className="record-dot" /> Parler maintenant
+        <span className="record-dot" /> {t("sidebar.recordNow")}
         <kbd>⌘⇧M</kbd>
       </button>
 
@@ -471,7 +485,7 @@ function Sidebar() {
             onClick={() => setActiveView(item.id)}
             type="button"
           >
-            <span>{item.label}</span>
+            <span>{t(item.labelKey)}</span>
             {typeof item.count === "number" ? (
               <span className="pill">{item.count}</span>
             ) : null}
@@ -481,11 +495,11 @@ function Sidebar() {
 
       <div className="history-block">
         <div className="section-title">
-          Dernières dictées ·{" "}
+          {t("sidebar.lastDictations")} ·{" "}
           {transcriptHistorySource === "api" ? "API" : "offline"}
         </div>
         {transcriptHistoryLoading ? (
-          <p className="history-helper">Chargement de l’historique…</p>
+          <p className="history-helper">{t("sidebar.loadingHistory")}</p>
         ) : null}
         {transcriptHistoryError ? (
           <p className="history-helper error">{transcriptHistoryError}</p>
@@ -519,24 +533,28 @@ function Sidebar() {
 function TopBar() {
   const privacyLevel = useDesktopStore((state) => state.privacyLevel);
   const setCommandOpen = useDesktopStore((state) => state.setCommandOpen);
+  const t = useT();
 
   return (
     <header className="topbar">
       <div>
-        <p className="eyebrow">Shell desktop premium</p>
-        <h2>Capture vocale → texte → actions</h2>
+        <p className="eyebrow">{t("topbar.eyebrow")}</p>
+        <h2>{t("topbar.headline")}</h2>
       </div>
       <div className="topbar-actions">
         <span className="status-chip">
-          {privacyLevel === "local" ? "Local-first" : "Cloud assisté"} ·{" "}
-          {isVoiceApiConfigured() ? "API prête" : "Offline"}
+          {privacyLevel === "local"
+            ? t("topbar.localFirst")
+            : t("topbar.cloudAssisted")}{" "}
+          ·{" "}
+          {isVoiceApiConfigured() ? t("topbar.apiReady") : t("topbar.offline")}
         </span>
         <button
           className="ghost-button"
           onClick={() => setCommandOpen(true)}
           type="button"
         >
-          Rechercher une commande <kbd>⌘K</kbd>
+          {t("topbar.searchCommand")} <kbd>⌘K</kbd>
         </button>
       </div>
     </header>
@@ -548,6 +566,7 @@ function TranscriptEditor() {
   const activeSessionId = useDesktopStore((state) => state.activeSessionId);
   const transcriptHistory = useDesktopStore((state) => state.transcriptHistory);
   const setTranscript = useDesktopStore((state) => state.setTranscript);
+  const t = useT();
   const activeSession = transcriptHistory.find(
     (session) => session.id === activeSessionId,
   );
@@ -560,8 +579,8 @@ function TranscriptEditor() {
     <section className="editor-panel">
       <div className="panel-header">
         <div>
-          <p className="eyebrow">Transcription éditable</p>
-          <h3>{activeSession?.title ?? "Brief vocal enrichi"}</h3>
+          <p className="eyebrow">{t("editor.eyebrow")}</p>
+          <h3>{activeSession?.title ?? t("editor.fallbackTitle")}</h3>
           {activeSession ? (
             <p className="editor-meta">
               {activeSession.status} · {activeSession.duration} ·{" "}
@@ -571,13 +590,13 @@ function TranscriptEditor() {
         </div>
         <div className="mode-switcher" aria-label="Modes de transformation">
           <button className="mode active" type="button">
-            Résumé
+            {t("editor.modeSummary")}
           </button>
           <button className="mode" type="button">
-            Email
+            {t("editor.modeEmail")}
           </button>
           <button className="mode" type="button">
-            Ticket
+            {t("editor.modeTicket")}
           </button>
         </div>
       </div>
@@ -585,17 +604,15 @@ function TranscriptEditor() {
       <div className="voice-command-strip" aria-label="Statut du flux vocal">
         <span className="neural-orb" aria-hidden="true" />
         <div>
-          <strong>Realtime voice canvas</strong>
-          <small>
-            Capture, transcription locale et transformation agentique.
-          </small>
+          <strong>{t("editor.voiceCanvas")}</strong>
+          <small>{t("editor.voiceCanvasSubtitle")}</small>
         </div>
         <span className="latency-chip">38 ms</span>
       </div>
 
       <div className="hologram-frame">
         <textarea
-          aria-label="Éditeur de transcription"
+          aria-label={t("editor.textareaLabel")}
           className="transcript-input"
           onChange={(event) => setTranscript(event.target.value)}
           spellCheck="true"
@@ -604,10 +621,12 @@ function TranscriptEditor() {
       </div>
 
       <footer className="editor-footer">
-        <span>{wordCount} mots</span>
-        <span>Langue : Français</span>
+        <span>
+          {wordCount} {t("editor.wordCount")}
+        </span>
+        <span>{t("editor.language")}</span>
         <button className="primary-button" type="button">
-          Transformer avec Sonolect
+          {t("editor.transformCta")}
         </button>
       </footer>
     </section>
@@ -626,56 +645,56 @@ function RightRail() {
 function SettingsPrivacy() {
   const privacyLevel = useDesktopStore((state) => state.privacyLevel);
   const setPrivacyLevel = useDesktopStore((state) => state.setPrivacyLevel);
+  const t = useT();
 
   return (
     <section className="glass-card">
-      <div className="section-title">Confidentialité</div>
-      <h3>Contrôle de la voix</h3>
-      <p>
-        Choisissez où les captures audio et brouillons de transcription sont
-        traités.
-      </p>
+      <div className="section-title">{t("privacy.title")}</div>
+      <h3>{t("privacy.heading")}</h3>
+      <p>{t("privacy.description")}</p>
       <div
         className="privacy-toggle"
         role="group"
-        aria-label="Mode de confidentialité"
+        aria-label={t("privacy.ariaLabel")}
       >
         <button
           className={privacyLevel === "local" ? "active" : ""}
           onClick={() => setPrivacyLevel("local")}
           type="button"
         >
-          Local
+          {t("privacy.local")}
         </button>
         <button
           className={privacyLevel === "cloud" ? "active" : ""}
           onClick={() => setPrivacyLevel("cloud")}
           type="button"
         >
-          Cloud
+          {t("privacy.cloud")}
         </button>
       </div>
       <ul className="check-list">
-        <li>Suppression automatique après 24h</li>
-        <li>Masquage des noms propres sensibles</li>
-        <li>Export texte uniquement sur demande</li>
+        <li>{t("privacy.autoDelete")}</li>
+        <li>{t("privacy.maskNames")}</li>
+        <li>{t("privacy.exportTextOnly")}</li>
       </ul>
     </section>
   );
 }
 
 function AgentActions() {
+  const t = useT();
+
   return (
     <section className="glass-card action-stack">
-      <div className="section-title">Actions agentiques</div>
+      <div className="section-title">{t("agents.title")}</div>
       {agentActions.map((action) => (
         <article className={`agent-card ${action.tone}`} key={action.id}>
           <div>
             <span className="app-badge">{action.app}</span>
-            <h4>{action.title}</h4>
-            <p>{action.description}</p>
+            <h4>{t(action.titleKey)}</h4>
+            <p>{t(action.descriptionKey)}</p>
           </div>
-          <button type="button">Prévisualiser</button>
+          <button type="button">{t("agents.preview")}</button>
         </article>
       ))}
     </section>
@@ -688,17 +707,18 @@ function VoiceRecorderOverlay() {
   const voiceError = useDesktopStore((state) => state.voiceError);
   const toggleRecording = useDesktopStore((state) => state.toggleRecording);
   const resetVoiceCapture = useDesktopStore((state) => state.resetVoiceCapture);
+  const t = useT();
 
   if (recordingState === "idle") return null;
 
   const isRecording = recordingState === "recording";
-  const copy = voiceStateCopy(recordingState, voiceCapture, voiceError);
+  const copy = voiceStateCopy(recordingState, t, voiceCapture, voiceError);
 
   return (
     <div
       className="recorder-overlay"
       role="dialog"
-      aria-label="Enregistreur vocal Sonolect"
+      aria-label={t("recorder.ariaLabel")}
     >
       <div className="recorder-card">
         <div className={isRecording ? "mic-orb active" : "mic-orb"} />
@@ -712,9 +732,11 @@ function VoiceRecorderOverlay() {
           <div className="capture-meta">
             <span>{formatDuration(voiceCapture.durationMs)}</span>
             <span>{voiceCapture.mimeType}</span>
-            <span>{Math.round(voiceCapture.sizeBytes / 1024)} Ko</span>
+            <span>
+              {Math.round(voiceCapture.sizeBytes / 1024)} {t("recorder.kb")}
+            </span>
             <a href={voiceCapture.objectUrl} download="sonolect-capture.webm">
-              Écouter / télécharger
+              {t("recorder.listenDownload")}
             </a>
           </div>
         ) : null}
@@ -725,7 +747,7 @@ function VoiceRecorderOverlay() {
               onClick={resetVoiceCapture}
               type="button"
             >
-              Fermer
+              {t("recorder.close")}
             </button>
           ) : null}
           <button
@@ -737,7 +759,7 @@ function VoiceRecorderOverlay() {
             onClick={toggleRecording}
             type="button"
           >
-            {isRecording ? "Terminer la capture" : "Nouvelle capture"}
+            {isRecording ? t("recorder.stopCapture") : t("recorder.newCapture")}
           </button>
         </div>
       </div>
@@ -747,55 +769,54 @@ function VoiceRecorderOverlay() {
 
 function voiceStateCopy(
   state: RecordingState,
+  t: (key: LocaleKeys) => string,
   capture?: VoiceCaptureResult,
   error?: string,
 ) {
   switch (state) {
     case "requesting-permission":
       return {
-        eyebrow: "Permission micro",
-        title: "Autorisez l’accès au microphone",
-        detail:
-          "Sonolect demande navigator.mediaDevices.getUserMedia({ audio: true }).",
+        eyebrow: t("voice.permission.eyebrow"),
+        title: t("voice.permission.title"),
+        detail: t("voice.permission.detail"),
       };
     case "recording":
       return {
-        eyebrow: "Écoute active",
-        title: "Parlez, Sonolect capture votre voix",
-        detail:
-          "MediaRecorder collecte les fragments audio localement jusqu’à l’arrêt.",
+        eyebrow: t("voice.recording.eyebrow"),
+        title: t("voice.recording.title"),
+        detail: t("voice.recording.detail"),
       };
     case "uploading":
       return {
-        eyebrow: "Envoi transcription",
-        title: "Préparation du job backend…",
+        eyebrow: t("voice.uploading.eyebrow"),
+        title: t("voice.uploading.title"),
         detail: isVoiceApiConfigured()
-          ? "Capture terminée : envoi au endpoint configuré par VITE_SONOLECT_API_URL."
-          : "Aucun backend configuré : bascule vers le mode local/offline explicite.",
+          ? t("voice.uploading.detailConfigured")
+          : t("voice.uploading.detailOffline"),
       };
     case "completed":
       return {
         eyebrow:
-          capture?.api.status === "offline" ? "Terminé · offline" : "Terminé",
+          capture?.api.status === "offline"
+            ? t("voice.completed.eyebrowOffline")
+            : t("voice.completed.eyebrow"),
         title:
           capture?.api.status === "offline"
-            ? "Capture locale prête"
-            : "Capture envoyée",
-        detail:
-          capture?.api.message ??
-          "Blob audio, durée, type MIME et URL locale ont été créés.",
+            ? t("voice.completed.titleOffline")
+            : t("voice.completed.title"),
+        detail: capture?.api.message ?? t("voice.completed.detailFallback"),
       };
     case "error":
       return {
-        eyebrow: "Erreur capture",
-        title: "Impossible de finaliser l’enregistrement",
-        detail: error ?? "Une erreur inconnue est survenue.",
+        eyebrow: t("voice.error.eyebrow"),
+        title: t("voice.error.title"),
+        detail: error ?? t("voice.error.detailFallback"),
       };
     default:
       return {
-        eyebrow: "Prêt",
-        title: "Capture vocale",
-        detail: "Cliquez pour commencer.",
+        eyebrow: t("voice.default.eyebrow"),
+        title: t("voice.default.title"),
+        detail: t("voice.default.detail"),
       };
   }
 }
@@ -813,25 +834,30 @@ function Waveform({ active }: { active: boolean }) {
 function CommandPalette() {
   const setCommandOpen = useDesktopStore((state) => state.setCommandOpen);
   const setActiveView = useDesktopStore((state) => state.setActiveView);
-  const commands: Array<{ label: string; hint: string; action: () => void }> = [
+  const t = useT();
+  const commands: Array<{
+    labelKey: LocaleKeys;
+    hintKey: LocaleKeys;
+    action: () => void;
+  }> = [
     {
-      label: "Nouvelle capture vocale",
-      hint: "Démarrer l’overlay micro",
+      labelKey: "palette.newCapture",
+      hintKey: "palette.newCaptureHint",
       action: () => useDesktopStore.getState().toggleRecording(),
     },
     {
-      label: "Ouvrir historique",
-      hint: "Retrouver une transcription",
+      labelKey: "palette.openHistory",
+      hintKey: "palette.openHistoryHint",
       action: () => setActiveView("history"),
     },
     {
-      label: "Centre agents",
-      hint: "Voir les actions connectées",
+      labelKey: "palette.agentCenter",
+      hintKey: "palette.agentCenterHint",
       action: () => setActiveView("agents"),
     },
     {
-      label: "Réglages confidentialité",
-      hint: "Local-first, cloud, rétention",
+      labelKey: "palette.privacySettings",
+      hintKey: "palette.privacySettingsHint",
       action: () => setActiveView("settings"),
     },
   ];
@@ -845,24 +871,24 @@ function CommandPalette() {
       <section
         className="command-palette"
         role="dialog"
-        aria-label="Palette de commandes"
+        aria-label={t("palette.ariaLabel")}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="palette-input">
-          ⌘K&nbsp;&nbsp; Que voulez-vous faire avec votre voix ?
+          ⌘K&nbsp;&nbsp; {t("palette.prompt")}
         </div>
         <div className="command-list">
           {commands.map((command) => (
             <button
-              key={command.label}
+              key={command.labelKey}
               onClick={() => {
                 command.action();
                 setCommandOpen(false);
               }}
               type="button"
             >
-              <span>{command.label}</span>
-              <small>{command.hint}</small>
+              <span>{t(command.labelKey)}</span>
+              <small>{t(command.hintKey)}</small>
             </button>
           ))}
         </div>

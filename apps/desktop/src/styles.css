@@ -853,3 +853,60 @@ kbd {
     transform: rotate(1turn);
   }
 }
+
+/* ── STT Language Selector ────────────────────────────────────── */
+
+.stt-language-selector {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(131, 103, 255, 0.3) transparent;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.stt-language-selector::-webkit-scrollbar {
+  height: 4px;
+}
+
+.stt-language-selector::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.stt-language-selector::-webkit-scrollbar-thumb {
+  background: rgba(131, 103, 255, 0.3);
+  border-radius: 2px;
+}
+
+.stt-lang-option {
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-family: inherit;
+  color: rgba(255, 255, 255, 0.55);
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+
+.stt-lang-option:hover {
+  color: rgba(255, 255, 255, 0.85);
+  border-color: rgba(131, 103, 255, 0.3);
+  background: rgba(131, 103, 255, 0.06);
+}
+
+.stt-lang-option.active {
+  color: white;
+  background: linear-gradient(
+    135deg,
+    rgba(131, 103, 255, 0.22),
+    rgba(25, 216, 255, 0.11)
+  );
+  border-color: rgba(131, 103, 255, 0.46);
+  box-shadow: inset 0 0 28px rgba(131, 103, 255, 0.08);
+}
