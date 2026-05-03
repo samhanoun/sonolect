@@ -403,6 +403,8 @@ function App() {
 
   return (
     <main className="desktop-shell">
+      <div className="ambient-grid" aria-hidden="true" />
+      <div className="signal-rings" aria-hidden="true" />
       <Sidebar />
       <section className="workspace" aria-label="Espace de travail Sonolect">
         <TopBar />
@@ -580,13 +582,26 @@ function TranscriptEditor() {
         </div>
       </div>
 
-      <textarea
-        aria-label="Éditeur de transcription"
-        className="transcript-input"
-        onChange={(event) => setTranscript(event.target.value)}
-        spellCheck="true"
-        value={transcript}
-      />
+      <div className="voice-command-strip" aria-label="Statut du flux vocal">
+        <span className="neural-orb" aria-hidden="true" />
+        <div>
+          <strong>Realtime voice canvas</strong>
+          <small>
+            Capture, transcription locale et transformation agentique.
+          </small>
+        </div>
+        <span className="latency-chip">38 ms</span>
+      </div>
+
+      <div className="hologram-frame">
+        <textarea
+          aria-label="Éditeur de transcription"
+          className="transcript-input"
+          onChange={(event) => setTranscript(event.target.value)}
+          spellCheck="true"
+          value={transcript}
+        />
+      </div>
 
       <footer className="editor-footer">
         <span>{wordCount} mots</span>
