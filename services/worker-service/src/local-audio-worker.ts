@@ -1,3 +1,4 @@
+import { exec, execFile } from "node:child_process";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +13,11 @@ interface LocalAudioStorePayload {
 export interface LocalAudioWorkerOptions {
   storePath: string;
   now?: () => Date;
+  localSttCommand?: string;
+  localSttCommandArgs?: string[];
+  sttTimeoutMs?: number;
+  allowMockTranscription?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface LocalAudioWorkerResult {
@@ -54,6 +60,218 @@ const mockTranscriptText = (job: AudioUploadJob): string => {
   return `Mock transcript for ${label} (${seconds} seconds).`;
 };
 
+const isEnabled = (value: string | undefined): boolean =>
+  value === "1" || value?.toLowerCase() === "true";
+
+const shellQuote = (value: string): string =>
+  `'${value.replace(/'/g, `'"'"'`)}'`;
+
+const commandReplacements = (job: AudioUploadJob, transcript: Transcript) =>
+  new Map<string, string>([
+    ["audioPath", job.upload.localPath ?? ""],
+    ["mimeType", job.upload.mimeType ?? job.mimeType],
+    ["language", transcript.language],
+  ]);
+
+const resolveLocalSttCommand = (
+  commandTemplate: string,
+  job: AudioUploadJob,
+  transcript: Transcript,
+): string => {
+  const replacements = commandReplacements(job, transcript);
+  return commandTemplate.replace(
+    /\{(audioPath|mimeType|language)\}/g,
+    (_match, key: string) => shellQuote(replacements.get(key) ?? ""),
+  );
+};
+
+const resolveLocalSttCommandArgs = (
+  commandArgsTemplate: string[],
+  job: AudioUploadJob,
+  transcript: Transcript,
+): string[] => {
+  const replacements = commandReplacements(job, transcript);
+  return commandArgsTemplate.map((arg) =>
+    arg.replace(
+      /\{(audioPath|mimeType|language)\}/g,
+      (_match, key: string) => replacements.get(key) ?? "",
+    ),
+  );
+};
+
+const textFromCommandOutput = (stdout: string): string => {
+  const text = stdout.trim();
+  if (!text) {
+    throw new Error("Local STT command produced no transcript text");
+  }
+  return text;
+};
+
+class LocalSttCommandAbortedError extends Error {
+  constructor() {
+    super("Local STT command aborted");
+    this.name = "LocalSttCommandAbortedError";
+  }
+}
+
+const isAbortError = (error: unknown): boolean =>
+  error instanceof LocalSttCommandAbortedError;
+
+const runLocalSttCommand = async (
+  command: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<string> =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new LocalSttCommandAbortedError());
+      return;
+    }
+
+    let settled = false;
+    const child = exec(
+      command,
+      { timeout: timeoutMs, maxBuffer: 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (settled) return;
+        settled = true;
+        if (error) {
+          const detail = stderr.trim() || stdout.trim() || error.message;
+          reject(new Error(`Local STT command failed: ${detail}`));
+          return;
+        }
+        try {
+          resolve(textFromCommandOutput(stdout));
+        } catch (outputError) {
+          reject(outputError);
+        }
+      },
+    );
+
+    signal?.addEventListener(
+      "abort",
+      () => {
+        if (settled) return;
+        settled = true;
+        child.kill("SIGTERM");
+        reject(new LocalSttCommandAbortedError());
+      },
+      { once: true },
+    );
+  });
+
+const runLocalSttCommandArgs = async (
+  commandArgs: string[],
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const [file, ...args] = commandArgs;
+    if (!file?.trim()) {
+      reject(new Error("Local STT command args must include an executable"));
+      return;
+    }
+    if (signal?.aborted) {
+      reject(new LocalSttCommandAbortedError());
+      return;
+    }
+
+    let settled = false;
+    const child = execFile(
+      file,
+      args,
+      { timeout: timeoutMs, maxBuffer: 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (settled) return;
+        settled = true;
+        if (error) {
+          const detail = stderr.trim() || stdout.trim() || error.message;
+          reject(new Error(`Local STT command failed: ${detail}`));
+          return;
+        }
+        try {
+          resolve(textFromCommandOutput(stdout));
+        } catch (outputError) {
+          reject(outputError);
+        }
+      },
+    );
+
+    signal?.addEventListener(
+      "abort",
+      () => {
+        if (settled) return;
+        settled = true;
+        child.kill("SIGTERM");
+        reject(new LocalSttCommandAbortedError());
+      },
+      { once: true },
+    );
+  });
+
+const parseLocalSttCommandArgs = (
+  value: string | undefined,
+): string[] | undefined => {
+  if (!value?.trim()) return undefined;
+  const parsed = JSON.parse(value) as unknown;
+  if (
+    !Array.isArray(parsed) ||
+    !parsed.every((item) => typeof item === "string")
+  ) {
+    throw new Error(
+      "SONOLECT_LOCAL_STT_COMMAND_ARGS must be a JSON array of strings",
+    );
+  }
+  return parsed;
+};
+
+const transcribeLocalAudio = async (
+  job: AudioUploadJob,
+  transcript: Transcript,
+  options: LocalAudioWorkerOptions,
+): Promise<{ text: string; tags: string[] }> => {
+  const commandArgsTemplate =
+    options.localSttCommandArgs ??
+    parseLocalSttCommandArgs(process.env.SONOLECT_LOCAL_STT_COMMAND_ARGS);
+  if (commandArgsTemplate?.length) {
+    return {
+      text: await runLocalSttCommandArgs(
+        resolveLocalSttCommandArgs(commandArgsTemplate, job, transcript),
+        options.sttTimeoutMs ?? 120_000,
+        options.signal,
+      ),
+      tags: ["audio", "local-stt", "offline-transcribed"],
+    };
+  }
+
+  const commandTemplate =
+    options.localSttCommand ?? process.env.SONOLECT_LOCAL_STT_COMMAND;
+  if (commandTemplate?.trim()) {
+    return {
+      text: await runLocalSttCommand(
+        resolveLocalSttCommand(commandTemplate, job, transcript),
+        options.sttTimeoutMs ?? 120_000,
+        options.signal,
+      ),
+      tags: ["audio", "local-stt", "offline-transcribed"],
+    };
+  }
+
+  if (
+    options.allowMockTranscription ||
+    isEnabled(process.env.SONOLECT_ALLOW_MOCK_TRANSCRIPTION)
+  ) {
+    return {
+      text: mockTranscriptText(job),
+      tags: ["audio", "mock-transcribed"],
+    };
+  }
+
+  throw new Error(
+    "Set SONOLECT_LOCAL_STT_COMMAND or SONOLECT_LOCAL_STT_COMMAND_ARGS to an offline STT command, or explicitly enable mock transcription for tests/dev.",
+  );
+};
+
 const byCreatedAtThenId = (a: AudioUploadJob, b: AudioUploadJob): number => {
   const created = a.createdAt.localeCompare(b.createdAt);
   return created === 0 ? a.id.localeCompare(b.id) : created;
@@ -63,6 +281,35 @@ const hasUploadedLocalAudio = (job: AudioUploadJob): boolean =>
   job.upload.storage === "local-file" &&
   job.upload.strategy === "binary-local" &&
   Boolean(job.upload.localPath?.trim());
+
+const replaceById = <T extends { id: string }>(items: T[], item: T): T[] => {
+  const index = items.findIndex((existing) => existing.id === item.id);
+  if (index === -1) return [...items, item];
+  const next = [...items];
+  next[index] = item;
+  return next;
+};
+
+const mergeAudioJob = (
+  latest: LocalAudioStorePayload,
+  original: AudioUploadJob,
+  update: AudioUploadJob,
+): AudioUploadJob[] => {
+  const audioJobs = [...(latest.audioJobs ?? [])];
+  const current = audioJobs.find((job) => job.id === original.id) ?? original;
+  return replaceById(audioJobs, { ...current, ...update });
+};
+
+const mergeTranscript = (
+  latest: LocalAudioStorePayload,
+  original: Transcript,
+  update: Transcript,
+): Transcript[] => {
+  const transcripts = [...(latest.transcripts ?? [])];
+  const current =
+    transcripts.find((item) => item.id === original.id) ?? original;
+  return replaceById(transcripts, { ...current, ...update });
+};
 
 export async function processNextQueuedAudioJob(
   options: LocalAudioWorkerOptions,
@@ -102,19 +349,23 @@ export async function processNextQueuedAudioJob(
     }
 
     const completedAt = createNow(options);
-    const text = mockTranscriptText(processingJob);
+    const originalTranscript = transcripts[transcriptIndex]!;
+    const { text, tags } = await transcribeLocalAudio(
+      processingJob,
+      originalTranscript,
+      options,
+    );
     const transcript: Transcript = {
-      ...transcripts[transcriptIndex]!,
+      ...originalTranscript,
       status: "completed",
       rawText: text,
       finalText: text,
       tags: Array.from(
         new Set([
-          ...transcripts[transcriptIndex]!.tags.filter(
-            (tag) => tag !== "queued",
+          ...originalTranscript.tags.filter(
+            (tag) => tag !== "queued" && tag !== "mock-transcribed",
           ),
-          "audio",
-          "mock-transcribed",
+          ...tags,
         ]),
       ),
       updatedAt: completedAt,
@@ -127,24 +378,93 @@ export async function processNextQueuedAudioJob(
       completedAt,
     };
 
-    transcripts[transcriptIndex] = transcript;
-    audioJobs[jobIndex] = job;
-    await writeStore(options.storePath, { ...payload, audioJobs, transcripts });
+    const latestPayload = await readStore(options.storePath);
+    await writeStore(options.storePath, {
+      ...latestPayload,
+      audioJobs: mergeAudioJob(latestPayload, processingJob, job),
+      transcripts: mergeTranscript(
+        latestPayload,
+        originalTranscript,
+        transcript,
+      ),
+    });
     return { job, transcript };
   } catch (error) {
     const failedAt = createNow(options);
+    const transcriptIndex = transcripts.findIndex(
+      (transcript) => transcript.id === processingJob.transcriptId,
+    );
+    const originalTranscript = transcripts[transcriptIndex];
+
+    if (isAbortError(error)) {
+      const restoredJob: AudioUploadJob = {
+        ...processingJob,
+        status: "queued",
+        updatedAt: failedAt,
+      };
+      const restoredTranscript: Transcript | undefined = originalTranscript
+        ? {
+            ...originalTranscript,
+            status: "processing",
+            tags: Array.from(new Set([...originalTranscript.tags, "queued"])),
+            updatedAt: failedAt,
+          }
+        : undefined;
+      const latestPayload = await readStore(options.storePath);
+      await writeStore(options.storePath, {
+        ...latestPayload,
+        audioJobs: mergeAudioJob(latestPayload, processingJob, restoredJob),
+        transcripts: restoredTranscript
+          ? mergeTranscript(
+              latestPayload,
+              originalTranscript!,
+              restoredTranscript,
+            )
+          : [...(latestPayload.transcripts ?? [])],
+      });
+      return {
+        job: restoredJob,
+        ...(restoredTranscript ? { transcript: restoredTranscript } : {}),
+      };
+    }
+
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : "Unknown local audio worker error";
     const job: AudioUploadJob = {
       ...processingJob,
       status: "failed",
       updatedAt: failedAt,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Unknown local audio worker error",
+      error: errorMessage,
     };
-    audioJobs[jobIndex] = job;
-    await writeStore(options.storePath, { ...payload, audioJobs, transcripts });
-    return { job };
+    const failedTranscript: Transcript | undefined = originalTranscript
+      ? {
+          ...originalTranscript,
+          status: "failed",
+          tags: Array.from(
+            new Set([
+              ...originalTranscript.tags.filter((tag) => tag !== "queued"),
+              "local-stt",
+              "transcription-failed",
+            ]),
+          ),
+          updatedAt: failedAt,
+        }
+      : undefined;
+
+    const latestPayload = await readStore(options.storePath);
+    await writeStore(options.storePath, {
+      ...latestPayload,
+      audioJobs: mergeAudioJob(latestPayload, processingJob, job),
+      transcripts: failedTranscript
+        ? mergeTranscript(latestPayload, originalTranscript!, failedTranscript)
+        : [...(latestPayload.transcripts ?? [])],
+    });
+    return {
+      job,
+      ...(failedTranscript ? { transcript: failedTranscript } : {}),
+    };
   }
 }
 
