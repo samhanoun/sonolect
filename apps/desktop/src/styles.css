@@ -272,6 +272,12 @@ h4 {
   font-weight: 800;
 }
 
+.shortcut-group {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .record-dot {
   width: 10px;
   height: 10px;
