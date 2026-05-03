@@ -1,3 +1,5 @@
+import { createAuthHeaders } from "./localDevAuth";
+
 export type VoiceCaptureMetadata = {
   durationMs: number;
   mimeType: string;
@@ -21,8 +23,12 @@ export type TranscriptJobResult = {
   message?: string;
 };
 
-const API_URL = import.meta.env.VITE_SONOLECT_API_URL?.trim();
-const API_TOKEN = import.meta.env.VITE_SONOLECT_API_TOKEN?.trim();
+type SubmitCapturedAudioOptions = {
+  apiUrl?: string;
+  fetchImpl?: typeof fetch;
+};
+
+const API_URL = import.meta.env?.VITE_SONOLECT_API_URL?.trim();
 const AUDIO_JOBS_PATH = "/audio/jobs";
 
 export function isVoiceApiConfigured() {
@@ -46,49 +52,99 @@ export function createCapturedAudioJobPayload(
 export async function submitCapturedAudio(
   audio: Blob,
   metadata: VoiceCaptureMetadata,
+  options: SubmitCapturedAudioOptions = {},
 ): Promise<TranscriptJobResult> {
-  if (!API_URL) {
-    return {
-      status: "offline",
-      message:
-        "VITE_SONOLECT_API_URL absent : capture conservée localement sans envoi backend.",
+  const apiUrl = options.apiUrl ?? API_URL;
+  if (!apiUrl) {
+    return offlineResult(
+      "VITE_SONOLECT_API_URL absent : capture conservée localement sans envoi backend.",
+    );
+  }
+
+  const fetchImpl = options.fetchImpl ?? fetch;
+
+  try {
+    const endpoint = new URL(AUDIO_JOBS_PATH, apiUrl).toString();
+    const headers: Record<string, string> = {
+      ...createAuthHeaders(),
+      "content-type": "application/json",
     };
+
+    const response = await fetchImpl(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(createCapturedAudioJobPayload(audio, metadata)),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Backend audio job failed (${response.status})`);
+    }
+
+    const payload = (await response
+      .json()
+      .catch(() => ({}))) as AudioJobResponse;
+    const jobId = payload.jobId ?? payload.id;
+    if (jobId) {
+      await uploadCapturedAudioBinary(
+        fetchImpl,
+        apiUrl,
+        jobId,
+        audio,
+        metadata,
+      );
+    }
+
+    const result: TranscriptJobResult = {
+      status: payload.status === "completed" ? "completed" : "submitted",
+      message: jobId
+        ? "Capture envoyée au backend Sonolect avec audio local."
+        : (payload.message ?? "Capture envoyée au backend Sonolect."),
+    };
+
+    const transcript = payload.transcriptId;
+    if (jobId) result.jobId = jobId;
+    if (transcript) result.transcript = transcript;
+
+    return result;
+  } catch (error) {
+    return offlineResult(
+      error instanceof Error
+        ? `Backend local indisponible : capture conservée localement (${error.message}).`
+        : "Backend local indisponible : capture conservée localement.",
+    );
   }
-
-  const endpoint = new URL(AUDIO_JOBS_PATH, API_URL).toString();
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-  };
-  if (API_TOKEN) {
-    headers.authorization = `Bearer ${API_TOKEN}`;
-  }
-
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(createCapturedAudioJobPayload(audio, metadata)),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Backend audio job failed (${response.status})`);
-  }
-
-  const payload = (await response.json().catch(() => ({}))) as AudioJobResponse;
-  const result: TranscriptJobResult = {
-    status: payload.status === "completed" ? "completed" : "submitted",
-    message: payload.message ?? "Capture envoyée au backend Sonolect.",
-  };
-
-  const jobId = payload.jobId ?? payload.id;
-  const transcript = payload.transcriptId;
-
-  if (jobId) result.jobId = jobId;
-  if (transcript) result.transcript = transcript;
-
-  return result;
 }
 
 export const submitTranscriptJob = submitCapturedAudio;
+
+async function uploadCapturedAudioBinary(
+  fetchImpl: typeof fetch,
+  apiUrl: string,
+  jobId: string,
+  audio: Blob,
+  metadata: VoiceCaptureMetadata,
+) {
+  const uploadEndpoint = new URL(
+    `${AUDIO_JOBS_PATH}/${encodeURIComponent(jobId)}/audio`,
+    apiUrl,
+  ).toString();
+  const uploadHeaders: Record<string, string> = {
+    ...createAuthHeaders(),
+    "content-type": metadata.mimeType || audio.type || "audio/webm",
+  };
+  const uploadResponse = await fetchImpl(uploadEndpoint, {
+    method: "POST",
+    headers: uploadHeaders,
+    body: audio,
+  });
+  if (!uploadResponse.ok) {
+    throw new Error(`Backend audio upload failed (${uploadResponse.status})`);
+  }
+}
+
+function offlineResult(message: string): TranscriptJobResult {
+  return { status: "offline", message };
+}
 
 function extensionForMime(mimeType: string) {
   if (mimeType.includes("mp4")) return "m4a";

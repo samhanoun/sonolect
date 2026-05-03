@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { Transcript } from "@sonolect/types";
+import type { AudioUploadJob, Transcript } from "@sonolect/types";
 
 export interface TranscriptListOptions {
   includeDeleted?: boolean | undefined;
@@ -76,12 +76,37 @@ export class InMemoryTranscriptRepository implements TranscriptRepository {
   }
 }
 
-interface FileStorePayload {
+export interface FileStorePayload {
   transcripts?: Transcript[];
+  audioJobs?: AudioUploadJob[];
+  [key: string]: unknown;
 }
 
+export const readFileStore = async (
+  storePath: string,
+): Promise<FileStorePayload> => {
+  try {
+    const raw = await readFile(storePath, "utf8");
+    return JSON.parse(raw) as FileStorePayload;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return {};
+    }
+    throw error;
+  }
+};
+
+export const writeFileStore = async (
+  storePath: string,
+  payload: FileStorePayload,
+): Promise<void> => {
+  await mkdir(dirname(storePath), { recursive: true });
+  const tempPath = `${storePath}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  await rename(tempPath, storePath);
+};
+
 export class FileTranscriptRepository implements TranscriptRepository {
-  private loaded = false;
   private readonly transcripts = new Map<string, Transcript>();
 
   constructor(private readonly storePath: string) {}
@@ -126,36 +151,23 @@ export class FileTranscriptRepository implements TranscriptRepository {
   }
 
   private async load(): Promise<void> {
-    if (this.loaded) {
-      return;
-    }
-
-    try {
-      const raw = await readFile(this.storePath, "utf8");
-      const payload = JSON.parse(raw) as FileStorePayload;
-      for (const transcript of payload.transcripts ?? []) {
-        if (transcript?.id) {
-          this.transcripts.set(transcript.id, transcript);
-        }
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw error;
+    const payload = await readFileStore(this.storePath);
+    this.transcripts.clear();
+    for (const transcript of payload.transcripts ?? []) {
+      if (transcript?.id) {
+        this.transcripts.set(transcript.id, transcript);
       }
     }
-
-    this.loaded = true;
   }
 
   private async flush(): Promise<void> {
+    const existing = await readFileStore(this.storePath);
     const payload: FileStorePayload = {
+      ...existing,
       transcripts: [...this.transcripts.values()].sort((a, b) =>
         a.createdAt.localeCompare(b.createdAt),
       ),
     };
-    await mkdir(dirname(this.storePath), { recursive: true });
-    const tempPath = `${this.storePath}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-    await rename(tempPath, this.storePath);
+    await writeFileStore(this.storePath, payload);
   }
 }

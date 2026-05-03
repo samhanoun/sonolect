@@ -18,6 +18,8 @@ export interface AuthOptions {
   firebaseProjectId?: string | undefined;
   verifyToken?: VerifyToken | undefined;
   allowDevTokens?: boolean | undefined;
+  localDevAuth?: boolean | undefined;
+  localUserId?: string | undefined;
   nodeEnv?: string;
 }
 
@@ -26,6 +28,8 @@ interface AuthConfig {
   firebaseProjectId: string | undefined;
   verifyToken: VerifyToken | undefined;
   allowDevTokens: boolean;
+  localDevAuth: boolean;
+  localUserId: string;
   nodeEnv: string;
 }
 
@@ -38,6 +42,11 @@ declare module "fastify" {
 const localUserId = "local-user";
 
 const envFlagEnabled = (value: string | undefined): boolean => value === "true";
+
+const sanitizeLocalUserId = (value: string | undefined): string => {
+  const trimmed = value?.trim();
+  return trimmed && /^[a-zA-Z0-9._-]+$/.test(trimmed) ? trimmed : localUserId;
+};
 
 const getAuthorizationValue = (request: FastifyRequest): string | undefined => {
   const header = request.headers.authorization;
@@ -67,9 +76,17 @@ export const createAuthConfig = (options: AuthOptions = {}): AuthConfig => ({
   firebaseProjectId:
     options.firebaseProjectId ?? process.env.FIREBASE_PROJECT_ID,
   verifyToken: options.verifyToken,
-  allowDevTokens:
+  localDevAuth:
+    options.localDevAuth ?? envFlagEnabled(process.env.SONOLECT_LOCAL_DEV_AUTH),
+  localUserId: sanitizeLocalUserId(
+    options.localUserId ?? process.env.SONOLECT_LOCAL_USER_ID,
+  ),
+  allowDevTokens: Boolean(
     options.allowDevTokens ??
-    envFlagEnabled(process.env.SONOLECT_ALLOW_DEV_TOKENS),
+    (envFlagEnabled(process.env.SONOLECT_ALLOW_DEV_TOKENS) ||
+      (options.localDevAuth ??
+        envFlagEnabled(process.env.SONOLECT_LOCAL_DEV_AUTH))),
+  ),
   nodeEnv: options.nodeEnv ?? process.env.NODE_ENV ?? "development",
 });
 
@@ -88,7 +105,7 @@ export async function resolveAuthenticatedActor(
       });
     }
     return {
-      userId: getLegacyUserId(request) ?? localUserId,
+      userId: getLegacyUserId(request) ?? config.localUserId,
       provider: "anonymous",
     };
   }
@@ -144,7 +161,7 @@ export function registerAuthMiddleware(
     "onRequest",
     async (request: FastifyRequest, reply: FastifyReply) => {
       if (isPublicRoute(request)) {
-        request.actor = { userId: localUserId, provider: "anonymous" };
+        request.actor = { userId: config.localUserId, provider: "anonymous" };
         return;
       }
 

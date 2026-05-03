@@ -8,6 +8,13 @@ import {
   type TranscriptJobResult,
   type VoiceCaptureMetadata,
 } from "./voiceApi";
+import {
+  fetchTranscriptDetail,
+  fetchTranscriptHistory,
+  offlineTranscriptHistory,
+  type TranscriptHistoryRow,
+} from "./transcriptHistory";
+import { resolveDesktopAuthConfig } from "./localDevAuth";
 import "./styles.css";
 
 type PrivacyLevel = "local" | "cloud";
@@ -26,15 +33,7 @@ type VoiceCaptureResult = VoiceCaptureMetadata & {
   api: TranscriptJobResult;
 };
 
-type TranscriptSession = {
-  id: string;
-  title: string;
-  preview: string;
-  timestamp: string;
-  duration: string;
-  mode: SonolectMode;
-  status: "draft" | "synced" | "actioned";
-};
+type TranscriptSession = TranscriptHistoryRow;
 
 type AgentAction = {
   id: string;
@@ -51,6 +50,10 @@ type DesktopState = {
   privacyLevel: PrivacyLevel;
   activeSessionId: string;
   transcript: string;
+  transcriptHistory: TranscriptSession[];
+  transcriptHistorySource: "api" | "offline";
+  transcriptHistoryLoading: boolean;
+  transcriptHistoryError: string | undefined;
   voiceCapture: VoiceCaptureResult | undefined;
   voiceError: string | undefined;
   setCommandOpen: (open: boolean) => void;
@@ -60,42 +63,16 @@ type DesktopState = {
   resetVoiceCapture: () => void;
   setActiveView: (view: ViewId) => void;
   setPrivacyLevel: (level: PrivacyLevel) => void;
+  loadTranscriptHistory: () => Promise<void>;
+  selectTranscriptSession: (sessionId: string) => Promise<void>;
   setActiveSession: (sessionId: string, transcript: string) => void;
   setTranscript: (value: string) => void;
 };
 
-const sessions: TranscriptSession[] = [
-  {
-    id: "session-1",
-    title: "Préparer la démo investisseurs",
-    preview:
-      "Résumer la traction, clarifier le positionnement voix-first, puis créer un mail de suivi.",
-    timestamp: "Aujourd’hui · 09:42",
-    duration: "2m 18s",
-    mode: "summarize",
-    status: "actioned",
-  },
-  {
-    id: "session-2",
-    title: "Réponse client urgente",
-    preview:
-      "Transformer mes notes en réponse concise, rassurante et professionnelle.",
-    timestamp: "Hier · 18:07",
-    duration: "48s",
-    mode: "reply",
-    status: "synced",
-  },
-  {
-    id: "session-3",
-    title: "Idées roadmap desktop",
-    preview:
-      "Palette de commandes, overlay micro, mode confidentiel et actions agentiques.",
-    timestamp: "Lun. · 14:16",
-    duration: "3m 04s",
-    mode: "task_creation",
-    status: "draft",
-  },
-];
+const API_URL = import.meta.env.VITE_SONOLECT_API_URL?.trim();
+const AUTH_CONFIG = resolveDesktopAuthConfig();
+const API_TOKEN = AUTH_CONFIG.token;
+const sessions: TranscriptSession[] = offlineTranscriptHistory;
 
 const agentActions: AgentAction[] = [
   {
@@ -165,6 +142,10 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
   privacyLevel: "local",
   activeSessionId: sessions[0]?.id ?? "session-1",
   transcript: initialTranscript,
+  transcriptHistory: sessions,
+  transcriptHistorySource: "offline",
+  transcriptHistoryLoading: false,
+  transcriptHistoryError: undefined,
   voiceCapture: undefined,
   voiceError: undefined,
   setCommandOpen: (open) => set({ commandOpen: open }),
@@ -321,6 +302,65 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
     }),
   setActiveView: (view) => set({ activeView: view }),
   setPrivacyLevel: (level) => set({ privacyLevel: level }),
+  loadTranscriptHistory: async () => {
+    set({ transcriptHistoryLoading: true, transcriptHistoryError: undefined });
+    try {
+      const history = await fetchTranscriptHistory({
+        apiUrl: API_URL,
+        token: API_TOKEN,
+      });
+      const activeSession = history.items[0];
+      set((state) => ({
+        transcriptHistory: history.items,
+        transcriptHistorySource: history.source,
+        transcriptHistoryLoading: false,
+        transcriptHistoryError: undefined,
+        activeSessionId: activeSession?.id ?? state.activeSessionId,
+        transcript: activeSession?.transcript ?? state.transcript,
+      }));
+    } catch (error) {
+      set({
+        transcriptHistory: sessions,
+        transcriptHistorySource: "offline",
+        transcriptHistoryLoading: false,
+        transcriptHistoryError:
+          error instanceof Error
+            ? error.message
+            : "Impossible de charger l’historique des transcriptions.",
+      });
+    }
+  },
+  selectTranscriptSession: async (sessionId) => {
+    const fallback = get().transcriptHistory.find(
+      (item) => item.id === sessionId,
+    );
+    if (fallback) {
+      set({ activeSessionId: fallback.id, transcript: fallback.transcript });
+    }
+    try {
+      const detail = await fetchTranscriptDetail(sessionId, {
+        apiUrl: API_URL,
+        token: API_TOKEN,
+      });
+      if (detail) {
+        set((state) => ({
+          activeSessionId: detail.id,
+          transcript: detail.transcript,
+          transcriptHistory: state.transcriptHistory.map((item) =>
+            item.id === detail.id ? detail : item,
+          ),
+          transcriptHistoryError: undefined,
+        }));
+      }
+    } catch (error) {
+      set({
+        transcriptHistoryError:
+          error instanceof Error
+            ? error.message
+            : "Impossible d’ouvrir le détail de transcription.",
+      });
+    }
+  },
   setActiveSession: (sessionId, transcript) =>
     set({ activeSessionId: sessionId, transcript }),
   setTranscript: (value) => set({ transcript: value }),
@@ -330,6 +370,13 @@ function App() {
   const commandOpen = useDesktopStore((state) => state.commandOpen);
   const setCommandOpen = useDesktopStore((state) => state.setCommandOpen);
   const toggleRecording = useDesktopStore((state) => state.toggleRecording);
+  const loadTranscriptHistory = useDesktopStore(
+    (state) => state.loadTranscriptHistory,
+  );
+
+  useEffect(() => {
+    void loadTranscriptHistory();
+  }, [loadTranscriptHistory]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -373,12 +420,24 @@ function App() {
 function Sidebar() {
   const activeView = useDesktopStore((state) => state.activeView);
   const activeSessionId = useDesktopStore((state) => state.activeSessionId);
+  const transcriptHistory = useDesktopStore((state) => state.transcriptHistory);
+  const transcriptHistorySource = useDesktopStore(
+    (state) => state.transcriptHistorySource,
+  );
+  const transcriptHistoryLoading = useDesktopStore(
+    (state) => state.transcriptHistoryLoading,
+  );
+  const transcriptHistoryError = useDesktopStore(
+    (state) => state.transcriptHistoryError,
+  );
   const setActiveView = useDesktopStore((state) => state.setActiveView);
-  const setActiveSession = useDesktopStore((state) => state.setActiveSession);
+  const selectTranscriptSession = useDesktopStore(
+    (state) => state.selectTranscriptSession,
+  );
 
   const navItems: Array<{ id: ViewId; label: string; count?: number }> = [
-    { id: "today", label: "Aujourd’hui", count: 4 },
-    { id: "history", label: "Historique", count: 28 },
+    { id: "today", label: "Aujourd’hui", count: transcriptHistory.length },
+    { id: "history", label: "Historique", count: transcriptHistory.length },
     { id: "agents", label: "Agents" },
     { id: "settings", label: "Réglages" },
   ];
@@ -419,8 +478,17 @@ function Sidebar() {
       </nav>
 
       <div className="history-block">
-        <div className="section-title">Dernières dictées</div>
-        {sessions.map((session) => (
+        <div className="section-title">
+          Dernières dictées ·{" "}
+          {transcriptHistorySource === "api" ? "API" : "offline"}
+        </div>
+        {transcriptHistoryLoading ? (
+          <p className="history-helper">Chargement de l’historique…</p>
+        ) : null}
+        {transcriptHistoryError ? (
+          <p className="history-helper error">{transcriptHistoryError}</p>
+        ) : null}
+        {transcriptHistory.map((session) => (
           <button
             className={
               activeSessionId === session.id
@@ -430,10 +498,7 @@ function Sidebar() {
             key={session.id}
             onClick={() => {
               setActiveView("history");
-              setActiveSession(
-                session.id,
-                `${session.preview}\n\nAction proposée : ${session.title}.`,
-              );
+              void selectTranscriptSession(session.id);
             }}
             type="button"
           >
@@ -441,6 +506,7 @@ function Sidebar() {
             <span className="history-meta">
               {session.timestamp} · {session.duration}
             </span>
+            <span className="history-status">{session.metadata}</span>
           </button>
         ))}
       </div>
@@ -477,7 +543,12 @@ function TopBar() {
 
 function TranscriptEditor() {
   const transcript = useDesktopStore((state) => state.transcript);
+  const activeSessionId = useDesktopStore((state) => state.activeSessionId);
+  const transcriptHistory = useDesktopStore((state) => state.transcriptHistory);
   const setTranscript = useDesktopStore((state) => state.setTranscript);
+  const activeSession = transcriptHistory.find(
+    (session) => session.id === activeSessionId,
+  );
   const wordCount = useMemo(
     () => transcript.trim().split(/\s+/).filter(Boolean).length,
     [transcript],
@@ -488,7 +559,13 @@ function TranscriptEditor() {
       <div className="panel-header">
         <div>
           <p className="eyebrow">Transcription éditable</p>
-          <h3>Brief vocal enrichi</h3>
+          <h3>{activeSession?.title ?? "Brief vocal enrichi"}</h3>
+          {activeSession ? (
+            <p className="editor-meta">
+              {activeSession.status} · {activeSession.duration} ·{" "}
+              {activeSession.metadata}
+            </p>
+          ) : null}
         </div>
         <div className="mode-switcher" aria-label="Modes de transformation">
           <button className="mode active" type="button">

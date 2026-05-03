@@ -18,8 +18,8 @@ export type AudioUploadJobStatus =
   | "completed"
   | "failed";
 export type AudioUploadSource = "desktop" | "web" | "mobile" | "api";
-export type AudioUploadStrategy = "inline-metadata";
-export type AudioUploadStorage = "local-placeholder";
+export type AudioUploadStrategy = "inline-metadata" | "binary-local";
+export type AudioUploadStorage = "local-placeholder" | "local-file";
 
 export type SttProviderName = "mock" | "google";
 export type TranscriptionJobStatus =
@@ -120,9 +120,15 @@ export interface AudioUploadJob {
   upload: {
     strategy: AudioUploadStrategy;
     storage: AudioUploadStorage;
+    localPath?: string;
+    mimeType?: string;
+    sizeBytes?: number;
+    uploadedAt?: string;
   };
   createdAt: string;
   updatedAt: string;
+  completedAt?: string;
+  error?: string;
 }
 
 export interface TranscriptionJobRequest {
