@@ -144,4 +144,19 @@ export const fr: Record<LocaleKeys, string> = {
     "VITE_SONOLECT_API_URL absent : capture conservée localement sans envoi backend.",
   "voiceApi.backendUnavailable":
     "Backend local indisponible : capture conservée localement",
+
+  // Toast
+  "toast.transformComplete": "Transcription transformée avec succès",
+  "toast.copySuccess": "Transcription copiée dans le presse-papiers",
+
+  // Transform
+  "editor.transforming": "Transformation…",
+
+  // Export
+  "editor.copy": "Copier",
+  "editor.download": "Télécharger",
+
+  // Command palette search
+  "palette.searchPlaceholder": "Rechercher des commandes…",
+  "palette.noResults": "Aucun résultat",
 };

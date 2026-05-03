@@ -1,4 +1,10 @@
-import React, { useEffect, useMemo } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+  useCallback,
+} from "react";
 import { createRoot } from "react-dom/client";
 import { create } from "zustand";
 import type { SonolectMode } from "@sonolect/types";
@@ -17,6 +23,8 @@ import {
 import { resolveDesktopAuthConfig } from "./localDevAuth";
 import { useT, useI18nStore, type SupportedLocale } from "./i18n";
 import type { LocaleKeys } from "./locales/en";
+import { saveSettings, loadSettings, SETTINGS_KEYS } from "./persistence";
+import { STT_LANGUAGES } from "./sttLanguages";
 import "./styles.css";
 
 type PrivacyLevel = "local" | "cloud";
@@ -27,7 +35,7 @@ type RecordingState =
   | "uploading"
   | "completed"
   | "error";
-type ViewId = "today" | "history" | "agents" | "settings";
+type ViewId = "today" | "history" | "settings";
 
 type VoiceCaptureResult = VoiceCaptureMetadata & {
   objectUrl: string;
@@ -37,13 +45,7 @@ type VoiceCaptureResult = VoiceCaptureMetadata & {
 
 type TranscriptSession = TranscriptHistoryRow;
 
-type AgentAction = {
-  id: string;
-  titleKey: LocaleKeys;
-  descriptionKey: LocaleKeys;
-  app: string;
-  tone: "violet" | "cyan" | "amber";
-};
+type Toast = { id: string; message: string };
 
 type DesktopState = {
   commandOpen: boolean;
@@ -52,6 +54,8 @@ type DesktopState = {
   privacyLevel: PrivacyLevel;
   activeSessionId: string;
   transcript: string;
+  transforming: boolean;
+  toasts: Toast[];
   transcriptHistory: TranscriptSession[];
   transcriptHistorySource: "api" | "offline";
   transcriptHistoryLoading: boolean;
@@ -73,36 +77,14 @@ type DesktopState = {
   selectTranscriptSession: (sessionId: string) => Promise<void>;
   setActiveSession: (sessionId: string, transcript: string) => void;
   setTranscript: (value: string) => void;
+  addToast: (message: string) => void;
+  transformTranscript: () => void;
 };
 
 const API_URL = import.meta.env.VITE_SONOLECT_API_URL?.trim();
 const AUTH_CONFIG = resolveDesktopAuthConfig();
 const API_TOKEN = AUTH_CONFIG.token;
 const sessions: TranscriptSession[] = offlineTranscriptHistory;
-
-const agentActions: AgentAction[] = [
-  {
-    id: "notion",
-    titleKey: "agents.notion.title",
-    descriptionKey: "agents.notion.description",
-    app: "Notion",
-    tone: "violet",
-  },
-  {
-    id: "linear",
-    titleKey: "agents.linear.title",
-    descriptionKey: "agents.linear.description",
-    app: "Linear",
-    tone: "cyan",
-  },
-  {
-    id: "mail",
-    titleKey: "agents.mail.title",
-    descriptionKey: "agents.mail.description",
-    app: "Gmail",
-    tone: "amber",
-  },
-];
 
 let activeRecorder: MediaRecorder | undefined;
 let activeStream: MediaStream | undefined;
@@ -140,7 +122,8 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
   commandOpen: false,
   recordingState: "idle",
   activeView: "today",
-  privacyLevel: "local",
+  privacyLevel:
+    (loadSettings(SETTINGS_KEYS.privacyLevel) as PrivacyLevel) || "local",
   activeSessionId: sessions[0]?.id ?? "session-1",
   transcript: "",
   transcriptHistory: sessions,
@@ -149,13 +132,21 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
   transcriptHistoryError: undefined,
   voiceCapture: undefined,
   voiceError: undefined,
-  locale: useI18nStore.getState().locale,
+  transforming: false,
+  toasts: [],
+  locale:
+    (loadSettings(SETTINGS_KEYS.locale) as SupportedLocale) ||
+    useI18nStore.getState().locale,
   setLocale: (locale) => {
     useI18nStore.getState().setLocale(locale);
+    saveSettings(SETTINGS_KEYS.locale, locale);
     set({ locale });
   },
-  sttLanguage: "auto",
-  setSttLanguage: (lang) => set({ sttLanguage: lang }),
+  sttLanguage: loadSettings(SETTINGS_KEYS.sttLanguage) || "auto",
+  setSttLanguage: (lang) => {
+    saveSettings(SETTINGS_KEYS.sttLanguage, lang);
+    set({ sttLanguage: lang });
+  },
   setCommandOpen: (open) => set({ commandOpen: open }),
   toggleRecording: () => {
     const {
@@ -304,7 +295,10 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
       };
     }),
   setActiveView: (view) => set({ activeView: view }),
-  setPrivacyLevel: (level) => set({ privacyLevel: level }),
+  setPrivacyLevel: (level) => {
+    saveSettings(SETTINGS_KEYS.privacyLevel, level);
+    set({ privacyLevel: level });
+  },
   loadTranscriptHistory: async () => {
     set({ transcriptHistoryLoading: true, transcriptHistoryError: undefined });
     try {
@@ -363,6 +357,38 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
   setActiveSession: (sessionId, transcript) =>
     set({ activeSessionId: sessionId, transcript }),
   setTranscript: (value) => set({ transcript: value }),
+  addToast: (message) => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    set((state) => ({ toasts: [...state.toasts, { id, message }] }));
+    setTimeout(() => {
+      set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) }));
+    }, 3000);
+  },
+  transformTranscript: () => {
+    const { transforming, transcript, addToast } = get();
+    if (transforming || !transcript.trim()) return;
+    set({ transforming: true });
+    // Local text transformation
+    const cleaned = transcript
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    // Split into sentences and capitalize first letter of each
+    const sentences = cleaned
+      .split(/(?<=[.!?])\s+/)
+      .map((s) => s.charAt(0).toUpperCase() + s.slice(1));
+    // Group into paragraphs (every 3 sentences)
+    const paragraphs: string[] = [];
+    for (let i = 0; i < sentences.length; i += 3) {
+      paragraphs.push(sentences.slice(i, i + 3).join(" "));
+    }
+    // Generate title from first few words
+    const firstWords = cleaned.split(/\s+/).slice(0, 6).join(" ");
+    const title = `# ${firstWords}${firstWords.length < cleaned.length ? "…" : ""}`;
+    const transformed = `${title}\n\n${paragraphs.join("\n\n")}`;
+    set({ transcript: transformed, transforming: false });
+    addToast("toast.transformComplete");
+  },
 }));
 
 function App() {
@@ -418,11 +444,11 @@ function App() {
         <TopBar />
         <div className="workspace-grid">
           <TranscriptEditor />
-          <RightRail />
         </div>
       </section>
       <VoiceRecorderOverlay />
       {commandOpen ? <CommandPalette /> : null}
+      <ToastContainer />
     </main>
   );
 }
@@ -454,7 +480,6 @@ function Sidebar() {
         labelKey: "nav.history",
         count: transcriptHistory.length,
       },
-      { id: "agents", labelKey: "nav.agents" },
       { id: "settings", labelKey: "nav.settings" },
     ];
 
@@ -566,6 +591,11 @@ function TranscriptEditor() {
   const activeSessionId = useDesktopStore((state) => state.activeSessionId);
   const transcriptHistory = useDesktopStore((state) => state.transcriptHistory);
   const setTranscript = useDesktopStore((state) => state.setTranscript);
+  const transforming = useDesktopStore((state) => state.transforming);
+  const transformTranscript = useDesktopStore(
+    (state) => state.transformTranscript,
+  );
+  const addToast = useDesktopStore((state) => state.addToast);
   const t = useT();
   const activeSession = transcriptHistory.find(
     (session) => session.id === activeSessionId,
@@ -574,6 +604,24 @@ function TranscriptEditor() {
     () => transcript.trim().split(/\s+/).filter(Boolean).length,
     [transcript],
   );
+
+  const handleCopy = useCallback(() => {
+    void navigator.clipboard.writeText(transcript).then(() => {
+      addToast("toast.copySuccess");
+    });
+  }, [transcript, addToast]);
+
+  const handleDownload = useCallback(() => {
+    const blob = new Blob([transcript], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "transcript.txt";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [transcript]);
 
   return (
     <section className="editor-panel">
@@ -587,17 +635,6 @@ function TranscriptEditor() {
               {activeSession.metadata}
             </p>
           ) : null}
-        </div>
-        <div className="mode-switcher" aria-label="Modes de transformation">
-          <button className="mode active" type="button">
-            {t("editor.modeSummary")}
-          </button>
-          <button className="mode" type="button">
-            {t("editor.modeEmail")}
-          </button>
-          <button className="mode" type="button">
-            {t("editor.modeTicket")}
-          </button>
         </div>
       </div>
 
@@ -625,26 +662,32 @@ function TranscriptEditor() {
           {wordCount} {t("editor.wordCount")}
         </span>
         <span>{t("editor.language")}</span>
-        <button className="primary-button" type="button">
-          {t("editor.transformCta")}
+        <button className="ghost-button" onClick={handleCopy} type="button">
+          {t("editor.copy")}
+        </button>
+        <button className="ghost-button" onClick={handleDownload} type="button">
+          {t("editor.download")}
+        </button>
+        <button
+          className="primary-button"
+          disabled={transforming}
+          onClick={transformTranscript}
+          type="button"
+        >
+          {transforming ? t("editor.transforming") : t("editor.transformCta")}
         </button>
       </footer>
     </section>
   );
 }
 
-function RightRail() {
-  return (
-    <aside className="right-rail">
-      <SettingsPrivacy />
-      <AgentActions />
-    </aside>
-  );
-}
-
 function SettingsPrivacy() {
   const privacyLevel = useDesktopStore((state) => state.privacyLevel);
   const setPrivacyLevel = useDesktopStore((state) => state.setPrivacyLevel);
+  const locale = useDesktopStore((state) => state.locale);
+  const setLocale = useDesktopStore((state) => state.setLocale);
+  const sttLanguage = useDesktopStore((state) => state.sttLanguage);
+  const setSttLanguage = useDesktopStore((state) => state.setSttLanguage);
   const t = useT();
 
   return (
@@ -677,26 +720,42 @@ function SettingsPrivacy() {
         <li>{t("privacy.maskNames")}</li>
         <li>{t("privacy.exportTextOnly")}</li>
       </ul>
-    </section>
-  );
-}
 
-function AgentActions() {
-  const t = useT();
+      <div className="section-title" style={{ marginTop: "1.5rem" }}>
+        Locale
+      </div>
+      <div className="privacy-toggle" role="group" aria-label="Locale toggle">
+        <button
+          className={locale === "en" ? "active" : ""}
+          onClick={() => setLocale("en")}
+          type="button"
+        >
+          EN
+        </button>
+        <button
+          className={locale === "fr" ? "active" : ""}
+          onClick={() => setLocale("fr")}
+          type="button"
+        >
+          FR
+        </button>
+      </div>
 
-  return (
-    <section className="glass-card action-stack">
-      <div className="section-title">{t("agents.title")}</div>
-      {agentActions.map((action) => (
-        <article className={`agent-card ${action.tone}`} key={action.id}>
-          <div>
-            <span className="app-badge">{action.app}</span>
-            <h4>{t(action.titleKey)}</h4>
-            <p>{t(action.descriptionKey)}</p>
-          </div>
-          <button type="button">{t("agents.preview")}</button>
-        </article>
-      ))}
+      <div className="section-title" style={{ marginTop: "1.5rem" }}>
+        STT Language
+      </div>
+      <select
+        className="ghost-button"
+        value={sttLanguage}
+        onChange={(e) => setSttLanguage(e.target.value)}
+        aria-label="STT Language"
+      >
+        {STT_LANGUAGES.map((lang) => (
+          <option key={lang.code} value={lang.code}>
+            {lang.nativeName} ({lang.name})
+          </option>
+        ))}
+      </select>
     </section>
   );
 }
@@ -835,6 +894,8 @@ function CommandPalette() {
   const setCommandOpen = useDesktopStore((state) => state.setCommandOpen);
   const setActiveView = useDesktopStore((state) => state.setActiveView);
   const t = useT();
+  const [search, setSearch] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
   const commands: Array<{
     labelKey: LocaleKeys;
     hintKey: LocaleKeys;
@@ -851,16 +912,24 @@ function CommandPalette() {
       action: () => setActiveView("history"),
     },
     {
-      labelKey: "palette.agentCenter",
-      hintKey: "palette.agentCenterHint",
-      action: () => setActiveView("agents"),
-    },
-    {
       labelKey: "palette.privacySettings",
       hintKey: "palette.privacySettingsHint",
       action: () => setActiveView("settings"),
     },
   ];
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const filtered = commands.filter((cmd) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      t(cmd.labelKey).toLowerCase().includes(q) ||
+      t(cmd.hintKey).toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div
@@ -875,24 +944,51 @@ function CommandPalette() {
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="palette-input">
-          ⌘K&nbsp;&nbsp; {t("palette.prompt")}
+          <span className="palette-prefix">⌘K</span>
+          <input
+            ref={inputRef}
+            className="palette-search"
+            type="text"
+            placeholder={t("palette.searchPlaceholder")}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
         <div className="command-list">
-          {commands.map((command) => (
-            <button
-              key={command.labelKey}
-              onClick={() => {
-                command.action();
-                setCommandOpen(false);
-              }}
-              type="button"
-            >
-              <span>{t(command.labelKey)}</span>
-              <small>{t(command.hintKey)}</small>
-            </button>
-          ))}
+          {filtered.length === 0 ? (
+            <p className="palette-no-results">{t("palette.noResults")}</p>
+          ) : (
+            filtered.map((command) => (
+              <button
+                key={command.labelKey}
+                onClick={() => {
+                  command.action();
+                  setCommandOpen(false);
+                }}
+                type="button"
+              >
+                <span>{t(command.labelKey)}</span>
+                <small>{t(command.hintKey)}</small>
+              </button>
+            ))
+          )}
         </div>
       </section>
+    </div>
+  );
+}
+
+function ToastContainer() {
+  const toasts = useDesktopStore((state) => state.toasts);
+  const t = useT();
+  if (toasts.length === 0) return null;
+  return (
+    <div className="toast-container">
+      {toasts.map((toast) => (
+        <div key={toast.id} className="toast">
+          {t(toast.message as LocaleKeys)}
+        </div>
+      ))}
     </div>
   );
 }

@@ -433,7 +433,7 @@ kbd {
 
 .workspace-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   padding: 18px;
 }
@@ -909,4 +909,88 @@ kbd {
   );
   border-color: rgba(131, 103, 255, 0.46);
   box-shadow: inset 0 0 28px rgba(131, 103, 255, 0.08);
+}
+
+/* ── Toast System ────────────────────────────────────────────── */
+
+.toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  padding: 12px 20px;
+  border-radius: 14px;
+  color: var(--text);
+  background:
+    linear-gradient(
+      135deg,
+      rgba(131, 103, 255, 0.18),
+      rgba(25, 216, 255, 0.12)
+    ),
+    var(--panel-strong);
+  border: 1px solid rgba(131, 103, 255, 0.32);
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.4),
+    0 0 24px rgba(25, 216, 255, 0.12);
+  backdrop-filter: blur(18px);
+  font-size: 13px;
+  font-weight: 650;
+  animation: toast-in 300ms ease forwards;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ── Command Palette Search ──────────────────────────────────── */
+
+.palette-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.palette-prefix {
+  color: var(--muted);
+  font-weight: 800;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.palette-search {
+  flex: 1;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  padding: 0;
+}
+
+.palette-search::placeholder {
+  color: var(--subtle);
+}
+
+.palette-no-results {
+  padding: 18px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
 }

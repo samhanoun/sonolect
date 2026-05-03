@@ -28,7 +28,6 @@ describe("desktop futuristic design shell", () => {
       "editor.eyebrow",
       "editor.transformCta",
       "privacy.title",
-      "agents.title",
       "topbar.localFirst",
     ]) {
       assert.match(mainSource, new RegExp(requiredKey));
@@ -42,7 +41,6 @@ describe("desktop futuristic design shell", () => {
       "Transcription éditable",
       "Transformer avec Sonolect",
       "Confidentialité",
-      "Actions agentiques",
       "Local-first",
     ]) {
       assert.match(frSource, new RegExp(requiredText));
@@ -56,7 +54,6 @@ describe("desktop futuristic design shell", () => {
       "Editable transcription",
       "Transform with Sonolect",
       "Privacy",
-      "Agentic actions",
       "Local-first",
     ]) {
       assert.match(enSource, new RegExp(requiredText));
