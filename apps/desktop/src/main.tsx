@@ -35,7 +35,7 @@ type RecordingState =
   | "uploading"
   | "completed"
   | "error";
-type ViewId = "today" | "history" | "settings";
+type ViewId = "home" | "settings";
 
 type VoiceCaptureResult = VoiceCaptureMetadata & {
   objectUrl: string;
@@ -52,7 +52,7 @@ type DesktopState = {
   recordingState: RecordingState;
   activeView: ViewId;
   privacyLevel: PrivacyLevel;
-  activeSessionId: string;
+  activeSessionId: string | null;
   transcript: string;
   transforming: boolean;
   toasts: Toast[];
@@ -76,6 +76,7 @@ type DesktopState = {
   loadTranscriptHistory: () => Promise<void>;
   selectTranscriptSession: (sessionId: string) => Promise<void>;
   setActiveSession: (sessionId: string, transcript: string) => void;
+  clearActiveSession: () => void;
   setTranscript: (value: string) => void;
   addToast: (message: string) => void;
   transformTranscript: () => void;
@@ -121,10 +122,10 @@ function stopActiveStream() {
 const useDesktopStore = create<DesktopState>((set, get) => ({
   commandOpen: false,
   recordingState: "idle",
-  activeView: "today",
+  activeView: "home",
   privacyLevel:
     (loadSettings(SETTINGS_KEYS.privacyLevel) as PrivacyLevel) || "local",
-  activeSessionId: sessions[0]?.id ?? "session-1",
+  activeSessionId: null,
   transcript: "",
   transcriptHistory: sessions,
   transcriptHistorySource: "offline",
@@ -306,14 +307,11 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
         apiUrl: API_URL,
         token: API_TOKEN,
       });
-      const activeSession = history.items[0];
-      set((state) => ({
+      set(() => ({
         transcriptHistory: history.items,
         transcriptHistorySource: history.source,
         transcriptHistoryLoading: false,
         transcriptHistoryError: undefined,
-        activeSessionId: activeSession?.id ?? state.activeSessionId,
-        transcript: activeSession?.transcript ?? state.transcript,
       }));
     } catch (error) {
       set({
@@ -330,7 +328,10 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
       (item) => item.id === sessionId,
     );
     if (fallback) {
-      set({ activeSessionId: fallback.id, transcript: fallback.transcript });
+      set({
+        activeSessionId: fallback.id,
+        transcript: fallback.transcript,
+      });
     }
     try {
       const detail = await fetchTranscriptDetail(sessionId, {
@@ -356,6 +357,7 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
   },
   setActiveSession: (sessionId, transcript) =>
     set({ activeSessionId: sessionId, transcript }),
+  clearActiveSession: () => set({ activeSessionId: null, transcript: "" }),
   setTranscript: (value) => set({ transcript: value }),
   addToast: (message) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -368,21 +370,17 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
     const { transforming, transcript, addToast } = get();
     if (transforming || !transcript.trim()) return;
     set({ transforming: true });
-    // Local text transformation
     const cleaned = transcript
       .replace(/[ \t]+/g, " ")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
-    // Split into sentences and capitalize first letter of each
     const sentences = cleaned
       .split(/(?<=[.!?])\s+/)
       .map((s) => s.charAt(0).toUpperCase() + s.slice(1));
-    // Group into paragraphs (every 3 sentences)
     const paragraphs: string[] = [];
     for (let i = 0; i < sentences.length; i += 3) {
       paragraphs.push(sentences.slice(i, i + 3).join(" "));
     }
-    // Generate title from first few words
     const firstWords = cleaned.split(/\s+/).slice(0, 6).join(" ");
     const title = `# ${firstWords}${firstWords.length < cleaned.length ? "…" : ""}`;
     const transformed = `${title}\n\n${paragraphs.join("\n\n")}`;
@@ -391,6 +389,8 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
   },
 }));
 
+/* ── App Shell ───────────────────────────────────────────────── */
+
 function App() {
   const commandOpen = useDesktopStore((state) => state.commandOpen);
   const setCommandOpen = useDesktopStore((state) => state.setCommandOpen);
@@ -398,15 +398,6 @@ function App() {
   const loadTranscriptHistory = useDesktopStore(
     (state) => state.loadTranscriptHistory,
   );
-  const t = useT();
-
-  // Set initial transcript based on locale
-  useEffect(() => {
-    const store = useDesktopStore.getState();
-    if (!store.transcript) {
-      store.setTranscript(t("initialTranscript"));
-    }
-  }, [t]);
 
   useEffect(() => {
     void loadTranscriptHistory();
@@ -471,12 +462,7 @@ function App() {
       <div className="ambient-grid" aria-hidden="true" />
       <div className="signal-rings" aria-hidden="true" />
       <Sidebar />
-      <section className="workspace" aria-label={t("workspace.ariaLabel")}>
-        <TopBar />
-        <div className="workspace-grid">
-          <TranscriptEditor />
-        </div>
-      </section>
+      <WorkspaceRouter />
       <VoiceRecorderPill />
       {commandOpen ? <CommandPalette /> : null}
       <ToastContainer />
@@ -484,35 +470,45 @@ function App() {
   );
 }
 
-function Sidebar() {
+/* ── Workspace Router ────────────────────────────────────────── */
+
+function WorkspaceRouter() {
   const activeView = useDesktopStore((state) => state.activeView);
   const activeSessionId = useDesktopStore((state) => state.activeSessionId);
-  const transcriptHistory = useDesktopStore((state) => state.transcriptHistory);
-  const transcriptHistorySource = useDesktopStore(
-    (state) => state.transcriptHistorySource,
+  const t = useT();
+
+  return (
+    <section className="workspace" aria-label={t("workspace.ariaLabel")}>
+      <TopBar />
+      {activeView === "settings" ? (
+        <div className="workspace-grid">
+          <SettingsPrivacy />
+        </div>
+      ) : activeSessionId ? (
+        <div className="workspace-grid">
+          <TranscriptDetail />
+        </div>
+      ) : (
+        <HomeDashboard />
+      )}
+    </section>
   );
-  const transcriptHistoryLoading = useDesktopStore(
-    (state) => state.transcriptHistoryLoading,
-  );
-  const transcriptHistoryError = useDesktopStore(
-    (state) => state.transcriptHistoryError,
-  );
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────── */
+
+function Sidebar() {
+  const activeView = useDesktopStore((state) => state.activeView);
   const setActiveView = useDesktopStore((state) => state.setActiveView);
-  const selectTranscriptSession = useDesktopStore(
-    (state) => state.selectTranscriptSession,
+  const clearActiveSession = useDesktopStore(
+    (state) => state.clearActiveSession,
   );
   const t = useT();
 
-  const navItems: Array<{ id: ViewId; labelKey: LocaleKeys; count?: number }> =
-    [
-      { id: "today", labelKey: "nav.today", count: transcriptHistory.length },
-      {
-        id: "history",
-        labelKey: "nav.history",
-        count: transcriptHistory.length,
-      },
-      { id: "settings", labelKey: "nav.settings" },
-    ];
+  const navItems: Array<{ id: ViewId; labelKey: LocaleKeys }> = [
+    { id: "home", labelKey: "nav.home" },
+    { id: "settings", labelKey: "nav.settings" },
+  ];
 
   return (
     <aside className="sidebar">
@@ -536,58 +532,83 @@ function Sidebar() {
         </span>
       </button>
 
-      <nav className="nav-list" aria-label="Navigation principale">
+      <nav className="nav-list" aria-label="Main navigation">
         {navItems.map((item) => (
           <button
             className={activeView === item.id ? "nav-item active" : "nav-item"}
             key={item.id}
-            onClick={() => setActiveView(item.id)}
+            onClick={() => {
+              setActiveView(item.id);
+              if (item.id === "home") clearActiveSession();
+            }}
             type="button"
           >
             <span>{t(item.labelKey)}</span>
-            {typeof item.count === "number" ? (
-              <span className="pill">{item.count}</span>
-            ) : null}
           </button>
         ))}
       </nav>
 
-      <div className="history-block">
-        <div className="section-title">
-          {t("sidebar.lastDictations")} ·{" "}
-          {transcriptHistorySource === "api" ? "API" : "offline"}
-        </div>
-        {transcriptHistoryLoading ? (
-          <p className="history-helper">{t("sidebar.loadingHistory")}</p>
-        ) : null}
-        {transcriptHistoryError ? (
-          <p className="history-helper error">{transcriptHistoryError}</p>
-        ) : null}
-        {transcriptHistory.map((session) => (
-          <button
-            className={
-              activeSessionId === session.id
-                ? "history-card selected"
-                : "history-card"
-            }
-            key={session.id}
-            onClick={() => {
-              setActiveView("history");
-              void selectTranscriptSession(session.id);
-            }}
-            type="button"
-          >
-            <span className="history-title">{session.title}</span>
-            <span className="history-meta">
-              {session.timestamp} · {session.duration}
-            </span>
-            <span className="history-status">{session.metadata}</span>
-          </button>
-        ))}
-      </div>
+      <SidebarHistoryList />
     </aside>
   );
 }
+
+function SidebarHistoryList() {
+  const transcriptHistory = useDesktopStore((state) => state.transcriptHistory);
+  const transcriptHistorySource = useDesktopStore(
+    (state) => state.transcriptHistorySource,
+  );
+  const transcriptHistoryLoading = useDesktopStore(
+    (state) => state.transcriptHistoryLoading,
+  );
+  const transcriptHistoryError = useDesktopStore(
+    (state) => state.transcriptHistoryError,
+  );
+  const activeSessionId = useDesktopStore((state) => state.activeSessionId);
+  const selectTranscriptSession = useDesktopStore(
+    (state) => state.selectTranscriptSession,
+  );
+  const setActiveView = useDesktopStore((state) => state.setActiveView);
+  const t = useT();
+
+  return (
+    <div className="history-block">
+      <div className="section-title">
+        {t("sidebar.lastDictations")} ·{" "}
+        {transcriptHistorySource === "api" ? "API" : "offline"}
+      </div>
+      {transcriptHistoryLoading ? (
+        <p className="history-helper">{t("sidebar.loadingHistory")}</p>
+      ) : null}
+      {transcriptHistoryError ? (
+        <p className="history-helper error">{transcriptHistoryError}</p>
+      ) : null}
+      {transcriptHistory.map((session) => (
+        <button
+          className={
+            activeSessionId === session.id
+              ? "history-card selected"
+              : "history-card"
+          }
+          key={session.id}
+          onClick={() => {
+            setActiveView("home");
+            void selectTranscriptSession(session.id);
+          }}
+          type="button"
+        >
+          <span className="history-title">{session.title}</span>
+          <span className="history-meta">
+            {session.timestamp} · {session.duration}
+          </span>
+          <span className="history-status">{session.metadata}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ── TopBar ──────────────────────────────────────────────────── */
 
 function TopBar() {
   const privacyLevel = useDesktopStore((state) => state.privacyLevel);
@@ -620,17 +641,199 @@ function TopBar() {
   );
 }
 
-function TranscriptEditor() {
-  const transcript = useDesktopStore((state) => state.transcript);
+/* ── Home Dashboard (Whispr Flow inspired) ───────────────────── */
+
+function HomeDashboard() {
+  const transcriptHistory = useDesktopStore((state) => state.transcriptHistory);
+  const t = useT();
+
+  return (
+    <div className="home-dashboard">
+      <div className="home-main">
+        <div className="home-header">
+          <div>
+            <h2>{t("home.welcome")}</h2>
+            <p className="home-banner">{t("home.banner")}</p>
+          </div>
+        </div>
+        <TimelineFeed entries={transcriptHistory} />
+      </div>
+      <div className="stats-rail">
+        <StatsCard entries={transcriptHistory} />
+      </div>
+    </div>
+  );
+}
+
+/* ── Timeline Feed ───────────────────────────────────────────── */
+
+function groupByDate(entries: TranscriptSession[]) {
+  const groups: Map<string, TranscriptSession[]> = new Map();
+  for (const entry of entries) {
+    // Use updatedAt for real grouping, fall back to timestamp label
+    const dateObj = new Date(entry.updatedAt);
+    const dateKey = Number.isNaN(dateObj.getTime())
+      ? entry.timestamp
+      : dateObj.toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        });
+    const group = groups.get(dateKey);
+    if (group) {
+      group.push(entry);
+    } else {
+      groups.set(dateKey, [entry]);
+    }
+  }
+  return groups;
+}
+
+function extractTime(entry: TranscriptSession) {
+  const dateObj = new Date(entry.updatedAt);
+  if (Number.isNaN(dateObj.getTime())) return entry.timestamp;
+  return dateObj.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function TimelineFeed({ entries }: { entries: TranscriptSession[] }) {
+  const selectTranscriptSession = useDesktopStore(
+    (state) => state.selectTranscriptSession,
+  );
+  const t = useT();
+
+  if (entries.length === 0) {
+    return <p className="home-banner">{t("home.noTranscripts")}</p>;
+  }
+
+  const groups = groupByDate(entries);
+
+  return (
+    <div className="timeline-feed">
+      {Array.from(groups.entries()).map(([dateLabel, items]) => (
+        <div className="timeline-group" key={dateLabel}>
+          <div className="timeline-date-header">{dateLabel}</div>
+          {items.map((entry) => (
+            <button
+              className="timeline-entry"
+              key={entry.id}
+              onClick={() => void selectTranscriptSession(entry.id)}
+              type="button"
+            >
+              <span className="timeline-time">{extractTime(entry)}</span>
+              <div className="timeline-content">
+                <span className="timeline-title">{entry.title}</span>
+                <span className="timeline-preview">{entry.preview}</span>
+              </div>
+              <span className="timeline-duration">{entry.duration}</span>
+            </button>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Stats Card ──────────────────────────────────────────────── */
+
+function StatsCard({ entries }: { entries: TranscriptSession[] }) {
+  const t = useT();
+
+  const stats = useMemo(() => {
+    let totalWords = 0;
+    let totalDurationMs = 0;
+    const datesSet = new Set<string>();
+
+    for (const entry of entries) {
+      const words = entry.transcript.trim().split(/\s+/).filter(Boolean).length;
+      totalWords += words;
+
+      // Parse duration string like "2m 18s" or "48s"
+      const mMatch = entry.duration.match(/(\d+)m/);
+      const sMatch = entry.duration.match(/(\d+)s/);
+      const ms =
+        (mMatch?.[1] ? parseInt(mMatch[1], 10) * 60000 : 0) +
+        (sMatch?.[1] ? parseInt(sMatch[1], 10) * 1000 : 0);
+      totalDurationMs += ms;
+
+      const dateObj = new Date(entry.updatedAt);
+      if (!Number.isNaN(dateObj.getTime())) {
+        datesSet.add(dateObj.toISOString().slice(0, 10));
+      }
+    }
+
+    const wpm =
+      totalDurationMs > 0
+        ? Math.round(totalWords / (totalDurationMs / 60000))
+        : 0;
+
+    // Calculate streak (consecutive days ending today or most recent)
+    const sortedDates = Array.from(datesSet).sort().reverse();
+    let streak = 0;
+    if (sortedDates.length > 0) {
+      const first = sortedDates[0] as string;
+      let cursor = new Date(first);
+      for (const d of sortedDates) {
+        const diff = Math.round(
+          (cursor.getTime() - new Date(d).getTime()) / 86400000,
+        );
+        if (diff <= 1) {
+          streak++;
+          cursor = new Date(d);
+        } else {
+          break;
+        }
+      }
+    }
+
+    return { totalWords, wpm, streak };
+  }, [entries]);
+
+  return (
+    <div className="stats-card glass-card">
+      <div className="section-title">{t("stats.title")}</div>
+      <div className="stats-grid">
+        <div className="stat-item">
+          <span className="stat-value">
+            {stats.totalWords >= 1000
+              ? `${(stats.totalWords / 1000).toFixed(1)}K`
+              : stats.totalWords}
+          </span>
+          <span className="stat-label">{t("stats.totalWords")}</span>
+        </div>
+        <div className="stat-item">
+          <span className="stat-value">{stats.wpm}</span>
+          <span className="stat-label">{t("stats.wpm")}</span>
+        </div>
+        <div className="stat-item">
+          <span className="stat-value">{stats.streak}</span>
+          <span className="stat-label">{t("stats.dayStreak")}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Transcript Detail (replaces editor panel) ───────────────── */
+
+function TranscriptDetail() {
   const activeSessionId = useDesktopStore((state) => state.activeSessionId);
+  const transcript = useDesktopStore((state) => state.transcript);
   const transcriptHistory = useDesktopStore((state) => state.transcriptHistory);
   const setTranscript = useDesktopStore((state) => state.setTranscript);
   const transforming = useDesktopStore((state) => state.transforming);
   const transformTranscript = useDesktopStore(
     (state) => state.transformTranscript,
   );
+  const clearActiveSession = useDesktopStore(
+    (state) => state.clearActiveSession,
+  );
   const addToast = useDesktopStore((state) => state.addToast);
   const t = useT();
+
   const activeSession = transcriptHistory.find(
     (session) => session.id === activeSessionId,
   );
@@ -659,6 +862,13 @@ function TranscriptEditor() {
 
   return (
     <section className="editor-panel">
+      <button
+        className="ghost-button back-button"
+        onClick={clearActiveSession}
+        type="button"
+      >
+        {t("home.backToTimeline")}
+      </button>
       <div className="panel-header">
         <div>
           <p className="eyebrow">{t("editor.eyebrow")}</p>
@@ -670,15 +880,6 @@ function TranscriptEditor() {
             </p>
           ) : null}
         </div>
-      </div>
-
-      <div className="voice-command-strip" aria-label="Statut du flux vocal">
-        <span className="neural-orb" aria-hidden="true" />
-        <div>
-          <strong>{t("editor.voiceCanvas")}</strong>
-          <small>{t("editor.voiceCanvasSubtitle")}</small>
-        </div>
-        <span className="latency-chip">38 ms</span>
       </div>
 
       <div className="hologram-frame">
@@ -714,6 +915,8 @@ function TranscriptEditor() {
     </section>
   );
 }
+
+/* ── Settings ────────────────────────────────────────────────── */
 
 function SettingsPrivacy() {
   const privacyLevel = useDesktopStore((state) => state.privacyLevel);
@@ -794,13 +997,14 @@ function SettingsPrivacy() {
   );
 }
 
+/* ── VoiceRecorderPill ───────────────────────────────────────── */
+
 function VoiceRecorderPill() {
   const recordingState = useDesktopStore((state) => state.recordingState);
   const voiceCapture = useDesktopStore((state) => state.voiceCapture);
   const voiceError = useDesktopStore((state) => state.voiceError);
   const toggleRecording = useDesktopStore((state) => state.toggleRecording);
   const resetVoiceCapture = useDesktopStore((state) => state.resetVoiceCapture);
-  const addToast = useDesktopStore((state) => state.addToast);
   const t = useT();
   const [elapsed, setElapsed] = React.useState(0);
 
@@ -890,60 +1094,6 @@ function VoiceRecorderPill() {
   );
 }
 
-function voiceStateCopy(
-  state: RecordingState,
-  t: (key: LocaleKeys) => string,
-  capture?: VoiceCaptureResult,
-  error?: string,
-) {
-  switch (state) {
-    case "requesting-permission":
-      return {
-        eyebrow: t("voice.permission.eyebrow"),
-        title: t("voice.permission.title"),
-        detail: t("voice.permission.detail"),
-      };
-    case "recording":
-      return {
-        eyebrow: t("voice.recording.eyebrow"),
-        title: t("voice.recording.title"),
-        detail: t("voice.recording.detail"),
-      };
-    case "uploading":
-      return {
-        eyebrow: t("voice.uploading.eyebrow"),
-        title: t("voice.uploading.title"),
-        detail: isVoiceApiConfigured()
-          ? t("voice.uploading.detailConfigured")
-          : t("voice.uploading.detailOffline"),
-      };
-    case "completed":
-      return {
-        eyebrow:
-          capture?.api.status === "offline"
-            ? t("voice.completed.eyebrowOffline")
-            : t("voice.completed.eyebrow"),
-        title:
-          capture?.api.status === "offline"
-            ? t("voice.completed.titleOffline")
-            : t("voice.completed.title"),
-        detail: capture?.api.message ?? t("voice.completed.detailFallback"),
-      };
-    case "error":
-      return {
-        eyebrow: t("voice.error.eyebrow"),
-        title: t("voice.error.title"),
-        detail: error ?? t("voice.error.detailFallback"),
-      };
-    default:
-      return {
-        eyebrow: t("voice.default.eyebrow"),
-        title: t("voice.default.title"),
-        detail: t("voice.default.detail"),
-      };
-  }
-}
-
 function Waveform({ active }: { active: boolean }) {
   return (
     <div className={active ? "waveform active" : "waveform"} aria-hidden="true">
@@ -954,9 +1104,14 @@ function Waveform({ active }: { active: boolean }) {
   );
 }
 
+/* ── Command Palette ─────────────────────────────────────────── */
+
 function CommandPalette() {
   const setCommandOpen = useDesktopStore((state) => state.setCommandOpen);
   const setActiveView = useDesktopStore((state) => state.setActiveView);
+  const clearActiveSession = useDesktopStore(
+    (state) => state.clearActiveSession,
+  );
   const t = useT();
   const [search, setSearch] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -973,7 +1128,10 @@ function CommandPalette() {
     {
       labelKey: "palette.openHistory",
       hintKey: "palette.openHistoryHint",
-      action: () => setActiveView("history"),
+      action: () => {
+        setActiveView("home");
+        clearActiveSession();
+      },
     },
     {
       labelKey: "palette.privacySettings",
@@ -1042,6 +1200,8 @@ function CommandPalette() {
   );
 }
 
+/* ── Toasts ──────────────────────────────────────────────────── */
+
 function ToastContainer() {
   const toasts = useDesktopStore((state) => state.toasts);
   const t = useT();
@@ -1056,6 +1216,8 @@ function ToastContainer() {
     </div>
   );
 }
+
+/* ── Mount ───────────────────────────────────────────────────── */
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

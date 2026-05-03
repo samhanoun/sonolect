@@ -4,6 +4,9 @@ export const en = {
   "nav.history": "History",
   "nav.agents": "Agents",
   "nav.settings": "Settings",
+  "nav.home": "Home",
+  "nav.snippets": "Snippets",
+  "nav.transforms": "Transforms",
 
   // Sidebar
   "sidebar.recordNow": "Record now",
@@ -18,6 +21,18 @@ export const en = {
   "topbar.cloudAssisted": "Cloud-assisted",
   "topbar.apiReady": "API ready",
   "topbar.offline": "Offline",
+
+  // Welcome / Home
+  "home.welcome": "Welcome back",
+  "home.banner": "Your voice-first workspace is ready.",
+  "home.noTranscripts": "No transcriptions yet. Press Record to get started.",
+  "home.backToTimeline": "← Back",
+
+  // Stats
+  "stats.title": "Insights",
+  "stats.totalWords": "total words",
+  "stats.wpm": "WPM",
+  "stats.dayStreak": "day streak",
 
   // Editor
   "editor.eyebrow": "Editable transcription",
