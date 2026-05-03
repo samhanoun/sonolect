@@ -156,6 +156,14 @@ export const en = {
   // Command palette search
   "palette.searchPlaceholder": "Search commands…",
   "palette.noResults": "No results",
+
+  // Recording pill
+  "pill.permitting": "Mic access…",
+  "pill.processing": "Processing…",
+  "pill.done": "Done",
+  "pill.error": "Error",
+  "pill.stop": "Stop",
+  "pill.again": "Again",
 } as const;
 
 export type LocaleKeys = keyof typeof en;

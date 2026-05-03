@@ -159,4 +159,12 @@ export const fr: Record<LocaleKeys, string> = {
   // Command palette search
   "palette.searchPlaceholder": "Rechercher des commandes…",
   "palette.noResults": "Aucun résultat",
+
+  // Recording pill
+  "pill.permitting": "Accès micro…",
+  "pill.processing": "Traitement…",
+  "pill.done": "Terminé",
+  "pill.error": "Erreur",
+  "pill.stop": "Stop",
+  "pill.again": "Relancer",
 };
