@@ -6,6 +6,9 @@ export const fr: Record<LocaleKeys, string> = {
   "nav.history": "Historique",
   "nav.agents": "Agents",
   "nav.settings": "Réglages",
+  "nav.home": "Accueil",
+  "nav.snippets": "Extraits",
+  "nav.transforms": "Transformations",
 
   // Sidebar
   "sidebar.recordNow": "Parler maintenant",
@@ -20,6 +23,19 @@ export const fr: Record<LocaleKeys, string> = {
   "topbar.cloudAssisted": "Cloud assisté",
   "topbar.apiReady": "API prête",
   "topbar.offline": "Offline",
+
+  // Welcome / Home
+  "home.welcome": "Bon retour",
+  "home.banner": "Votre espace voix-first est prêt.",
+  "home.noTranscripts":
+    "Aucune transcription pour le moment. Appuyez sur Enregistrer pour commencer.",
+  "home.backToTimeline": "← Retour",
+
+  // Stats
+  "stats.title": "Aperçu",
+  "stats.totalWords": "Mots au total",
+  "stats.wpm": "MPM",
+  "stats.dayStreak": "Jours consécutifs",
 
   // Editor
   "editor.eyebrow": "Transcription éditable",
