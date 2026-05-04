@@ -1,4 +1,9 @@
 import { createAuthHeaders } from "./localDevAuth";
+import {
+  transcribeWithDesktopWhisper,
+  type DesktopWhisperResult,
+} from "./desktopWhisper";
+import type { TranscriptSegment } from "./segmentEditor";
 
 export type VoiceCaptureMetadata = {
   durationMs: number;
@@ -19,6 +24,7 @@ type AudioJobResponse = {
 export type TranscriptJobResult = {
   jobId?: string;
   transcript?: string;
+  segments?: TranscriptSegment[];
   status: "submitted" | "completed" | "offline";
   message?: string;
 };
@@ -27,6 +33,11 @@ type SubmitCapturedAudioOptions = {
   apiUrl?: string;
   fetchImpl?: typeof fetch;
   language?: string;
+  desktopTranscriber?: (
+    audio: Blob,
+    metadata: VoiceCaptureMetadata,
+    language?: string,
+  ) => Promise<DesktopWhisperResult | undefined>;
 };
 
 const API_URL = import.meta.env?.VITE_SONOLECT_API_URL?.trim();
@@ -60,6 +71,18 @@ export async function submitCapturedAudio(
   metadata: VoiceCaptureMetadata,
   options: SubmitCapturedAudioOptions = {},
 ): Promise<TranscriptJobResult> {
+  const desktopResult = await (
+    options.desktopTranscriber ?? transcribeWithDesktopWhisper
+  )(audio, metadata, options.language).catch(() => undefined);
+  if (desktopResult) {
+    return {
+      status: "completed",
+      transcript: desktopResult.text.trim(),
+      segments: desktopResult.segments,
+      message: "Capture transcrite localement avec Whisper desktop.",
+    };
+  }
+
   const apiUrl = options.apiUrl ?? API_URL;
   if (!apiUrl) {
     return offlineResult(
