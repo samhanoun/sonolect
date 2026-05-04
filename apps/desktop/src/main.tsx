@@ -25,6 +25,14 @@ import { useT, useI18nStore, type SupportedLocale } from "./i18n";
 import type { LocaleKeys } from "./locales/en";
 import { saveSettings, loadSettings, SETTINGS_KEYS } from "./persistence";
 import { STT_LANGUAGES } from "./sttLanguages";
+import {
+  assignSpeakerLabel,
+  mergeTranscriptSegments,
+  segmentsToText,
+  splitTranscriptSegment,
+  textToSegments,
+  type TranscriptSegment,
+} from "./segmentEditor";
 import "./styles.css";
 
 type PrivacyLevel = "local" | "cloud";
@@ -54,6 +62,8 @@ type DesktopState = {
   privacyLevel: PrivacyLevel;
   activeSessionId: string | null;
   transcript: string;
+  transcriptSegments: TranscriptSegment[];
+  selectedSegmentIds: string[];
   transforming: boolean;
   toasts: Toast[];
   transcriptHistory: TranscriptSession[];
@@ -78,6 +88,11 @@ type DesktopState = {
   setActiveSession: (sessionId: string, transcript: string) => void;
   clearActiveSession: () => void;
   setTranscript: (value: string) => void;
+  toggleSegmentSelection: (segmentId: string) => void;
+  updateSegmentText: (segmentId: string, text: string) => void;
+  updateSegmentSpeaker: (segmentId: string, speaker: string) => void;
+  mergeSelectedSegments: () => void;
+  splitSelectedSegment: () => void;
   addToast: (message: string) => void;
   transformTranscript: () => void;
 };
@@ -114,6 +129,45 @@ function formatDuration(durationMs: number) {
     : `${seconds}s`;
 }
 
+function formatTimestamp(ms: number) {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function splitAtReadableMidpoint(text: string) {
+  const trimmed = text.trim();
+  if (trimmed.length < 2) return 0;
+  const midpoint = Math.floor(trimmed.length / 2);
+  const after = trimmed.indexOf(" ", midpoint);
+  const before = trimmed.lastIndexOf(" ", midpoint);
+  if (after > 0 && after < trimmed.length - 1) return after;
+  if (before > 0 && before < trimmed.length - 1) return before;
+  return midpoint;
+}
+
+function syncTranscriptText(transcript: string) {
+  return {
+    transcript,
+    transcriptSegments: textToSegments(transcript),
+    selectedSegmentIds: [],
+  };
+}
+
+function syncSegments(
+  transcriptSegments: TranscriptSegment[],
+  selectedSegmentIds: string[],
+) {
+  return {
+    transcriptSegments,
+    transcript: segmentsToText(transcriptSegments),
+    selectedSegmentIds: selectedSegmentIds.filter((id) =>
+      transcriptSegments.some((segment) => segment.id === id),
+    ),
+  };
+}
+
 function stopActiveStream() {
   activeStream?.getTracks().forEach((track) => track.stop());
   activeStream = undefined;
@@ -127,6 +181,8 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
     (loadSettings(SETTINGS_KEYS.privacyLevel) as PrivacyLevel) || "local",
   activeSessionId: null,
   transcript: "",
+  transcriptSegments: [],
+  selectedSegmentIds: [],
   transcriptHistory: sessions,
   transcriptHistorySource: "offline",
   transcriptHistoryLoading: false,
@@ -238,22 +294,43 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
         void submitCapturedAudio(blob, metadata)
           .then((api) => {
             const objectUrl = URL.createObjectURL(blob);
+            const completedAt = new Date().toISOString();
             const capture: VoiceCaptureResult = {
               ...metadata,
               objectUrl,
-              completedAt: new Date().toISOString(),
+              completedAt,
               api,
             };
             const fallbackTranscript =
               api.status === "offline"
                 ? `\n\n[${formatDuration(metadata.durationMs)} · ${metadata.mimeType} · ${Math.round(metadata.sizeBytes / 1024)} KB]`
                 : `\n\n[Job ${api.jobId ?? "pending"} · ${formatDuration(metadata.durationMs)}]`;
-            set((state) => ({
-              recordingState: "completed",
-              voiceCapture: capture,
-              voiceError: undefined,
-              transcript: `${state.transcript}${api.transcript ? `\n\n${api.transcript}` : fallbackTranscript}`,
-            }));
+            set((state) => {
+              const nextBaseState = {
+                recordingState: "completed" as const,
+                voiceCapture: capture,
+                voiceError: undefined,
+              };
+              if (api.segments?.length) {
+                const captureSegments = api.segments.map((segment, index) => ({
+                  ...segment,
+                  id: `capture-${completedAt}-${index + 1}-${segment.id}`,
+                }));
+                return {
+                  ...nextBaseState,
+                  ...syncSegments(
+                    [...state.transcriptSegments, ...captureSegments],
+                    [],
+                  ),
+                };
+              }
+              return {
+                ...nextBaseState,
+                ...syncTranscriptText(
+                  `${state.transcript}${api.transcript ? `\n\n${api.transcript}` : fallbackTranscript}`,
+                ),
+              };
+            });
           })
           .catch((error: unknown) => {
             set({
@@ -330,7 +407,7 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
     if (fallback) {
       set({
         activeSessionId: fallback.id,
-        transcript: fallback.transcript,
+        ...syncTranscriptText(fallback.transcript),
       });
     }
     try {
@@ -341,7 +418,7 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
       if (detail) {
         set((state) => ({
           activeSessionId: detail.id,
-          transcript: detail.transcript,
+          ...syncTranscriptText(detail.transcript),
           transcriptHistory: state.transcriptHistory.map((item) =>
             item.id === detail.id ? detail : item,
           ),
@@ -356,9 +433,65 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
     }
   },
   setActiveSession: (sessionId, transcript) =>
-    set({ activeSessionId: sessionId, transcript }),
-  clearActiveSession: () => set({ activeSessionId: null, transcript: "" }),
-  setTranscript: (value) => set({ transcript: value }),
+    set({ activeSessionId: sessionId, ...syncTranscriptText(transcript) }),
+  clearActiveSession: () =>
+    set({
+      activeSessionId: null,
+      transcript: "",
+      transcriptSegments: [],
+      selectedSegmentIds: [],
+    }),
+  setTranscript: (value) => set(syncTranscriptText(value)),
+  toggleSegmentSelection: (segmentId) =>
+    set((state) => ({
+      selectedSegmentIds: state.selectedSegmentIds.includes(segmentId)
+        ? state.selectedSegmentIds.filter((id) => id !== segmentId)
+        : [...state.selectedSegmentIds, segmentId],
+    })),
+  updateSegmentText: (segmentId, text) =>
+    set((state) =>
+      syncSegments(
+        state.transcriptSegments.map((segment) =>
+          segment.id === segmentId ? { ...segment, text } : segment,
+        ),
+        state.selectedSegmentIds,
+      ),
+    ),
+  updateSegmentSpeaker: (segmentId, speaker) =>
+    set((state) =>
+      syncSegments(
+        state.transcriptSegments.map((segment) =>
+          segment.id === segmentId
+            ? assignSpeakerLabel(segment, speaker)
+            : segment,
+        ),
+        state.selectedSegmentIds,
+      ),
+    ),
+  mergeSelectedSegments: () => {
+    const { transcriptSegments, selectedSegmentIds } = get();
+    if (selectedSegmentIds.length !== 2) return;
+    const merged = mergeTranscriptSegments(
+      transcriptSegments,
+      selectedSegmentIds[0]!,
+      selectedSegmentIds[1]!,
+    );
+    set(syncSegments(merged, []));
+  },
+  splitSelectedSegment: () => {
+    const { transcriptSegments, selectedSegmentIds } = get();
+    if (selectedSegmentIds.length !== 1) return;
+    const segment = transcriptSegments.find(
+      (item) => item.id === selectedSegmentIds[0],
+    );
+    if (!segment) return;
+    const split = splitTranscriptSegment(
+      transcriptSegments,
+      segment.id,
+      splitAtReadableMidpoint(segment.text),
+    );
+    set(syncSegments(split, []));
+  },
   addToast: (message) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     set((state) => ({ toasts: [...state.toasts, { id, message }] }));
@@ -384,7 +517,7 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
     const firstWords = cleaned.split(/\s+/).slice(0, 6).join(" ");
     const title = `# ${firstWords}${firstWords.length < cleaned.length ? "…" : ""}`;
     const transformed = `${title}\n\n${paragraphs.join("\n\n")}`;
-    set({ transcript: transformed, transforming: false });
+    set({ ...syncTranscriptText(transformed), transforming: false });
     addToast("toast.transformComplete");
   },
 }));
@@ -822,8 +955,27 @@ function StatsCard({ entries }: { entries: TranscriptSession[] }) {
 function TranscriptDetail() {
   const activeSessionId = useDesktopStore((state) => state.activeSessionId);
   const transcript = useDesktopStore((state) => state.transcript);
+  const transcriptSegments = useDesktopStore(
+    (state) => state.transcriptSegments,
+  );
+  const selectedSegmentIds = useDesktopStore(
+    (state) => state.selectedSegmentIds,
+  );
   const transcriptHistory = useDesktopStore((state) => state.transcriptHistory);
   const setTranscript = useDesktopStore((state) => state.setTranscript);
+  const toggleSegmentSelection = useDesktopStore(
+    (state) => state.toggleSegmentSelection,
+  );
+  const updateSegmentText = useDesktopStore((state) => state.updateSegmentText);
+  const updateSegmentSpeaker = useDesktopStore(
+    (state) => state.updateSegmentSpeaker,
+  );
+  const mergeSelectedSegments = useDesktopStore(
+    (state) => state.mergeSelectedSegments,
+  );
+  const splitSelectedSegment = useDesktopStore(
+    (state) => state.splitSelectedSegment,
+  );
   const transforming = useDesktopStore((state) => state.transforming);
   const transformTranscript = useDesktopStore(
     (state) => state.transformTranscript,
@@ -841,6 +993,14 @@ function TranscriptDetail() {
     () => transcript.trim().split(/\s+/).filter(Boolean).length,
     [transcript],
   );
+  const selectedSegmentIndexes = selectedSegmentIds
+    .map((id) => transcriptSegments.findIndex((segment) => segment.id === id))
+    .filter((index) => index >= 0)
+    .sort((a, b) => a - b);
+  const canMergeSegments =
+    selectedSegmentIndexes.length === 2 &&
+    selectedSegmentIndexes[1] === selectedSegmentIndexes[0]! + 1;
+  const canSplitSegment = selectedSegmentIds.length === 1;
 
   const handleCopy = useCallback(() => {
     void navigator.clipboard.writeText(transcript).then(() => {
@@ -891,6 +1051,87 @@ function TranscriptDetail() {
           value={transcript}
         />
       </div>
+
+      <section className="segment-editor" aria-label={t("segments.ariaLabel")}>
+        <div className="segment-toolbar">
+          <div>
+            <p className="section-title">{t("segments.title")}</p>
+            <p className="editor-meta">
+              {transcriptSegments.length} {t("segments.count")}
+            </p>
+          </div>
+          <div className="segment-actions">
+            <button
+              className="ghost-button"
+              disabled={!canMergeSegments}
+              onClick={mergeSelectedSegments}
+              type="button"
+            >
+              {t("segments.merge")}
+            </button>
+            <button
+              className="ghost-button"
+              disabled={!canSplitSegment}
+              onClick={splitSelectedSegment}
+              type="button"
+            >
+              {t("segments.split")}
+            </button>
+          </div>
+        </div>
+
+        <div className="segment-list">
+          {transcriptSegments.length === 0 ? (
+            <p className="editor-meta">{t("segments.empty")}</p>
+          ) : (
+            transcriptSegments.map((segment, index) => {
+              const selected = selectedSegmentIds.includes(segment.id);
+              return (
+                <article
+                  className={
+                    selected ? "segment-card selected" : "segment-card"
+                  }
+                  key={segment.id}
+                >
+                  <label className="segment-select">
+                    <input
+                      checked={selected}
+                      onChange={() => toggleSegmentSelection(segment.id)}
+                      type="checkbox"
+                    />
+                    <span>
+                      {t("segments.segment")} {index + 1} ·{" "}
+                      {formatTimestamp(segment.startMs)}–
+                      {formatTimestamp(segment.endMs)}
+                    </span>
+                  </label>
+                  <label className="segment-speaker">
+                    <span>{t("segments.speaker")}</span>
+                    <input
+                      aria-label={`${t("segments.speaker")} ${index + 1}`}
+                      onChange={(event) =>
+                        updateSegmentSpeaker(segment.id, event.target.value)
+                      }
+                      placeholder={t("segments.speakerPlaceholder")}
+                      type="text"
+                      value={segment.speaker ?? ""}
+                    />
+                  </label>
+                  <textarea
+                    aria-label={`${t("segments.textLabel")} ${index + 1}`}
+                    className="segment-textarea"
+                    onChange={(event) =>
+                      updateSegmentText(segment.id, event.target.value)
+                    }
+                    spellCheck="true"
+                    value={segment.text}
+                  />
+                </article>
+              );
+            })
+          )}
+        </div>
+      </section>
 
       <footer className="editor-footer">
         <span>

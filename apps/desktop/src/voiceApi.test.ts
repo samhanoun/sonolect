@@ -3,6 +3,88 @@ import { describe, it } from "node:test";
 import { submitCapturedAudio } from "./voiceApi";
 
 describe("desktop voice API client", () => {
+  it("uses in-app desktop Whisper before backend submission when available", async () => {
+    let fetchCalled = false;
+    const result = await submitCapturedAudio(
+      new Blob([new Uint8Array([1, 2, 3])], { type: "audio/webm" }),
+      { durationMs: 1200, mimeType: "audio/webm", sizeBytes: 3 },
+      {
+        apiUrl: "https://api.example.test",
+        fetchImpl: async () => {
+          fetchCalled = true;
+          throw new Error("backend should not be called");
+        },
+        language: "fr",
+        desktopTranscriber: async (_audio, metadata, language) => {
+          assert.equal(metadata.mimeType, "audio/webm");
+          assert.equal(language, "fr");
+          return {
+            text: " Bonjour Sonolect ",
+            language: "fr",
+            segments: [
+              {
+                id: "whisper-1",
+                text: "Bonjour Sonolect",
+                startMs: 0,
+                endMs: 1200,
+                speaker: "Speaker 1",
+              },
+            ],
+          };
+        },
+      },
+    );
+
+    assert.equal(fetchCalled, false);
+    assert.deepEqual(result, {
+      status: "completed",
+      transcript: "Bonjour Sonolect",
+      message: "Capture transcrite localement avec Whisper desktop.",
+      segments: [
+        {
+          id: "whisper-1",
+          text: "Bonjour Sonolect",
+          startMs: 0,
+          endMs: 1200,
+          speaker: "Speaker 1",
+        },
+      ],
+    });
+  });
+
+  it("falls back to the local API when desktop Whisper is unavailable", async () => {
+    const seen: string[] = [];
+    const result = await submitCapturedAudio(
+      new Blob([new Uint8Array([1, 2, 3])], { type: "audio/webm" }),
+      { durationMs: 1200, mimeType: "audio/webm", sizeBytes: 3 },
+      {
+        apiUrl: "http://localhost:4321",
+        desktopTranscriber: async () => {
+          throw new Error("Whisper command args are not configured");
+        },
+        fetchImpl: async (url: URL | RequestInfo) => {
+          seen.push(String(url));
+          if (seen.length === 1) {
+            return new Response(
+              JSON.stringify({ id: "job-2", status: "queued" }),
+              {
+                status: 201,
+              },
+            );
+          }
+          return new Response(JSON.stringify({ id: "job-2" }), { status: 200 });
+        },
+      },
+    );
+
+    assert.equal(result.status, "submitted");
+    assert.equal(result.jobId, "job-2");
+    assert.deepEqual(seen, [
+      "http://localhost:4321/audio/jobs",
+      "http://localhost:4321/audio/jobs/job-2/audio",
+    ]);
+  });
+
   it("creates an audio job then uploads the captured binary", async () => {
     const seen: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl = async (url: URL | RequestInfo, init?: RequestInit) => {

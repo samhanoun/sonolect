@@ -48,6 +48,18 @@ export const en = {
   "editor.transformCta": "Transform with Sonolect",
   "editor.textareaLabel": "Transcription editor",
 
+  // Segment editor
+  "segments.ariaLabel": "Transcript segment editor",
+  "segments.title": "Segments",
+  "segments.count": "segments",
+  "segments.merge": "Merge selected",
+  "segments.split": "Split selected",
+  "segments.empty": "Type transcript text to create editable segments.",
+  "segments.segment": "Segment",
+  "segments.speaker": "Speaker",
+  "segments.speakerPlaceholder": "Speaker label",
+  "segments.textLabel": "Segment text",
+
   // Privacy / Settings
   "privacy.title": "Privacy",
   "privacy.heading": "Voice control",

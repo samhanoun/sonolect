@@ -51,6 +51,19 @@ export const fr: Record<LocaleKeys, string> = {
   "editor.transformCta": "Transformer avec Sonolect",
   "editor.textareaLabel": "Éditeur de transcription",
 
+  // Segment editor
+  "segments.ariaLabel": "Éditeur de segments de transcription",
+  "segments.title": "Segments",
+  "segments.count": "segments",
+  "segments.merge": "Fusionner la sélection",
+  "segments.split": "Diviser la sélection",
+  "segments.empty":
+    "Saisissez une transcription pour créer des segments éditables.",
+  "segments.segment": "Segment",
+  "segments.speaker": "Intervenant",
+  "segments.speakerPlaceholder": "Libellé intervenant",
+  "segments.textLabel": "Texte du segment",
+
   // Privacy / Settings
   "privacy.title": "Confidentialité",
   "privacy.heading": "Contrôle de la voix",
