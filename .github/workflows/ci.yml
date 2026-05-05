@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 22]
+        node-version: [22, 24]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -113,6 +113,9 @@ jobs:
       - name: Check release readiness
         run: pnpm test:release-readiness
 
+      - name: Release readiness dry-run validation
+        run: pnpm release:dry-run
+
       - name: Check formatting
         run: pnpm format:check
 
@@ -153,7 +156,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build native installer bundle
-        run: pnpm --filter @sonolect/desktop tauri build --bundles ${{ matrix.bundles }}
+        run: pnpm --filter @sonolect/desktop tauri build --bundles ${{ matrix.bundles }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       - name: Validate macOS bundle
         if: runner.os == 'macOS'

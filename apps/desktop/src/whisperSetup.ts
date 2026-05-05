@@ -4,6 +4,61 @@ export type WhisperConfig = {
   modelName: string;
 };
 
+export type WhisperModelCatalogEntry = {
+  id: "tiny.en" | "base.en" | "small.en";
+  label: string;
+  filename: string;
+  sizeBytes: number;
+  downloadUrl: string;
+  recommended?: boolean;
+  description: string;
+};
+
+export type WhisperInstallPlatform = "darwin" | "linux" | "win32";
+
+export type WhisperInstallPlanInput = {
+  platform: WhisperInstallPlatform;
+  homeDir: string;
+  appDataDir?: string;
+  modelId?: WhisperModelCatalogEntry["id"];
+};
+
+export type WhisperInstallPlan = {
+  platform: WhisperInstallPlatform;
+  rootDir: string;
+  binDir: string;
+  modelsDir: string;
+  binaryPath: string;
+  modelPath: string;
+  model: WhisperModelCatalogEntry;
+  config: WhisperConfig;
+};
+
+export type WhisperAssetStatusState =
+  | "not-installed"
+  | "downloading"
+  | "ready"
+  | "invalid";
+
+export type WhisperAssetStatusInput = {
+  binaryExists?: boolean;
+  modelExists?: boolean;
+  downloading?: boolean;
+  invalidReason?: string;
+};
+
+export type WhisperAssetStatus = {
+  state: WhisperAssetStatusState;
+  ready: boolean;
+  message: string;
+};
+
+export type WhisperInstallerGuidance = {
+  summary: string;
+  steps: string[];
+  commandPreview: string;
+};
+
 export type WhisperValidationCode =
   | "missing-command"
   | "command-not-argv"
@@ -26,6 +81,40 @@ export const DEFAULT_WHISPER_CONFIG: WhisperConfig = {
   modelPath: "",
   modelName: "",
 };
+
+export const WHISPER_MODEL_CATALOG: WhisperModelCatalogEntry[] = [
+  {
+    id: "tiny.en",
+    label: "Tiny English",
+    filename: "ggml-tiny.en.bin",
+    sizeBytes: 77_681_171,
+    downloadUrl:
+      "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
+    description:
+      "Fastest local onboarding model for smoke tests and short notes.",
+  },
+  {
+    id: "base.en",
+    label: "Base English",
+    filename: "ggml-base.en.bin",
+    sizeBytes: 147_951_465,
+    downloadUrl:
+      "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+    recommended: true,
+    description:
+      "Recommended desktop default: good quality with a modest download.",
+  },
+  {
+    id: "small.en",
+    label: "Small English",
+    filename: "ggml-small.en.bin",
+    sizeBytes: 487_601_967,
+    downloadUrl:
+      "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin",
+    description:
+      "Higher quality local transcription for users with more disk/CPU budget.",
+  },
+];
 
 const AUDIO_PLACEHOLDERS = ["{audioPath}", "{audio}"];
 
@@ -106,6 +195,144 @@ export function getWhisperSetupStatus(
     ready: true,
     code: "ready",
     message: "Whisper command is ready to test with a local recording.",
+  };
+}
+
+function joinPath(...parts: string[]): string {
+  return parts
+    .map((part, index) => {
+      const normalized = part.replace(/\\/g, "/");
+      if (index === 0) return normalized.replace(/\/+$/g, "");
+      return normalized.replace(/^\/+|\/+$/g, "");
+    })
+    .filter(Boolean)
+    .join("/");
+}
+
+export function recommendedWhisperModel(): WhisperModelCatalogEntry {
+  const model =
+    WHISPER_MODEL_CATALOG.find((entry) => entry.recommended) ??
+    WHISPER_MODEL_CATALOG[0];
+  if (!model) {
+    throw new Error("Whisper model catalog is empty.");
+  }
+  return model;
+}
+
+export function getDefaultWhisperInstallPlan(
+  input: WhisperInstallPlanInput,
+): WhisperInstallPlan {
+  const model =
+    WHISPER_MODEL_CATALOG.find((entry) => entry.id === input.modelId) ??
+    recommendedWhisperModel();
+  const homeDir = input.homeDir.replace(/\\/g, "/").replace(/\/+$/g, "");
+  const appDataDir = input.appDataDir?.replace(/\\/g, "/").replace(/\/+$/g, "");
+  const rootDir =
+    input.platform === "darwin"
+      ? joinPath(
+          homeDir,
+          "Library",
+          "Application Support",
+          "Sonolect",
+          "whisper",
+        )
+      : input.platform === "win32"
+        ? joinPath(
+            appDataDir || joinPath(homeDir, "AppData", "Roaming"),
+            "Sonolect",
+            "whisper",
+          )
+        : joinPath(homeDir, ".local", "share", "sonolect", "whisper");
+  const binDir = joinPath(rootDir, "bin");
+  const modelsDir = joinPath(rootDir, "models");
+  const binaryPath = joinPath(
+    binDir,
+    input.platform === "win32" ? "whisper-cli.exe" : "whisper-cli",
+  );
+  const modelPath = joinPath(modelsDir, model.filename);
+  const config: WhisperConfig = {
+    command: [
+      binaryPath,
+      "--model",
+      "{model}",
+      "--file",
+      "{audioPath}",
+      "--output-json",
+    ],
+    modelPath,
+    modelName: model.id,
+  };
+
+  return {
+    platform: input.platform,
+    rootDir,
+    binDir,
+    modelsDir,
+    binaryPath,
+    modelPath,
+    model,
+    config,
+  };
+}
+
+export function getWhisperAssetStatus(
+  input: WhisperAssetStatusInput,
+): WhisperAssetStatus {
+  if (input.invalidReason) {
+    return {
+      state: "invalid",
+      ready: false,
+      message: `Whisper assets need attention: ${input.invalidReason}`,
+    };
+  }
+  if (input.downloading) {
+    return {
+      state: "downloading",
+      ready: false,
+      message: "Downloading Whisper assets…",
+    };
+  }
+  if (input.binaryExists && input.modelExists) {
+    return {
+      state: "ready",
+      ready: true,
+      message: "Whisper binary and model are installed locally.",
+    };
+  }
+  if (input.binaryExists) {
+    return {
+      state: "not-installed",
+      ready: false,
+      message: "Whisper model is missing.",
+    };
+  }
+  if (input.modelExists) {
+    return {
+      state: "not-installed",
+      ready: false,
+      message: "Whisper binary is missing.",
+    };
+  }
+  return {
+    state: "not-installed",
+    ready: false,
+    message: "Whisper binary and model are not installed yet.",
+  };
+}
+
+export function buildWhisperInstallerGuidance(
+  plan: WhisperInstallPlan,
+): WhisperInstallerGuidance {
+  return {
+    summary:
+      "Sonolect uses local whisper.cpp-compatible assets only: a small CLI binary plus a GGML model stored in app data.",
+    steps: [
+      `Create ${plan.binDir} and ${plan.modelsDir}.`,
+      `Install or copy a whisper.cpp CLI binary to ${plan.binaryPath}.`,
+      `Download ${plan.model.filename} (${plan.model.label}) from ${plan.model.downloadUrl} into ${plan.modelsDir}.`,
+      "No cloud speech-to-text is required; Sonolect passes recorded audio to the local command.",
+    ],
+    commandPreview: buildWhisperCommandPreview(plan.config),
   };
 }
 

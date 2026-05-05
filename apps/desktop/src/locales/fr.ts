@@ -105,6 +105,14 @@ export const fr: Record<LocaleKeys, string> = {
   "settings.whisper.status": "Statut",
   "settings.whisper.preview": "Aperçu",
   "settings.whisper.envValue": "Valeur env",
+  "settings.whisper.catalog": "Ressources locales recommandées",
+  "settings.whisper.recommendedModel": "Modèle à télécharger",
+  "settings.whisper.defaultBinary": "Chemin binaire par défaut",
+  "settings.whisper.defaultModel": "Chemin modèle par défaut",
+  "settings.whisper.downloadUrl": "Téléchargement du modèle",
+  "settings.whisper.usePlan": "Utiliser le modèle de commande recommandé",
+  "settings.whisper.planApplied":
+    "Modèle de commande Whisper recommandé appliqué. Ajoutez votre vrai chemin de modèle avant le test.",
   "settings.whisper.commandJsonInvalid":
     "Les arguments doivent être un tableau JSON de chaînes valide.",
   "settings.whisper.commandSaved": "Commande Whisper enregistrée localement.",

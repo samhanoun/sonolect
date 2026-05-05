@@ -36,8 +36,51 @@ describe("release and package readiness", () => {
   it("documents unsigned PR-safe signing and updater readiness", () => {
     assert.match(releaseDocs, /TAURI_SIGNING_PRIVATE_KEY/);
     assert.match(releaseDocs, /TAURI_UPDATER_PRIVATE_KEY/);
+    assert.match(releaseDocs, /latest\.json/);
+    assert.match(releaseDocs, /version/);
+    assert.match(releaseDocs, /pub_date/);
+    assert.match(releaseDocs, /signature/);
     assert.match(ciWorkflow, /Release package validation/);
     assert.doesNotMatch(ciWorkflow, /APPLE_CERTIFICATE:/);
+  });
+
+  it("configures updater metadata without committing signing secrets", () => {
+    assert.equal(
+      tauriConfig.bundle.createUpdaterArtifacts,
+      false,
+      "Default desktop builds stay unsigned/PR-safe; protected release jobs can opt in with --config.",
+    );
+    assert.ok(
+      tauriConfig.plugins?.updater,
+      "Tauri updater plugin config exists",
+    );
+    assert.match(tauriConfig.plugins.updater.pubkey, /^[A-Za-z0-9+/=]+$/);
+    assert.doesNotMatch(
+      Buffer.from(tauriConfig.plugins.updater.pubkey, "base64").toString(
+        "utf8",
+      ),
+      /PLACEHOLDER|TODO|SONOLECT_UPDATER_PUBLIC_KEY/i,
+    );
+    assert.ok(
+      tauriConfig.plugins.updater.endpoints.some((endpoint) =>
+        endpoint.includes("latest.json"),
+      ),
+    );
+    assert.doesNotMatch(
+      JSON.stringify(tauriConfig),
+      /PRIVATE_KEY|BEGIN [A-Z ]+ KEY/,
+    );
+  });
+
+  it("keeps release dry-run validation in CI secret-free for PRs", () => {
+    assert.equal(
+      rootPackage.scripts["release:dry-run"],
+      "pnpm test:release-readiness",
+    );
+    assert.match(ciWorkflow, /Release readiness dry-run validation/);
+    assert.match(ciWorkflow, /pnpm release:dry-run/);
+    assert.doesNotMatch(ciWorkflow, /TAURI_SIGNING_PRIVATE_KEY:/);
+    assert.doesNotMatch(ciWorkflow, /TAURI_UPDATER_PRIVATE_KEY:/);
   });
 
   it("validates macOS and Windows desktop package jobs in CI", () => {
@@ -46,5 +89,11 @@ describe("release and package readiness", () => {
     assert.match(ciWorkflow, /tauri build --bundles/);
     assert.match(ciWorkflow, /Validate macOS bundle/);
     assert.match(ciWorkflow, /Validate Windows installer/);
+  });
+
+  it("runs GitHub-hosted Node checks on active LTS/current versions", () => {
+    assert.doesNotMatch(ciWorkflow, /node-version:\s*20\b/);
+    assert.doesNotMatch(ciWorkflow, /node-version:\s*\[20,/);
+    assert.match(ciWorkflow, /node-version:\s*\[22, 24\]/);
   });
 });
