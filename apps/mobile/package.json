@@ -8,7 +8,7 @@
     "build": "echo \"Use EAS build for mobile\"",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo \"No mobile tests yet\""
+    "test": "pnpm dlx tsx@4.19.2 --test src/localApi.test.ts"
   },
   "dependencies": {
     "@sonolect/types": "workspace:*",

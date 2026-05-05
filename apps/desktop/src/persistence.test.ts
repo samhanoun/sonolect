@@ -17,8 +17,14 @@ const fakeLocalStorage = {
 (globalThis as any).localStorage = fakeLocalStorage;
 
 // Dynamic import so the module sees our polyfill
-const { saveSettings, loadSettings, SETTINGS_KEYS } =
-  await import("./persistence");
+const {
+  saveSettings,
+  loadSettings,
+  SETTINGS_KEYS,
+  saveTranscriptDraft,
+  loadTranscriptDraft,
+  clearTranscriptDraft,
+} = await import("./persistence");
 
 describe("persistence", () => {
   beforeEach(() => {
@@ -39,6 +45,29 @@ describe("persistence", () => {
     saveSettings(SETTINGS_KEYS.privacyLevel, "cloud");
     assert.equal(loadSettings(SETTINGS_KEYS.sttLanguage), "en");
     assert.equal(loadSettings(SETTINGS_KEYS.privacyLevel), "cloud");
+  });
+
+  it("saves, loads, and clears autosave drafts for crash recovery", () => {
+    const draft = {
+      activeSessionId: "session-1",
+      transcript: "Unsaved edit",
+      transcriptSegments: [
+        { id: "seg-1", text: "Unsaved edit", startMs: 0, endMs: 1000 },
+      ],
+      selectedSegmentIds: ["seg-1"],
+      savedAt: "2026-05-05T07:00:00.000Z",
+    };
+
+    saveTranscriptDraft(draft);
+    assert.deepEqual(loadTranscriptDraft(), draft);
+
+    clearTranscriptDraft();
+    assert.equal(loadTranscriptDraft(), null);
+  });
+
+  it("ignores corrupt autosave draft payloads", () => {
+    saveSettings(SETTINGS_KEYS.transcriptDraft, "{not-json");
+    assert.equal(loadTranscriptDraft(), null);
   });
 
   it("safe fallback when localStorage is unavailable", () => {
