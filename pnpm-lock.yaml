@@ -53,6 +53,9 @@ importers:
         specifier: ^5.0.2
         version: 5.0.12(@types/react@19.2.14)(react@19.2.5)(use-sync-external-store@1.6.0(react@19.2.5))
     devDependencies:
+      "@playwright/test":
+        specifier: ^1.49.1
+        version: 1.59.1
       "@tauri-apps/cli":
         specifier: ^2.2.0
         version: 2.11.0
@@ -1959,7 +1962,7 @@ packages:
       {
         integrity: sha512-+Lla7nYSiHZirgK+U/uYzsLv/X+HaJienbD5AKX1UQZHYfWaP+9uuQluRB4GrEVWF0GZ7vEVp/jzaOT9k/SQlg==,
       }
-    engines: { "0": node >=0.10.0 }
+    engines: { node: ">=0.10.0" }
 
   "@expo/cli@0.22.28":
     resolution:
@@ -2684,6 +2687,14 @@ packages:
         integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==,
       }
     engines: { node: ">=14" }
+
+  "@playwright/test@1.59.1":
+    resolution:
+      {
+        integrity: sha512-PG6q63nQg5c9rIi4/Z5lR5IVF7yU5MqmKaPOe0HSc0O2cX1fPi96sUQu5j7eo4gKCkB2AnNGoWt7y4/Xx3Kcqg==,
+      }
+    engines: { node: ">=18" }
+    hasBin: true
 
   "@protobufjs/aspromise@1.1.2":
     resolution:
@@ -5063,6 +5074,14 @@ packages:
         integrity: sha512-OO0pH2lK6a0hZnAdau5ItzHPI6pUlvI7jMVnxUQRtw4owF2wk8lOSabtGDCTP4Ggrg2MbGnWO9X8K1t4+fGMDw==,
       }
 
+  fsevents@2.3.2:
+    resolution:
+      {
+        integrity: sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==,
+      }
+    engines: { node: ^8.16.0 || ^10.6.0 || >=11.0.0 }
+    os: [darwin]
+
   fsevents@2.3.3:
     resolution:
       {
@@ -6664,6 +6683,22 @@ packages:
         integrity: sha512-/E57AYkoeQ25qkxMj5PBOVgF8Kiu/h7cYS30Z5+R7WaiCCBfLq58ZI/dSeaEKb9WVJV5n/03QwrN3IeWIFllvw==,
       }
     engines: { node: ">=6" }
+
+  playwright-core@1.59.1:
+    resolution:
+      {
+        integrity: sha512-HBV/RJg81z5BiiZ9yPzIiClYV/QMsDCKUyogwH9p3MCP6IYjUFu/MActgYAvK0oWyV9NlwM3GLBjADyWgydVyg==,
+      }
+    engines: { node: ">=18" }
+    hasBin: true
+
+  playwright@1.59.1:
+    resolution:
+      {
+        integrity: sha512-C8oWjPR3F81yljW9o5OxcWzfh6avkVwDD2VYdwIGqTkl+OGFISgypqzfu7dOe4QNLL2aqcWBmI3PMtLIK233lw==,
+      }
+    engines: { node: ">=18" }
+    hasBin: true
 
   plist@3.1.1:
     resolution:
@@ -10267,6 +10302,10 @@ snapshots:
   "@pkgjs/parseargs@0.11.0":
     optional: true
 
+  "@playwright/test@1.59.1":
+    dependencies:
+      playwright: 1.59.1
+
   "@protobufjs/aspromise@1.1.2": {}
 
   "@protobufjs/base64@1.1.2": {}
@@ -11857,6 +11896,9 @@ snapshots:
 
   fs.realpath@1.0.0: {}
 
+  fsevents@2.3.2:
+    optional: true
+
   fsevents@2.3.3:
     optional: true
 
@@ -12821,6 +12863,14 @@ snapshots:
   pkg-dir@3.0.0:
     dependencies:
       find-up: 3.0.0
+
+  playwright-core@1.59.1: {}
+
+  playwright@1.59.1:
+    dependencies:
+      playwright-core: 1.59.1
+    optionalDependencies:
+      fsevents: 2.3.2
 
   plist@3.1.1:
     dependencies:

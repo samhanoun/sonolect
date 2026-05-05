@@ -9,7 +9,8 @@
     "tauri": "tauri",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm dlx tsx@4.19.2 --test src/localDevAuth.test.ts src/transcriptHistory.test.ts src/voiceApi.test.ts src/desktopWhisper.test.ts src/segmentEditor.test.ts src/segmentEditorUi.test.ts src/transcriptExport.test.ts src/transcriptUndo.test.ts src/persistence.test.ts src/desktopDesign.test.ts src/sttLanguage.test.ts src/features.test.ts src/waveform.test.ts src/audioPlaybackUi.test.ts"
+    "test": "pnpm dlx tsx@4.19.2 --test src/localDevAuth.test.ts src/transcriptHistory.test.ts src/voiceApi.test.ts src/desktopWhisper.test.ts src/whisperSetup.test.ts src/segmentEditor.test.ts src/segmentEditorUi.test.ts src/transcriptExport.test.ts src/transcriptUndo.test.ts src/persistence.test.ts src/desktopDesign.test.ts src/sttLanguage.test.ts src/features.test.ts src/waveform.test.ts src/audioPlaybackUi.test.ts",
+    "e2e": "playwright test -c playwright.config.ts"
   },
   "dependencies": {
     "@sonolect/types": "workspace:*",
@@ -22,6 +23,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.1",
     "@tauri-apps/cli": "^2.2.0",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",

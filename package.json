@@ -10,6 +10,7 @@
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
+    "test:release-readiness": "node --test scripts/release-readiness.test.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

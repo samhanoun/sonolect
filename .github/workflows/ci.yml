@@ -51,6 +51,33 @@ jobs:
       - name: Test
         run: pnpm test
 
+  desktop-e2e:
+    name: Desktop Playwright E2E
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @sonolect/desktop exec playwright install --with-deps chromium
+
+      - name: Run desktop Playwright E2E
+        run: pnpm --filter @sonolect/desktop e2e
+
   config-validation:
     name: Config validation
     runs-on: ubuntu-latest
@@ -83,8 +110,94 @@ jobs:
             npx --yes yaml valid < "${file}"
           done
 
+      - name: Check release readiness
+        run: pnpm test:release-readiness
+
       - name: Check formatting
         run: pnpm format:check
+
+  release-package-validation:
+    name: Release package validation (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            bundles: dmg
+            artifact_glob: apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+          - os: windows-latest
+            bundles: nsis,msi
+            artifact_glob: apps/desktop/src-tauri/target/release/bundle/**/*.{msi,exe}
+    env:
+      # Optional: PR-safe unsigned builds pass without these secrets. Release maintainers can
+      # provide them on protected branches/tags to exercise Tauri signing/updater readiness.
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+      TAURI_UPDATER_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build native installer bundle
+        run: pnpm --filter @sonolect/desktop tauri build --bundles ${{ matrix.bundles }}
+
+      - name: Validate macOS bundle
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          artifacts=(apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg)
+          test ${#artifacts[@]} -gt 0
+          for artifact in "${artifacts[@]}"; do
+            test -s "${artifact}"
+            hdiutil verify "${artifact}"
+            codesign --verify --deep --strict "${artifact}" || echo "Unsigned DMG accepted for PR validation"
+          done
+
+      - name: Validate Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $artifacts = Get-ChildItem apps/desktop/src-tauri/target/release/bundle -Recurse -Include *.msi,*.exe
+          if ($artifacts.Count -eq 0) { throw "No Windows installers were produced" }
+          foreach ($artifact in $artifacts) {
+            if ($artifact.Length -le 0) { throw "Empty installer: $($artifact.FullName)" }
+            Get-AuthenticodeSignature $artifact.FullName | Format-List
+          }
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}-packages
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+          retention-days: 7
 
   terraform:
     name: Terraform formatting
