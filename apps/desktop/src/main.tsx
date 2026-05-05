@@ -23,7 +23,14 @@ import {
 import { resolveDesktopAuthConfig } from "./localDevAuth";
 import { useT, useI18nStore, type SupportedLocale } from "./i18n";
 import type { LocaleKeys } from "./locales/en";
-import { saveSettings, loadSettings, SETTINGS_KEYS } from "./persistence";
+import {
+  saveSettings,
+  loadSettings,
+  SETTINGS_KEYS,
+  saveTranscriptDraft,
+  loadTranscriptDraft,
+  clearTranscriptDraft,
+} from "./persistence";
 import { STT_LANGUAGES } from "./sttLanguages";
 import {
   assignSpeakerLabel,
@@ -33,6 +40,15 @@ import {
   textToSegments,
   type TranscriptSegment,
 } from "./segmentEditor";
+import { decodeAudioWaveform } from "./waveform";
+import {
+  exportTranscript,
+  type TranscriptExportFormat,
+} from "./transcriptExport";
+import {
+  createTranscriptUndoStack,
+  type TranscriptUndoSnapshot,
+} from "./transcriptUndo";
 import "./styles.css";
 
 type PrivacyLevel = "local" | "cloud";
@@ -64,6 +80,9 @@ type DesktopState = {
   transcript: string;
   transcriptSegments: TranscriptSegment[];
   selectedSegmentIds: string[];
+  canUndoTranscript: boolean;
+  canRedoTranscript: boolean;
+  draftRestored: boolean;
   transforming: boolean;
   toasts: Toast[];
   transcriptHistory: TranscriptSession[];
@@ -88,6 +107,8 @@ type DesktopState = {
   setActiveSession: (sessionId: string, transcript: string) => void;
   clearActiveSession: () => void;
   setTranscript: (value: string) => void;
+  undoTranscriptEdit: () => void;
+  redoTranscriptEdit: () => void;
   toggleSegmentSelection: (segmentId: string) => void;
   updateSegmentText: (segmentId: string, text: string) => void;
   updateSegmentSpeaker: (segmentId: string, speaker: string) => void;
@@ -168,6 +189,50 @@ function syncSegments(
   };
 }
 
+const restoredDraft = loadTranscriptDraft();
+const initialTranscriptSnapshot: TranscriptUndoSnapshot = restoredDraft
+  ? {
+      transcript: restoredDraft.transcript,
+      transcriptSegments: restoredDraft.transcriptSegments,
+      selectedSegmentIds: restoredDraft.selectedSegmentIds,
+    }
+  : { transcript: "", transcriptSegments: [], selectedSegmentIds: [] };
+const transcriptUndoStack = createTranscriptUndoStack(
+  initialTranscriptSnapshot,
+);
+
+function undoFlags() {
+  return {
+    canUndoTranscript: transcriptUndoStack.canUndo(),
+    canRedoTranscript: transcriptUndoStack.canRedo(),
+  };
+}
+
+function snapshotFromState(
+  state: Pick<
+    DesktopState,
+    "transcript" | "transcriptSegments" | "selectedSegmentIds"
+  >,
+): TranscriptUndoSnapshot {
+  return {
+    transcript: state.transcript,
+    transcriptSegments: state.transcriptSegments,
+    selectedSegmentIds: state.selectedSegmentIds,
+  };
+}
+
+function withUndoSnapshot(
+  previous: Pick<
+    DesktopState,
+    "transcript" | "transcriptSegments" | "selectedSegmentIds"
+  >,
+  next: TranscriptUndoSnapshot,
+) {
+  transcriptUndoStack.push(snapshotFromState(previous));
+  transcriptUndoStack.push(next);
+  return { ...next, ...undoFlags() };
+}
+
 function stopActiveStream() {
   activeStream?.getTracks().forEach((track) => track.stop());
   activeStream = undefined;
@@ -179,10 +244,13 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
   activeView: "home",
   privacyLevel:
     (loadSettings(SETTINGS_KEYS.privacyLevel) as PrivacyLevel) || "local",
-  activeSessionId: null,
-  transcript: "",
-  transcriptSegments: [],
-  selectedSegmentIds: [],
+  activeSessionId: restoredDraft?.activeSessionId ?? null,
+  transcript: initialTranscriptSnapshot.transcript,
+  transcriptSegments: initialTranscriptSnapshot.transcriptSegments,
+  selectedSegmentIds: initialTranscriptSnapshot.selectedSegmentIds,
+  canUndoTranscript: false,
+  canRedoTranscript: false,
+  draftRestored: Boolean(restoredDraft),
   transcriptHistory: sessions,
   transcriptHistorySource: "offline",
   transcriptHistoryLoading: false,
@@ -316,19 +384,21 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
                   ...segment,
                   id: `capture-${completedAt}-${index + 1}-${segment.id}`,
                 }));
+                const next = syncSegments(
+                  [...state.transcriptSegments, ...captureSegments],
+                  [],
+                );
                 return {
                   ...nextBaseState,
-                  ...syncSegments(
-                    [...state.transcriptSegments, ...captureSegments],
-                    [],
-                  ),
+                  ...withUndoSnapshot(state, next),
                 };
               }
+              const next = syncTranscriptText(
+                `${state.transcript}${api.transcript ? `\n\n${api.transcript}` : fallbackTranscript}`,
+              );
               return {
                 ...nextBaseState,
-                ...syncTranscriptText(
-                  `${state.transcript}${api.transcript ? `\n\n${api.transcript}` : fallbackTranscript}`,
-                ),
+                ...withUndoSnapshot(state, next),
               };
             });
           })
@@ -405,9 +475,16 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
       (item) => item.id === sessionId,
     );
     if (fallback) {
+      const next = {
+        ...syncTranscriptText(fallback.transcript),
+        selectedSegmentIds: [],
+      };
+      transcriptUndoStack.reset(next);
       set({
         activeSessionId: fallback.id,
-        ...syncTranscriptText(fallback.transcript),
+        ...next,
+        ...undoFlags(),
+        draftRestored: false,
       });
     }
     try {
@@ -416,9 +493,16 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
         token: API_TOKEN,
       });
       if (detail) {
+        const next = {
+          ...syncTranscriptText(detail.transcript),
+          selectedSegmentIds: [],
+        };
+        transcriptUndoStack.reset(next);
         set((state) => ({
           activeSessionId: detail.id,
-          ...syncTranscriptText(detail.transcript),
+          ...next,
+          ...undoFlags(),
+          draftRestored: false,
           transcriptHistory: state.transcriptHistory.map((item) =>
             item.id === detail.id ? detail : item,
           ),
@@ -432,16 +516,43 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
       });
     }
   },
-  setActiveSession: (sessionId, transcript) =>
-    set({ activeSessionId: sessionId, ...syncTranscriptText(transcript) }),
-  clearActiveSession: () =>
+  setActiveSession: (sessionId, transcript) => {
+    const next = { ...syncTranscriptText(transcript), selectedSegmentIds: [] };
+    transcriptUndoStack.reset(next);
     set({
-      activeSessionId: null,
+      activeSessionId: sessionId,
+      ...next,
+      ...undoFlags(),
+      draftRestored: false,
+    });
+  },
+  clearActiveSession: () => {
+    const next = {
       transcript: "",
       transcriptSegments: [],
       selectedSegmentIds: [],
-    }),
-  setTranscript: (value) => set(syncTranscriptText(value)),
+    };
+    transcriptUndoStack.reset(next);
+    clearTranscriptDraft();
+    set({
+      activeSessionId: null,
+      ...next,
+      ...undoFlags(),
+      draftRestored: false,
+    });
+  },
+  setTranscript: (value) =>
+    set((state) => withUndoSnapshot(state, syncTranscriptText(value))),
+  undoTranscriptEdit: () => {
+    const snapshot = transcriptUndoStack.undo();
+    if (!snapshot) return;
+    set({ ...snapshot, ...undoFlags() });
+  },
+  redoTranscriptEdit: () => {
+    const snapshot = transcriptUndoStack.redo();
+    if (!snapshot) return;
+    set({ ...snapshot, ...undoFlags() });
+  },
   toggleSegmentSelection: (segmentId) =>
     set((state) => ({
       selectedSegmentIds: state.selectedSegmentIds.includes(segmentId)
@@ -450,22 +561,28 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
     })),
   updateSegmentText: (segmentId, text) =>
     set((state) =>
-      syncSegments(
-        state.transcriptSegments.map((segment) =>
-          segment.id === segmentId ? { ...segment, text } : segment,
+      withUndoSnapshot(
+        state,
+        syncSegments(
+          state.transcriptSegments.map((segment) =>
+            segment.id === segmentId ? { ...segment, text } : segment,
+          ),
+          state.selectedSegmentIds,
         ),
-        state.selectedSegmentIds,
       ),
     ),
   updateSegmentSpeaker: (segmentId, speaker) =>
     set((state) =>
-      syncSegments(
-        state.transcriptSegments.map((segment) =>
-          segment.id === segmentId
-            ? assignSpeakerLabel(segment, speaker)
-            : segment,
+      withUndoSnapshot(
+        state,
+        syncSegments(
+          state.transcriptSegments.map((segment) =>
+            segment.id === segmentId
+              ? assignSpeakerLabel(segment, speaker)
+              : segment,
+          ),
+          state.selectedSegmentIds,
         ),
-        state.selectedSegmentIds,
       ),
     ),
   mergeSelectedSegments: () => {
@@ -476,7 +593,7 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
       selectedSegmentIds[0]!,
       selectedSegmentIds[1]!,
     );
-    set(syncSegments(merged, []));
+    set((state) => withUndoSnapshot(state, syncSegments(merged, [])));
   },
   splitSelectedSegment: () => {
     const { transcriptSegments, selectedSegmentIds } = get();
@@ -490,7 +607,7 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
       segment.id,
       splitAtReadableMidpoint(segment.text),
     );
-    set(syncSegments(split, []));
+    set((state) => withUndoSnapshot(state, syncSegments(split, [])));
   },
   addToast: (message) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -517,7 +634,10 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
     const firstWords = cleaned.split(/\s+/).slice(0, 6).join(" ");
     const title = `# ${firstWords}${firstWords.length < cleaned.length ? "…" : ""}`;
     const transformed = `${title}\n\n${paragraphs.join("\n\n")}`;
-    set({ ...syncTranscriptText(transformed), transforming: false });
+    set((state) => ({
+      ...withUndoSnapshot(state, syncTranscriptText(transformed)),
+      transforming: false,
+    }));
     addToast("toast.transformComplete");
   },
 }));
@@ -531,6 +651,20 @@ function App() {
   const loadTranscriptHistory = useDesktopStore(
     (state) => state.loadTranscriptHistory,
   );
+  const activeSessionId = useDesktopStore((state) => state.activeSessionId);
+  const transcript = useDesktopStore((state) => state.transcript);
+  const transcriptSegments = useDesktopStore(
+    (state) => state.transcriptSegments,
+  );
+  const selectedSegmentIds = useDesktopStore(
+    (state) => state.selectedSegmentIds,
+  );
+  const undoTranscriptEdit = useDesktopStore(
+    (state) => state.undoTranscriptEdit,
+  );
+  const redoTranscriptEdit = useDesktopStore(
+    (state) => state.redoTranscriptEdit,
+  );
 
   useEffect(() => {
     void loadTranscriptHistory();
@@ -541,6 +675,15 @@ function App() {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setCommandOpen(true);
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) redoTranscriptEdit();
+        else undoTranscriptEdit();
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        redoTranscriptEdit();
       }
       // Hands-free toggle: ⌘⇧M — press to start, press to stop
       if (
@@ -588,7 +731,21 @@ function App() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [setCommandOpen, toggleRecording]);
+  }, [setCommandOpen, toggleRecording, undoTranscriptEdit, redoTranscriptEdit]);
+
+  useEffect(() => {
+    if (!transcript.trim() && transcriptSegments.length === 0) {
+      clearTranscriptDraft();
+      return;
+    }
+    saveTranscriptDraft({
+      activeSessionId,
+      transcript,
+      transcriptSegments,
+      selectedSegmentIds,
+      savedAt: new Date().toISOString(),
+    });
+  }, [activeSessionId, transcript, transcriptSegments, selectedSegmentIds]);
 
   return (
     <main className="desktop-shell">
@@ -778,6 +935,7 @@ function TopBar() {
 
 function HomeDashboard() {
   const transcriptHistory = useDesktopStore((state) => state.transcriptHistory);
+  const voiceCapture = useDesktopStore((state) => state.voiceCapture);
   const t = useT();
 
   return (
@@ -789,6 +947,14 @@ function HomeDashboard() {
             <p className="home-banner">{t("home.banner")}</p>
           </div>
         </div>
+        {voiceCapture?.objectUrl ? (
+          <AudioPlaybackCard
+            audioUrl={voiceCapture.objectUrl}
+            className="recent-capture-player"
+            durationLabel={formatDuration(voiceCapture.durationMs)}
+            title={t("audio.recentCapture")}
+          />
+        ) : null}
         <TimelineFeed entries={transcriptHistory} />
       </div>
       <div className="stats-rail">
@@ -850,23 +1016,110 @@ function TimelineFeed({ entries }: { entries: TranscriptSession[] }) {
         <div className="timeline-group" key={dateLabel}>
           <div className="timeline-date-header">{dateLabel}</div>
           {items.map((entry) => (
-            <button
+            <article
               className="timeline-entry"
               key={entry.id}
               onClick={() => void selectTranscriptSession(entry.id)}
-              type="button"
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  void selectTranscriptSession(entry.id);
+                }
+              }}
+              role="button"
+              tabIndex={0}
             >
               <span className="timeline-time">{extractTime(entry)}</span>
               <div className="timeline-content">
                 <span className="timeline-title">{entry.title}</span>
                 <span className="timeline-preview">{entry.preview}</span>
+                {entry.audioUrl ? (
+                  <AudioPlaybackCard
+                    audioUrl={entry.audioUrl}
+                    compact
+                    durationLabel={entry.duration}
+                    onClick={(event) => event.stopPropagation()}
+                    title={entry.title}
+                  />
+                ) : null}
               </div>
               <span className="timeline-duration">{entry.duration}</span>
-            </button>
+            </article>
           ))}
         </div>
       ))}
     </div>
+  );
+}
+
+/* ── Audio Playback ───────────────────────────────────────────── */
+
+function AudioPlaybackCard({
+  audioUrl,
+  className,
+  compact = false,
+  durationLabel,
+  onClick,
+  title,
+}: {
+  audioUrl: string;
+  className?: string;
+  compact?: boolean;
+  durationLabel?: string;
+  onClick?: (event: React.MouseEvent<HTMLElement>) => void;
+  title: string;
+}) {
+  const t = useT();
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+
+  const handleToggle = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      void audio.play();
+    } else {
+      audio.pause();
+    }
+  }, []);
+
+  return (
+    <section
+      className={[
+        "audio-playback-card",
+        compact ? "compact" : "",
+        className ?? "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      onClick={onClick}
+      onKeyDown={(event) => event.stopPropagation()}
+      aria-label={title}
+    >
+      <audio
+        ref={audioRef}
+        preload="metadata"
+        src={audioUrl}
+        onEnded={() => setPlaying(false)}
+        onPause={() => setPlaying(false)}
+        onPlay={() => setPlaying(true)}
+      />
+      <button
+        aria-label={t("audio.playPause")}
+        className="audio-play-button"
+        onClick={handleToggle}
+        type="button"
+      >
+        {playing ? "Ⅱ" : "▶"}
+      </button>
+      <div className="audio-playback-body">
+        <div className="audio-playback-header">
+          <span>{title}</span>
+          {durationLabel ? <small>{durationLabel}</small> : null}
+        </div>
+        <Waveform audioUrl={audioUrl} active={playing} />
+      </div>
+    </section>
   );
 }
 
@@ -963,6 +1216,15 @@ function TranscriptDetail() {
   );
   const transcriptHistory = useDesktopStore((state) => state.transcriptHistory);
   const setTranscript = useDesktopStore((state) => state.setTranscript);
+  const undoTranscriptEdit = useDesktopStore(
+    (state) => state.undoTranscriptEdit,
+  );
+  const redoTranscriptEdit = useDesktopStore(
+    (state) => state.redoTranscriptEdit,
+  );
+  const canUndoTranscript = useDesktopStore((state) => state.canUndoTranscript);
+  const canRedoTranscript = useDesktopStore((state) => state.canRedoTranscript);
+  const draftRestored = useDesktopStore((state) => state.draftRestored);
   const toggleSegmentSelection = useDesktopStore(
     (state) => state.toggleSegmentSelection,
   );
@@ -1008,17 +1270,27 @@ function TranscriptDetail() {
     });
   }, [transcript, addToast]);
 
-  const handleDownload = useCallback(() => {
-    const blob = new Blob([transcript], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "transcript.txt";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, [transcript]);
+  const handleDownload = useCallback(
+    (format: TranscriptExportFormat = "txt") => {
+      const exported = exportTranscript({
+        format,
+        transcript,
+        segments: transcriptSegments,
+        sessionId: activeSessionId,
+        title: activeSession?.title ?? t("editor.fallbackTitle"),
+      });
+      const blob = new Blob([exported.content], { type: exported.mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = exported.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    },
+    [activeSession?.title, activeSessionId, transcript, transcriptSegments, t],
+  );
 
   return (
     <section className="editor-panel">
@@ -1043,6 +1315,30 @@ function TranscriptDetail() {
       </div>
 
       <div className="hologram-frame">
+        {draftRestored ? (
+          <p className="draft-recovery-banner">{t("editor.draftRestored")}</p>
+        ) : null}
+        <div
+          className="editor-history-actions"
+          aria-label={t("editor.historyControls")}
+        >
+          <button
+            className="ghost-button"
+            disabled={!canUndoTranscript}
+            onClick={undoTranscriptEdit}
+            type="button"
+          >
+            {t("editor.undo")}
+          </button>
+          <button
+            className="ghost-button"
+            disabled={!canRedoTranscript}
+            onClick={redoTranscriptEdit}
+            type="button"
+          >
+            {t("editor.redo")}
+          </button>
+        </div>
         <textarea
           aria-label={t("editor.textareaLabel")}
           className="transcript-input"
@@ -1141,9 +1437,18 @@ function TranscriptDetail() {
         <button className="ghost-button" onClick={handleCopy} type="button">
           {t("editor.copy")}
         </button>
-        <button className="ghost-button" onClick={handleDownload} type="button">
-          {t("editor.download")}
-        </button>
+        {(["txt", "md", "srt", "vtt", "json"] as TranscriptExportFormat[]).map(
+          (format) => (
+            <button
+              className="ghost-button"
+              key={format}
+              onClick={() => handleDownload(format)}
+              type="button"
+            >
+              {format === "txt" ? t("editor.download") : format.toUpperCase()}
+            </button>
+          ),
+        )}
         <button
           className="primary-button"
           disabled={transforming}
@@ -1259,9 +1564,9 @@ function VoiceRecorderPill() {
     return () => clearInterval(id);
   }, [recordingState]);
 
-  // Auto-dismiss pill 3s after completed/error
+  // Keep completed captures available so users can play back the recent audio.
   useEffect(() => {
-    if (recordingState !== "completed" && recordingState !== "error") return;
+    if (recordingState !== "error") return;
     const id = setTimeout(() => resetVoiceCapture(), 3000);
     return () => clearTimeout(id);
   }, [recordingState, resetVoiceCapture]);
@@ -1335,11 +1640,50 @@ function VoiceRecorderPill() {
   );
 }
 
-function Waveform({ active }: { active: boolean }) {
+function Waveform({
+  active,
+  audioUrl,
+}: {
+  active: boolean;
+  audioUrl?: string;
+}) {
+  const t = useT();
+  const [peaks, setPeaks] = useState<number[]>(() =>
+    Array.from({ length: 18 }, () => 0.18),
+  );
+
+  useEffect(() => {
+    if (!audioUrl) {
+      setPeaks(Array.from({ length: 18 }, () => (active ? 0.45 : 0.18)));
+      return;
+    }
+
+    let cancelled = false;
+    void decodeAudioWaveform(audioUrl, 32)
+      .then((nextPeaks) => {
+        if (!cancelled) setPeaks(nextPeaks);
+      })
+      .catch(() => {
+        if (!cancelled) setPeaks(Array.from({ length: 32 }, () => 0.12));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [active, audioUrl]);
+
   return (
-    <div className={active ? "waveform active" : "waveform"} aria-hidden="true">
-      {Array.from({ length: 18 }, (_, index) => (
-        <span key={index} style={{ animationDelay: `${index * 45}ms` }} />
+    <div
+      className={active ? "waveform active" : "waveform"}
+      aria-label={t("audio.waveform")}
+      role="img"
+    >
+      {peaks.map((peak, index) => (
+        <span
+          className="waveform-bar"
+          key={`${audioUrl ?? "live"}-${index}`}
+          style={{ height: `${Math.max(8, Math.round(peak * 56))}px` }}
+        />
       ))}
     </div>
   );

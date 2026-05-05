@@ -47,6 +47,7 @@ export interface CompanionSettings {
   privacyLevel: PrivacyLevel;
   saveHistory: boolean;
   cloudSyncEnabled: boolean;
+  localApiUrl?: string;
   notificationsEnabled: boolean;
   hapticsEnabled: boolean;
 }

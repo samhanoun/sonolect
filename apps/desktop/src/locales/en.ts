@@ -47,6 +47,10 @@ export const en = {
   "editor.language": "Language: French",
   "editor.transformCta": "Transform with Sonolect",
   "editor.textareaLabel": "Transcription editor",
+  "editor.draftRestored": "Recovered your unsaved local draft after restart.",
+  "editor.historyControls": "Transcript edit history controls",
+  "editor.undo": "Undo",
+  "editor.redo": "Redo",
 
   // Segment editor
   "segments.ariaLabel": "Transcript segment editor",
@@ -191,6 +195,11 @@ export const en = {
   "pill.error": "Error",
   "pill.stop": "Stop",
   "pill.again": "Again",
+
+  // Audio playback
+  "audio.recentCapture": "Recent capture",
+  "audio.playPause": "Play or pause audio",
+  "audio.waveform": "Audio waveform",
 } as const;
 
 export type LocaleKeys = keyof typeof en;

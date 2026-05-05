@@ -7,6 +7,12 @@ import type {
   TranscriptTurn,
 } from "./domain";
 import { DEFAULT_SETTINGS, SAMPLE_TRANSCRIPTS } from "./domain";
+import {
+  fetchLocalTranscriptHistory,
+  mergeTranscriptHistory,
+  resolveMobileLocalApiConfig,
+  syncQueuedTranscriptTurns,
+} from "./localApi";
 import { notificationGateway } from "./notifications";
 import { mobileStorage } from "./storage";
 import type { SonolectMode } from "@sonolect/types";
@@ -64,6 +70,31 @@ function refineText(rawText: string, mode: SonolectMode): string {
   }
 }
 
+async function loadAndSyncHistory(
+  settings: CompanionSettings,
+  history: TranscriptTurn[],
+): Promise<TranscriptTurn[]> {
+  const syncedHistory = await syncHistoryWhenConfigured(settings, history);
+  const config = resolveMobileLocalApiConfig(settings);
+  if (!config.apiUrl) return syncedHistory;
+
+  try {
+    const remoteHistory = await fetchLocalTranscriptHistory(config);
+    return mergeTranscriptHistory(syncedHistory, remoteHistory);
+  } catch {
+    return syncedHistory;
+  }
+}
+
+async function syncHistoryWhenConfigured(
+  settings: CompanionSettings,
+  history: TranscriptTurn[],
+): Promise<TranscriptTurn[]> {
+  const config = resolveMobileLocalApiConfig(settings);
+  if (!config.apiUrl) return history;
+  return syncQueuedTranscriptTurns(history, config);
+}
+
 export const useCompanionStore = create<CompanionState>((set, get) => ({
   hydrated: false,
   auth: { status: "guest" },
@@ -78,7 +109,11 @@ export const useCompanionStore = create<CompanionState>((set, get) => ({
       mobileStorage.loadHistory(),
     ]);
 
-    set({ auth, settings, history, hydrated: true });
+    const syncedHistory = await loadAndSyncHistory(settings, history);
+    set({ auth, settings, history: syncedHistory, hydrated: true });
+    if (syncedHistory !== history) {
+      await mobileStorage.saveHistory(syncedHistory);
+    }
   },
 
   startCapture: () => {
@@ -144,7 +179,12 @@ export const useCompanionStore = create<CompanionState>((set, get) => ({
     });
 
     if (settings.saveHistory && settings.privacyLevel !== "ephemeral") {
-      await mobileStorage.saveHistory(nextHistory);
+      const syncedHistory = await syncHistoryWhenConfigured(
+        settings,
+        nextHistory,
+      );
+      set({ history: syncedHistory });
+      await mobileStorage.saveHistory(syncedHistory);
     }
 
     if (settings.notificationsEnabled) {
@@ -177,13 +217,23 @@ export const useCompanionStore = create<CompanionState>((set, get) => ({
     };
     const nextHistory = [refined, latest, ...rest].slice(0, 25);
     set({ history: nextHistory });
-    await mobileStorage.saveHistory(nextHistory);
+    const syncedHistory = await syncHistoryWhenConfigured(
+      get().settings,
+      nextHistory,
+    );
+    set({ history: syncedHistory });
+    await mobileStorage.saveHistory(syncedHistory);
   },
 
   updateSettings: async (patch: Partial<CompanionSettings>) => {
     const settings = { ...get().settings, ...patch };
     set({ settings });
     await mobileStorage.saveSettings(settings);
+    if (settings.cloudSyncEnabled) {
+      const syncedHistory = await loadAndSyncHistory(settings, get().history);
+      set({ history: syncedHistory });
+      await mobileStorage.saveHistory(syncedHistory);
+    }
   },
 
   clearHistory: async () => {

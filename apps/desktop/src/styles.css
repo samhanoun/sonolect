@@ -895,16 +895,20 @@ kbd {
   height: 64px;
 }
 
-.waveform span {
+.waveform-bar {
   width: 5px;
-  height: 18px;
+  min-height: 8px;
   border-radius: 99px;
   background: linear-gradient(var(--accent-cyan), var(--accent-violet));
-  opacity: 0.5;
+  opacity: 0.78;
+  transition:
+    height 160ms ease,
+    opacity 160ms ease;
 }
 
-.waveform.active span {
-  animation: pulse-wave 900ms ease-in-out infinite alternate;
+.waveform.active .waveform-bar {
+  opacity: 1;
+  box-shadow: 0 0 12px rgba(25, 216, 255, 0.32);
 }
 
 .palette-backdrop {
@@ -961,17 +965,6 @@ kbd {
     box-shadow:
       0 0 0 18px rgba(255, 79, 139, 0.13),
       0 0 86px rgba(25, 216, 255, 0.4);
-  }
-}
-
-@keyframes pulse-wave {
-  from {
-    height: 12px;
-    opacity: 0.35;
-  }
-  to {
-    height: 54px;
-    opacity: 1;
   }
 }
 
@@ -1149,6 +1142,72 @@ kbd {
   color: var(--muted);
   font-size: 14px;
   margin-top: 4px;
+}
+
+/* ── Audio Playback ───────────────────────────────────────────── */
+
+.audio-playback-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(25, 216, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18);
+}
+
+.audio-playback-card.compact {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  box-shadow: none;
+}
+
+.audio-play-button {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: white;
+  background: linear-gradient(135deg, var(--accent-violet), var(--accent-cyan));
+  cursor: pointer;
+}
+
+.audio-playback-body {
+  display: grid;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.audio-playback-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.audio-playback-header small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.audio-playback-card .waveform {
+  height: 36px;
+  justify-content: flex-start;
+  overflow: hidden;
+}
+
+.audio-playback-card .waveform-bar {
+  width: 4px;
 }
 
 /* ── Timeline Feed ───────────────────────────────────────────── */

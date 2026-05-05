@@ -19,6 +19,7 @@ export type TranscriptHistoryRow = {
   status: TranscriptHistoryStatus;
   metadata: string;
   updatedAt: string;
+  audioUrl?: string;
 };
 
 export type TranscriptHistoryResult = {
@@ -155,6 +156,8 @@ export function normalizeTranscriptRecord(
   const body = (transcript.finalText ?? transcript.rawText ?? "").trim();
   const preview = body || "Transcription en attente de contenu.";
   const title = transcript.title?.trim() || truncateText(preview, 51);
+  const audioUrl = (transcript as Transcript & { audio?: { uri?: string } })
+    .audio?.uri;
   const metadata = [
     transcript.status,
     transcript.language,
@@ -172,6 +175,7 @@ export function normalizeTranscriptRecord(
     status: transcript.status,
     metadata: metadata.join(" · "),
     updatedAt: transcript.updatedAt,
+    ...(audioUrl ? { audioUrl } : {}),
   };
 }
 

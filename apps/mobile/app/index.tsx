@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
@@ -146,7 +147,7 @@ export default function HomeScreen() {
                 <View style={styles.historyMetaRow}>
                   <Text style={styles.historyMode}>{modeLabel(turn.mode)}</Text>
                   <Text style={styles.historyMeta}>
-                    {turn.syncState === "queued" ? "Sync en attente" : "Local"}
+                    {syncStateLabel(turn.syncState)}
                   </Text>
                 </View>
                 <Text style={styles.historyText}>{turn.refinedText}</Text>
@@ -179,6 +180,28 @@ export default function HomeScreen() {
               void updateSettings({ cloudSyncEnabled: value })
             }
           />
+          <View style={styles.apiConfigBox}>
+            <Text style={styles.apiConfigLabel}>API locale Sonolect</Text>
+            <TextInput
+              accessibilityLabel="URL de l'API locale Sonolect"
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              placeholder="http://localhost:8787"
+              placeholderTextColor={palette.textMuted}
+              defaultValue={settings.localApiUrl ?? ""}
+              onEndEditing={(event) =>
+                void updateSettings({
+                  localApiUrl: event.nativeEvent.text.trim(),
+                })
+              }
+              style={styles.apiConfigInput}
+            />
+            <Text style={styles.privacyNote}>
+              Renseignez une URL locale ou EXPO_PUBLIC_SONOLECT_API_URL pour
+              envoyer les éléments en attente et récupérer l'historique local.
+            </Text>
+          </View>
           <View style={styles.privacyRow}>
             {(["standard", "local_first", "ephemeral"] as const).map(
               (level) => (
@@ -267,6 +290,18 @@ function statusCopy(status: string): string {
 
 function modeLabel(mode: string): string {
   return mode.replace("_", " ");
+}
+
+function syncStateLabel(syncState: string): string {
+  switch (syncState) {
+    case "queued":
+      return "Sync en attente";
+    case "synced":
+      return "Synchronisé";
+    case "local":
+    default:
+      return "Local";
+  }
 }
 
 function privacyLabel(level: string): string {
@@ -416,6 +451,23 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   settingLabel: { color: palette.text, fontSize: 16 },
+  apiConfigBox: {
+    backgroundColor: palette.surfaceMuted,
+    borderColor: palette.border,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    gap: 8,
+  },
+  apiConfigLabel: { color: palette.text, fontWeight: "800" },
+  apiConfigInput: {
+    color: palette.text,
+    borderColor: palette.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
   privacyRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   privacyPill: {
     borderColor: palette.border,

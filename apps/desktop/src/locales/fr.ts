@@ -50,6 +50,11 @@ export const fr: Record<LocaleKeys, string> = {
   "editor.language": "Langue : Français",
   "editor.transformCta": "Transformer avec Sonolect",
   "editor.textareaLabel": "Éditeur de transcription",
+  "editor.draftRestored":
+    "Brouillon local non sauvegardé restauré après redémarrage.",
+  "editor.historyControls": "Contrôles d'historique d'édition de transcription",
+  "editor.undo": "Annuler",
+  "editor.redo": "Rétablir",
 
   // Segment editor
   "segments.ariaLabel": "Éditeur de segments de transcription",
@@ -196,4 +201,9 @@ export const fr: Record<LocaleKeys, string> = {
   "pill.error": "Erreur",
   "pill.stop": "Stop",
   "pill.again": "Relancer",
+
+  // Audio playback
+  "audio.recentCapture": "Capture récente",
+  "audio.playPause": "Lire ou mettre en pause l'audio",
+  "audio.waveform": "Forme d'onde audio",
 };
