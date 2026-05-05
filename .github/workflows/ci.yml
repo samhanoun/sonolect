@@ -128,7 +128,9 @@ jobs:
             artifact_glob: apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
           - os: windows-latest
             bundles: nsis,msi
-            artifact_glob: apps/desktop/src-tauri/target/release/bundle/**/*.{msi,exe}
+            artifact_glob: |
+              apps/desktop/src-tauri/target/release/bundle/**/*.msi
+              apps/desktop/src-tauri/target/release/bundle/**/*.exe
     steps:
       - name: Checkout
         uses: actions/checkout@v4
