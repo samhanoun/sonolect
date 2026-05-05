@@ -42,13 +42,17 @@ import {
 } from "./segmentEditor";
 import { decodeAudioWaveform } from "./waveform";
 import {
+  WHISPER_MODEL_CATALOG,
   buildWhisperCommandPreview,
+  buildWhisperInstallerGuidance,
   commandArgsJsonForEnv,
+  getDefaultWhisperInstallPlan,
   getWhisperSetupStatus,
   parseWhisperConfig,
   serializeWhisperConfig,
   validateWhisperConfig,
   type WhisperConfig,
+  type WhisperInstallPlatform,
 } from "./whisperSetup";
 import {
   exportTranscript,
@@ -1496,6 +1500,30 @@ function SettingsPrivacy() {
   const [diagnostic, setDiagnostic] = React.useState<string | undefined>();
   const whisperStatus = getWhisperSetupStatus(whisperConfig);
   const whisperErrors = validateWhisperConfig(whisperConfig);
+  const detectedWhisperPlatform: WhisperInstallPlatform = /Win/i.test(
+    navigator.platform,
+  )
+    ? "win32"
+    : /Mac/i.test(navigator.platform)
+      ? "darwin"
+      : "linux";
+  const defaultWhisperHome =
+    detectedWhisperPlatform === "darwin"
+      ? "/Users/you"
+      : detectedWhisperPlatform === "win32"
+        ? "C:/Users/you"
+        : "/home/you";
+  const selectedModelId = WHISPER_MODEL_CATALOG.some(
+    (model) => model.id === whisperConfig.modelName,
+  )
+    ? (whisperConfig.modelName as (typeof WHISPER_MODEL_CATALOG)[number]["id"])
+    : "base.en";
+  const whisperInstallPlan = getDefaultWhisperInstallPlan({
+    platform: detectedWhisperPlatform,
+    homeDir: defaultWhisperHome,
+    modelId: selectedModelId,
+  });
+  const whisperGuidance = buildWhisperInstallerGuidance(whisperInstallPlan);
 
   useEffect(() => {
     setCommandJson(JSON.stringify(whisperConfig.command, null, 2));
@@ -1620,6 +1648,83 @@ function SettingsPrivacy() {
           <code>SONOLECT_DESKTOP_WHISPER_COMMAND_ARGS</code>
         </li>
       </ul>
+      <div className="section-title" style={{ marginTop: "1rem" }}>
+        {t("settings.whisper.catalog")}
+      </div>
+      <p>{whisperGuidance.summary}</p>
+      <label className="field-label" htmlFor="whisper-model-catalog">
+        {t("settings.whisper.recommendedModel")}
+      </label>
+      <select
+        id="whisper-model-catalog"
+        className="ghost-button"
+        value={selectedModelId}
+        onChange={(event) => {
+          const nextPlan = getDefaultWhisperInstallPlan({
+            platform: detectedWhisperPlatform,
+            homeDir: defaultWhisperHome,
+            modelId: event.target.value as typeof selectedModelId,
+          });
+          updateWhisperConfig({
+            modelName: nextPlan.model.id,
+          });
+        }}
+      >
+        {WHISPER_MODEL_CATALOG.map((model) => (
+          <option key={model.id} value={model.id}>
+            {model.label} · {Math.round(model.sizeBytes / 1024 / 1024)} MB
+          </option>
+        ))}
+      </select>
+      <ul className="check-list">
+        <li>
+          {t("settings.whisper.defaultBinary")}:{" "}
+          <code>{whisperInstallPlan.binaryPath}</code>
+        </li>
+        <li>
+          {t("settings.whisper.defaultModel")}:{" "}
+          <code>{whisperInstallPlan.modelPath}</code>
+        </li>
+        <li>
+          {t("settings.whisper.downloadUrl")}:{" "}
+          <a
+            href={whisperInstallPlan.model.downloadUrl}
+            rel="noreferrer noopener"
+            target="_blank"
+          >
+            {whisperInstallPlan.model.filename}
+          </a>
+        </li>
+      </ul>
+      <div className="editor-actions">
+        <button
+          className="ghost-button"
+          type="button"
+          onClick={() => {
+            const commandTemplate = {
+              command: [
+                "whisper-cli",
+                "--model",
+                "{model}",
+                "--file",
+                "{audioPath}",
+                "--output-json",
+              ],
+              modelName: whisperInstallPlan.model.id,
+            } satisfies Partial<WhisperConfig>;
+            updateWhisperConfig(commandTemplate);
+            setCommandJson(JSON.stringify(commandTemplate.command, null, 2));
+            setDiagnostic(t("settings.whisper.planApplied"));
+          }}
+        >
+          {t("settings.whisper.usePlan")}
+        </button>
+      </div>
+      <ol className="check-list">
+        {whisperGuidance.steps.map((step) => (
+          <li key={step}>{step}</li>
+        ))}
+      </ol>
       <label className="field-label" htmlFor="whisper-model-path">
         {t("settings.whisper.modelPath")}
       </label>

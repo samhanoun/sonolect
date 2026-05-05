@@ -11,6 +11,7 @@
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "test:release-readiness": "node --test scripts/release-readiness.test.mjs",
+    "release:dry-run": "pnpm test:release-readiness",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

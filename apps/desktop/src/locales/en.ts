@@ -100,6 +100,14 @@ export const en = {
   "settings.whisper.status": "Status",
   "settings.whisper.preview": "Preview",
   "settings.whisper.envValue": "Env value",
+  "settings.whisper.catalog": "Recommended local assets",
+  "settings.whisper.recommendedModel": "Model to download",
+  "settings.whisper.defaultBinary": "Default binary path",
+  "settings.whisper.defaultModel": "Default model path",
+  "settings.whisper.downloadUrl": "Model download",
+  "settings.whisper.usePlan": "Use recommended command template",
+  "settings.whisper.planApplied":
+    "Recommended Whisper command template applied. Add your real model path before testing.",
   "settings.whisper.commandJsonInvalid":
     "Command args must be valid JSON string array.",
   "settings.whisper.commandSaved": "Whisper command saved locally.",
