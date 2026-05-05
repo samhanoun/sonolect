@@ -139,6 +139,20 @@ test.describe("Sonolect voice capture readiness", () => {
     ).toContainText("Done");
     await expect(page.getByText(/Recent capture/i)).toBeVisible();
 
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          Boolean(
+            (
+              window as typeof window & {
+                __sonolectE2eObjectUrlBytes?: number[];
+              }
+            ).__sonolectE2eObjectUrlBytes,
+          ),
+        ),
+      )
+      .toBe(true);
+
     const readiness = await page.evaluate(() => {
       const rawDraft = window.localStorage.getItem("sonolect.transcriptDraft");
       return {

@@ -156,7 +156,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build native installer bundle
-        run: pnpm --filter @sonolect/desktop tauri build --bundles ${{ matrix.bundles }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
+        run: pnpm --filter @sonolect/desktop tauri build --bundles ${{ matrix.bundles }}
 
       - name: Validate macOS bundle
         if: runner.os == 'macOS'
