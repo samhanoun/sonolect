@@ -199,7 +199,8 @@ export default function HomeScreen() {
             />
             <Text style={styles.privacyNote}>
               Renseignez une URL locale ou EXPO_PUBLIC_SONOLECT_API_URL pour
-              envoyer les éléments en attente et récupérer l'historique local.
+              envoyer les éléments en attente, téléverser l'audio capturé vers
+              l'API locale et récupérer l'historique local.
             </Text>
           </View>
           <View style={styles.privacyRow}>

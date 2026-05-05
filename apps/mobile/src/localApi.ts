@@ -8,6 +8,36 @@ export type MobileLocalApiConfig = {
   limit?: number;
 };
 
+export type MobileCapturedAudio = {
+  bytes: BodyInit | Uint8Array | ArrayBuffer;
+  mimeType: string;
+  durationMs: number;
+  sizeBytes?: number;
+  fileName?: string;
+};
+
+export type MobileAudioUploadResult = {
+  status: "completed" | "submitted" | "offline";
+  jobId?: string;
+  transcriptId?: string;
+  turn?: TranscriptTurn;
+  message?: string;
+};
+
+type AudioJobResponse = {
+  id?: string;
+  jobId?: string;
+  status?: "queued" | "processing" | "completed" | "failed";
+  transcriptId?: string;
+  message?: string;
+};
+
+type SubmitCapturedMobileAudioOptions = {
+  language?: TranscriptTurn["language"];
+  source?: "mobile";
+  pollAttempts?: number;
+};
+
 type TranscriptCreateBody = {
   title: string;
   rawText: string;
@@ -61,6 +91,126 @@ export async function fetchLocalTranscriptHistory(
   return (payload.items ?? []).map(transcriptToTurn);
 }
 
+export async function fetchLocalTranscriptById(
+  transcriptId: string,
+  config: MobileLocalApiConfig,
+): Promise<TranscriptTurn | undefined> {
+  const apiUrl = config.apiUrl?.trim();
+  if (!apiUrl || !transcriptId.trim()) return undefined;
+
+  const response = await (config.fetchImpl ?? fetch)(
+    new URL(
+      `/transcripts/${encodeURIComponent(transcriptId)}`,
+      apiUrl,
+    ).toString(),
+    { headers: createJsonHeaders() },
+  );
+  if (!response.ok) {
+    throw new Error(`Mobile transcript fetch failed (${response.status})`);
+  }
+
+  const transcript = (await response.json()) as Transcript;
+  return transcriptToTurn(transcript);
+}
+
+export async function submitCapturedMobileAudio(
+  audio: MobileCapturedAudio,
+  config: MobileLocalApiConfig,
+  options: SubmitCapturedMobileAudioOptions = {},
+): Promise<MobileAudioUploadResult> {
+  const apiUrl = config.apiUrl?.trim();
+  if (!apiUrl) {
+    return {
+      status: "offline",
+      message: "API locale Sonolect non configurée.",
+    };
+  }
+
+  const fetchImpl = config.fetchImpl ?? fetch;
+  try {
+    const jobResponse = await fetchImpl(
+      new URL("/audio/jobs", apiUrl).toString(),
+      {
+        method: "POST",
+        headers: createJsonHeaders({ contentType: true }),
+        body: JSON.stringify(
+          createCapturedAudioJobPayload(audio, options.language),
+        ),
+      },
+    );
+    if (!jobResponse.ok) {
+      throw new Error(`Mobile audio job failed (${jobResponse.status})`);
+    }
+
+    const jobPayload = (await jobResponse
+      .json()
+      .catch(() => ({}))) as AudioJobResponse;
+    const jobId = jobPayload.jobId ?? jobPayload.id;
+    if (!jobId) {
+      return withOptionalTranscriptId(
+        {
+          status: "submitted",
+          message:
+            jobPayload.message ?? "Capture audio envoyée à l'API locale.",
+        },
+        jobPayload.transcriptId,
+      );
+    }
+
+    const uploadResponse = await fetchImpl(
+      new URL(
+        `/audio/jobs/${encodeURIComponent(jobId)}/audio`,
+        apiUrl,
+      ).toString(),
+      {
+        method: "POST",
+        headers: { "content-type": audio.mimeType || "audio/wav" },
+        body: audio.bytes as BodyInit,
+      },
+    );
+    if (!uploadResponse.ok) {
+      throw new Error(`Mobile audio upload failed (${uploadResponse.status})`);
+    }
+
+    const uploadPayload = (await uploadResponse
+      .json()
+      .catch(() => ({}))) as AudioJobResponse;
+    const transcriptId = uploadPayload.transcriptId ?? jobPayload.transcriptId;
+    const turn = transcriptId
+      ? await tryFetchCompletedTranscript(transcriptId, {
+          apiUrl,
+          fetchImpl,
+          attempts: options.pollAttempts ?? 1,
+        })
+      : undefined;
+
+    if (turn) {
+      return withOptionalTranscriptId(
+        { status: "completed", jobId, turn },
+        transcriptId,
+      );
+    }
+
+    return withOptionalTranscriptId(
+      {
+        status: "submitted",
+        jobId,
+        message:
+          uploadPayload.message ?? "Capture audio envoyée à l'API locale.",
+      },
+      transcriptId,
+    );
+  } catch (error) {
+    return {
+      status: "offline",
+      message:
+        error instanceof Error
+          ? `API locale indisponible: ${error.message}`
+          : "API locale indisponible.",
+    };
+  }
+}
+
 export async function syncQueuedTranscriptTurns(
   history: TranscriptTurn[],
   config: MobileLocalApiConfig,
@@ -108,6 +258,14 @@ export function mergeTranscriptHistory(
     .slice(0, 25);
 }
 
+function withOptionalTranscriptId<T extends MobileAudioUploadResult>(
+  result: T,
+  transcriptId: string | undefined,
+): T {
+  if (!transcriptId) return result;
+  return { ...result, transcriptId };
+}
+
 async function postTranscriptTurn(
   turn: TranscriptTurn,
   config: Required<Pick<MobileLocalApiConfig, "apiUrl">> & MobileLocalApiConfig,
@@ -139,6 +297,53 @@ function transcriptToTurn(transcript: Transcript): TranscriptTurn {
     source: "sample",
     syncState: "synced",
   };
+}
+
+function createCapturedAudioJobPayload(
+  audio: MobileCapturedAudio,
+  language?: TranscriptTurn["language"],
+) {
+  return {
+    fileName:
+      audio.fileName ?? `sonolect-mobile.${extensionForMime(audio.mimeType)}`,
+    mimeType: audio.mimeType,
+    sizeBytes: audio.sizeBytes ?? sizeOfBody(audio.bytes),
+    durationMs: Math.max(1, Math.round(audio.durationMs)),
+    source: "mobile" as const,
+    transcriptTitle: "Mobile voice capture",
+    ...(language && language !== "auto" ? { language } : {}),
+  };
+}
+
+async function tryFetchCompletedTranscript(
+  transcriptId: string,
+  config: MobileLocalApiConfig & { attempts?: number },
+): Promise<TranscriptTurn | undefined> {
+  const attempts = Math.max(1, config.attempts ?? 1);
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      const turn = await fetchLocalTranscriptById(transcriptId, config);
+      if (turn?.refinedText || turn?.rawText) return turn;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function sizeOfBody(body: MobileCapturedAudio["bytes"]): number {
+  if (body instanceof Uint8Array) return body.byteLength;
+  if (body instanceof ArrayBuffer) return body.byteLength;
+  if (typeof Blob !== "undefined" && body instanceof Blob) return body.size;
+  if (typeof body === "string") return body.length;
+  return 1;
+}
+
+function extensionForMime(mimeType: string): string {
+  if (mimeType.includes("wav")) return "wav";
+  if (mimeType.includes("mp4")) return "m4a";
+  if (mimeType.includes("ogg")) return "ogg";
+  return "webm";
 }
 
 function turnToCreateBody(turn: TranscriptTurn): TranscriptCreateBody {

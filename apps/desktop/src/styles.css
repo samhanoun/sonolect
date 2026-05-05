@@ -528,12 +528,45 @@ kbd {
 }
 
 .transcript-input {
+  min-height: 260px;
+}
+
+.transcript-textarea {
+  min-height: 120px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.search-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  padding: 10px 12px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.field-label {
+  display: block;
+  margin: 12px 0 6px;
+  color: var(--subtle);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.transcript-input,
+.transcript-textarea {
   position: relative;
   z-index: 0;
   flex: 1;
   width: 100%;
   height: 100%;
-  min-height: 260px;
   resize: none;
   border: 0;
   outline: none;

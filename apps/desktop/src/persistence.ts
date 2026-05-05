@@ -11,6 +11,7 @@ export const SETTINGS_KEYS = {
   locale: `${KEY_PREFIX}locale`,
   sttLanguage: `${KEY_PREFIX}sttLanguage`,
   privacyLevel: `${KEY_PREFIX}privacyLevel`,
+  whisperConfig: `${KEY_PREFIX}whisperConfig`,
   transcriptDraft: `${KEY_PREFIX}transcriptDraft`,
 } as const;
 

@@ -40,11 +40,16 @@ describe("persistence", () => {
     assert.equal(loadSettings("nonexistent.key"), null);
   });
 
-  it("persists sttLanguage and privacyLevel", () => {
+  it("persists sttLanguage, privacyLevel, and Whisper config", () => {
     saveSettings(SETTINGS_KEYS.sttLanguage, "en");
     saveSettings(SETTINGS_KEYS.privacyLevel, "cloud");
+    saveSettings(SETTINGS_KEYS.whisperConfig, '{"command":["whisper-cli"]}');
     assert.equal(loadSettings(SETTINGS_KEYS.sttLanguage), "en");
     assert.equal(loadSettings(SETTINGS_KEYS.privacyLevel), "cloud");
+    assert.equal(
+      loadSettings(SETTINGS_KEYS.whisperConfig),
+      '{"command":["whisper-cli"]}',
+    );
   });
 
   it("saves, loads, and clears autosave drafts for crash recovery", () => {

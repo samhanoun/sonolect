@@ -42,6 +42,15 @@ import {
 } from "./segmentEditor";
 import { decodeAudioWaveform } from "./waveform";
 import {
+  buildWhisperCommandPreview,
+  commandArgsJsonForEnv,
+  getWhisperSetupStatus,
+  parseWhisperConfig,
+  serializeWhisperConfig,
+  validateWhisperConfig,
+  type WhisperConfig,
+} from "./whisperSetup";
+import {
   exportTranscript,
   type TranscriptExportFormat,
 } from "./transcriptExport";
@@ -95,6 +104,8 @@ type DesktopState = {
   setLocale: (locale: SupportedLocale) => void;
   sttLanguage: string;
   setSttLanguage: (lang: string) => void;
+  whisperConfig: WhisperConfig;
+  setWhisperConfig: (config: WhisperConfig) => void;
   setCommandOpen: (open: boolean) => void;
   toggleRecording: () => void;
   startVoiceCapture: () => Promise<void>;
@@ -271,6 +282,11 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
   setSttLanguage: (lang) => {
     saveSettings(SETTINGS_KEYS.sttLanguage, lang);
     set({ sttLanguage: lang });
+  },
+  whisperConfig: parseWhisperConfig(loadSettings(SETTINGS_KEYS.whisperConfig)),
+  setWhisperConfig: (config) => {
+    saveSettings(SETTINGS_KEYS.whisperConfig, serializeWhisperConfig(config));
+    set({ whisperConfig: config });
   },
   setCommandOpen: (open) => set({ commandOpen: open }),
   toggleRecording: () => {
@@ -1471,7 +1487,41 @@ function SettingsPrivacy() {
   const setLocale = useDesktopStore((state) => state.setLocale);
   const sttLanguage = useDesktopStore((state) => state.sttLanguage);
   const setSttLanguage = useDesktopStore((state) => state.setSttLanguage);
+  const whisperConfig = useDesktopStore((state) => state.whisperConfig);
+  const setWhisperConfig = useDesktopStore((state) => state.setWhisperConfig);
   const t = useT();
+  const [commandJson, setCommandJson] = React.useState(() =>
+    JSON.stringify(whisperConfig.command, null, 2),
+  );
+  const [diagnostic, setDiagnostic] = React.useState<string | undefined>();
+  const whisperStatus = getWhisperSetupStatus(whisperConfig);
+  const whisperErrors = validateWhisperConfig(whisperConfig);
+
+  useEffect(() => {
+    setCommandJson(JSON.stringify(whisperConfig.command, null, 2));
+  }, [whisperConfig.command]);
+
+  function updateWhisperConfig(next: Partial<WhisperConfig>) {
+    setWhisperConfig({ ...whisperConfig, ...next });
+    setDiagnostic(undefined);
+  }
+
+  function saveCommandJson() {
+    try {
+      const parsed = JSON.parse(commandJson) as unknown;
+      if (
+        !Array.isArray(parsed) ||
+        !parsed.every((arg) => typeof arg === "string")
+      ) {
+        setDiagnostic(t("settings.whisper.commandJsonInvalid"));
+        return;
+      }
+      updateWhisperConfig({ command: parsed });
+      setDiagnostic(t("settings.whisper.commandSaved"));
+    } catch {
+      setDiagnostic(t("settings.whisper.commandJsonInvalid"));
+    }
+  }
 
   return (
     <section className="glass-card">
@@ -1539,6 +1589,111 @@ function SettingsPrivacy() {
           </option>
         ))}
       </select>
+
+      <div className="section-title" style={{ marginTop: "1.5rem" }}>
+        {t("settings.localApi.title")}
+      </div>
+      <p>{t("settings.localApi.description")}</p>
+      <ul className="check-list">
+        <li>
+          {t("settings.localApi.url")}:{" "}
+          <code>{API_URL || "VITE_SONOLECT_API_URL not set"}</code>
+        </li>
+        <li>
+          {t(
+            isVoiceApiConfigured()
+              ? "settings.localApi.configured"
+              : "settings.localApi.offline",
+          )}
+        </li>
+      </ul>
+
+      <div className="section-title" style={{ marginTop: "1.5rem" }}>
+        {t("settings.whisper.title")}
+      </div>
+      <p>{t("settings.whisper.description")}</p>
+      <ul className="check-list">
+        <li>{t("settings.whisper.install")}</li>
+        <li>{t("settings.whisper.download")}</li>
+        <li>
+          {t("settings.whisper.env")}:{" "}
+          <code>SONOLECT_DESKTOP_WHISPER_COMMAND_ARGS</code>
+        </li>
+      </ul>
+      <label className="field-label" htmlFor="whisper-model-path">
+        {t("settings.whisper.modelPath")}
+      </label>
+      <input
+        id="whisper-model-path"
+        className="search-input"
+        value={whisperConfig.modelPath}
+        onChange={(event) =>
+          updateWhisperConfig({ modelPath: event.target.value })
+        }
+        placeholder="/Users/me/Models/ggml-base.en.bin"
+      />
+      <label className="field-label" htmlFor="whisper-model-name">
+        {t("settings.whisper.modelName")}
+      </label>
+      <input
+        id="whisper-model-name"
+        className="search-input"
+        value={whisperConfig.modelName}
+        onChange={(event) =>
+          updateWhisperConfig({ modelName: event.target.value })
+        }
+        placeholder="base.en"
+      />
+      <label className="field-label" htmlFor="whisper-command-json">
+        {t("settings.whisper.commandArgs")}
+      </label>
+      <textarea
+        id="whisper-command-json"
+        className="transcript-textarea"
+        value={commandJson}
+        onChange={(event) => setCommandJson(event.target.value)}
+        rows={5}
+        spellCheck={false}
+      />
+      <div className="editor-actions">
+        <button
+          className="ghost-button"
+          type="button"
+          onClick={saveCommandJson}
+        >
+          {t("settings.whisper.saveCommand")}
+        </button>
+        <button
+          className="ghost-button"
+          type="button"
+          onClick={() => setDiagnostic(whisperStatus.message)}
+        >
+          {t("settings.whisper.validate")}
+        </button>
+      </div>
+      <p>
+        <strong>{t("settings.whisper.status")}:</strong> {whisperStatus.message}
+      </p>
+      {whisperErrors.length > 0 ? (
+        <ul className="check-list">
+          {whisperErrors.map((error) => (
+            <li key={error.code}>{error.message}</li>
+          ))}
+        </ul>
+      ) : null}
+      {whisperConfig.command.length > 0 ? (
+        <>
+          <p>
+            <strong>{t("settings.whisper.preview")}:</strong>{" "}
+            <code>{buildWhisperCommandPreview(whisperConfig)}</code>
+          </p>
+          <p>
+            <strong>{t("settings.whisper.envValue")}:</strong>{" "}
+            <code>{commandArgsJsonForEnv(whisperConfig)}</code>
+          </p>
+        </>
+      ) : null}
+      {diagnostic ? <p role="status">{diagnostic}</p> : null}
     </section>
   );
 }

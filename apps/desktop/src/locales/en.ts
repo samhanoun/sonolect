@@ -75,6 +75,34 @@ export const en = {
   "privacy.maskNames": "Masking of sensitive proper nouns",
   "privacy.exportTextOnly": "Text-only export on demand",
   "privacy.ariaLabel": "Privacy mode",
+  "settings.localApi.title": "Local API",
+  "settings.localApi.description":
+    "Sonolect can send captures to a local HTTP API, or stay offline when no URL is configured.",
+  "settings.localApi.url": "Configured URL",
+  "settings.localApi.configured":
+    "Local API upload is enabled for new captures.",
+  "settings.localApi.offline":
+    "No API URL is configured; captures remain local/offline.",
+  "settings.whisper.title": "Local Whisper setup",
+  "settings.whisper.description":
+    "Use your own whisper.cpp, OpenAI Whisper, or faster-whisper wrapper. Sonolect stores only command settings; no large model is bundled.",
+  "settings.whisper.install":
+    "Install a Whisper-compatible binary or Python wrapper on this computer.",
+  "settings.whisper.download":
+    "Download a model file yourself and keep it in a local folder you control.",
+  "settings.whisper.env":
+    "Start the desktop app with this environment variable set to the argv JSON below",
+  "settings.whisper.modelPath": "Model path or model id",
+  "settings.whisper.modelName": "Model label",
+  "settings.whisper.commandArgs": "Command args JSON",
+  "settings.whisper.saveCommand": "Save command",
+  "settings.whisper.validate": "Validate setup",
+  "settings.whisper.status": "Status",
+  "settings.whisper.preview": "Preview",
+  "settings.whisper.envValue": "Env value",
+  "settings.whisper.commandJsonInvalid":
+    "Command args must be valid JSON string array.",
+  "settings.whisper.commandSaved": "Whisper command saved locally.",
 
   // Agent Actions
   "agents.title": "Agentic actions",

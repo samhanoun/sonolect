@@ -6,7 +6,12 @@ import type {
   CompanionSettings,
   TranscriptTurn,
 } from "./domain";
-import { DEFAULT_SETTINGS, SAMPLE_TRANSCRIPTS } from "./domain";
+import { DEFAULT_SETTINGS } from "./domain";
+import {
+  mobileAudioCaptureAdapter,
+  refineText,
+  stopCaptureWithAudio,
+} from "./audioCapture";
 import {
   fetchLocalTranscriptHistory,
   mergeTranscriptHistory,
@@ -42,32 +47,6 @@ const initialCapture: CaptureSession = {
 
 function id(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function refineText(rawText: string, mode: SonolectMode): string {
-  const cleaned = rawText.trim().replace(/\s+/g, " ");
-
-  switch (mode) {
-    case "summarize":
-      return `Résumé — ${cleaned}.\n\nActions: vérifier le contexte, confirmer le destinataire, envoyer une version concise.`;
-    case "reply":
-      return `Bonjour, merci pour le retour. Je valide l'approche et je reviens vers vous avec une version finalisée rapidement.`;
-    case "task_creation":
-      return `À faire\n• Clarifier la demande\n• Préparer la réponse\n• Programmer le suivi`;
-    case "translate":
-      return `Translation draft — ${cleaned}`;
-    case "command":
-      return `Commande détectée: ${cleaned}`;
-    case "code":
-      return `Note technique: ${cleaned}`;
-    case "meeting_notes":
-      return `Notes de réunion\n• ${cleaned}\n• Décisions et prochaines étapes à confirmer.`;
-    case "rewrite":
-      return `${cleaned.charAt(0).toUpperCase()}${cleaned.slice(1)} Merci de me confirmer si cela vous convient.`;
-    case "dictate":
-    default:
-      return cleaned;
-  }
 }
 
 async function loadAndSyncHistory(
@@ -118,6 +97,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => ({
 
   startCapture: () => {
     const settings = get().settings;
+    void mobileAudioCaptureAdapter.start();
     set({
       capture: {
         id: id("capture"),
@@ -146,24 +126,11 @@ export const useCompanionStore = create<CompanionState>((set, get) => ({
       },
     });
 
-    const started = capture.startedAt
-      ? Date.parse(capture.startedAt)
-      : Date.now();
-    const sample =
-      SAMPLE_TRANSCRIPTS[history.length % SAMPLE_TRANSCRIPTS.length] ??
-      SAMPLE_TRANSCRIPTS[0];
-    const transcript: TranscriptTurn = {
-      id: id("turn"),
-      rawText: sample,
-      refinedText: refineText(sample, "dictate"),
-      mode: "dictate",
-      language: settings.language,
-      privacyMode: settings.privacyLevel !== "standard",
-      createdAt: new Date().toISOString(),
-      durationMs: Math.max(1200, Date.now() - started),
-      source: "microphone",
-      syncState: settings.cloudSyncEnabled ? "queued" : "local",
-    };
+    const transcript = await stopCaptureWithAudio({
+      captureStartedAt: capture.startedAt,
+      settings,
+      historyLength: history.length,
+    });
 
     const nextHistory =
       settings.saveHistory && settings.privacyLevel !== "ephemeral"
@@ -198,7 +165,10 @@ export const useCompanionStore = create<CompanionState>((set, get) => ({
     }
   },
 
-  cancelCapture: () => set({ capture: initialCapture }),
+  cancelCapture: () => {
+    void mobileAudioCaptureAdapter.cancel();
+    set({ capture: initialCapture });
+  },
 
   refineLast: async (mode: SonolectMode) => {
     const { history } = get();

@@ -80,6 +80,34 @@ export const fr: Record<LocaleKeys, string> = {
   "privacy.maskNames": "Masquage des noms propres sensibles",
   "privacy.exportTextOnly": "Export texte uniquement sur demande",
   "privacy.ariaLabel": "Mode de confidentialité",
+  "settings.localApi.title": "API locale",
+  "settings.localApi.description":
+    "Sonolect peut envoyer les captures vers une API HTTP locale, ou rester hors ligne quand aucune URL n'est configurée.",
+  "settings.localApi.url": "URL configurée",
+  "settings.localApi.configured":
+    "L'envoi vers l'API locale est activé pour les nouvelles captures.",
+  "settings.localApi.offline":
+    "Aucune URL d'API n'est configurée ; les captures restent locales/offline.",
+  "settings.whisper.title": "Configuration Whisper locale",
+  "settings.whisper.description":
+    "Utilisez votre propre wrapper whisper.cpp, OpenAI Whisper ou faster-whisper. Sonolect stocke uniquement les réglages de commande ; aucun gros modèle n'est inclus.",
+  "settings.whisper.install":
+    "Installez un binaire Whisper-compatible ou un wrapper Python sur cet ordinateur.",
+  "settings.whisper.download":
+    "Téléchargez vous-même un fichier modèle et gardez-le dans un dossier local que vous contrôlez.",
+  "settings.whisper.env":
+    "Démarrez l'app desktop avec cette variable d'environnement définie sur le JSON argv ci-dessous",
+  "settings.whisper.modelPath": "Chemin du modèle ou identifiant",
+  "settings.whisper.modelName": "Libellé du modèle",
+  "settings.whisper.commandArgs": "JSON des arguments de commande",
+  "settings.whisper.saveCommand": "Enregistrer la commande",
+  "settings.whisper.validate": "Valider la configuration",
+  "settings.whisper.status": "Statut",
+  "settings.whisper.preview": "Aperçu",
+  "settings.whisper.envValue": "Valeur env",
+  "settings.whisper.commandJsonInvalid":
+    "Les arguments doivent être un tableau JSON de chaînes valide.",
+  "settings.whisper.commandSaved": "Commande Whisper enregistrée localement.",
 
   // Agent Actions
   "agents.title": "Actions agentiques",

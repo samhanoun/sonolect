@@ -2,7 +2,71 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { submitCapturedAudio } from "./voiceApi";
 
+function createDeterministicWavBytes() {
+  const data = new Uint8Array([0, 64, 255, 127, 0, 128, 255, 191]);
+  const bytes = new Uint8Array(44 + data.length);
+  const view = new DataView(bytes.buffer);
+  const writeAscii = (offset: number, value: string) => {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset + index, value.charCodeAt(index));
+    }
+  };
+
+  writeAscii(0, "RIFF");
+  view.setUint32(4, 36 + data.length, true);
+  writeAscii(8, "WAVE");
+  writeAscii(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 16_000, true);
+  view.setUint32(28, 32_000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeAscii(36, "data");
+  view.setUint32(40, data.length, true);
+  bytes.set(data, 44);
+  return bytes;
+}
+
 describe("desktop voice API client", () => {
+  it("uploads deterministic WAV fixture bytes through the real backend audio boundary", async () => {
+    const wavBytes = createDeterministicWavBytes();
+    const audio = new Blob([wavBytes], { type: "audio/wav" });
+    let uploaded: Blob | undefined;
+
+    const result = await submitCapturedAudio(
+      audio,
+      {
+        durationMs: 250,
+        mimeType: "audio/wav",
+        sizeBytes: wavBytes.byteLength,
+      },
+      {
+        apiUrl: "http://localhost:4321",
+        desktopTranscriber: async () => undefined,
+        fetchImpl: (async (_url: URL | RequestInfo, init?: RequestInit) => {
+          if (init?.body instanceof Blob) {
+            uploaded = init.body;
+            return new Response("{}", { status: 200 });
+          }
+          return new Response(
+            JSON.stringify({ id: "wav-job", status: "queued" }),
+            { status: 201 },
+          );
+        }) as typeof fetch,
+      },
+    );
+
+    assert.equal(result.status, "submitted");
+    assert.equal(result.jobId, "wav-job");
+    assert.ok(uploaded);
+    assert.equal(uploaded.type, "audio/wav");
+    assert.deepEqual(new Uint8Array(await uploaded.arrayBuffer()), wavBytes);
+    assert.equal(new TextDecoder().decode(wavBytes.slice(0, 4)), "RIFF");
+    assert.equal(new TextDecoder().decode(wavBytes.slice(8, 12)), "WAVE");
+  });
+
   it("uses in-app desktop Whisper before backend submission when available", async () => {
     let fetchCalled = false;
     const result = await submitCapturedAudio(
