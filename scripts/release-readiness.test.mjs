@@ -22,6 +22,11 @@ const ciWorkflow = readFileSync(
   "utf8",
 );
 
+const releaseDocs = readFileSync(
+  new URL("../docs/release.md", import.meta.url),
+  "utf8",
+);
+
 describe("release and package readiness", () => {
   it("keeps npm, desktop, and Tauri versions aligned", () => {
     assert.equal(desktopPackage.version, rootPackage.version);
@@ -29,9 +34,10 @@ describe("release and package readiness", () => {
   });
 
   it("documents unsigned PR-safe signing and updater readiness", () => {
-    assert.match(ciWorkflow, /TAURI_SIGNING_PRIVATE_KEY/);
-    assert.match(ciWorkflow, /TAURI_UPDATER_PRIVATE_KEY/);
+    assert.match(releaseDocs, /TAURI_SIGNING_PRIVATE_KEY/);
+    assert.match(releaseDocs, /TAURI_UPDATER_PRIVATE_KEY/);
     assert.match(ciWorkflow, /Release package validation/);
+    assert.doesNotMatch(ciWorkflow, /APPLE_CERTIFICATE:/);
   });
 
   it("validates macOS and Windows desktop package jobs in CI", () => {
