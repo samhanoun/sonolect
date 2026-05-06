@@ -1,0 +1,128 @@
+title = "Sonolect gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+paths = [
+  '''pnpm-lock\.yaml''',
+  '''\.test\.ts$''',
+  '''\.test\.mjs$''',
+  '''\.snap$''',
+  '''node_modules/''',
+]
+
+# ── Stripe ───────────────────────────────────────────────────────────
+[[rules]]
+id = "stripe-secret-key"
+description = "Stripe secret API key"
+regex = '''(?i)\bsk_(live|test)_[0-9a-zA-Z]{24,}\b'''
+tags = ["stripe", "secret"]
+
+[[rules]]
+id = "stripe-restricted-key"
+description = "Stripe restricted API key"
+regex = '''(?i)\brk_(live|test)_[0-9a-zA-Z]{24,}\b'''
+tags = ["stripe", "secret"]
+
+[[rules]]
+id = "stripe-webhook-secret"
+description = "Stripe webhook signing secret"
+regex = '''(?i)\bwhsec_[0-9a-zA-Z]{24,}\b'''
+tags = ["stripe", "secret"]
+
+# ── Firebase / GCP ──────────────────────────────────────────────────
+[[rules]]
+id = "firebase-api-key"
+description = "Firebase web API key"
+regex = '''(?i)\bAIza[0-9A-Za-z\-_]{35}\b'''
+tags = ["firebase", "gcp", "secret"]
+
+[[rules]]
+id = "gcp-service-account-key"
+description = "GCP service account private key"
+regex = '''-----BEGIN (RSA )?PRIVATE KEY-----'''
+tags = ["gcp", "secret"]
+
+[[rules]]
+id = "gcp-oauth-client-secret"
+description = "GCP OAuth client secret"
+regex = '''(?i)GOCSPX-[0-9A-Za-z\-_]{28,}'''
+tags = ["gcp", "secret"]
+
+[[rules]]
+id = "firebase-service-account-json"
+description = "Firebase/GCP service account JSON key pattern"
+regex = '''"private_key_id"\s*:\s*"[0-9a-f]{40}"'''
+tags = ["firebase", "gcp", "secret"]
+
+# ── OpenAI ──────────────────────────────────────────────────────────
+[[rules]]
+id = "openai-api-key"
+description = "OpenAI API key"
+regex = '''(?i)\bsk-[A-Za-z0-9_-]{20,}T3BlbkFJ[A-Za-z0-9_-]{20,}\b'''
+tags = ["openai", "secret"]
+
+[[rules]]
+id = "openai-api-key-new"
+description = "OpenAI API key (new format)"
+regex = '''(?i)\bsk-proj-[A-Za-z0-9_-]{40,}\b'''
+tags = ["openai", "secret"]
+
+# ── Anthropic ───────────────────────────────────────────────────────
+[[rules]]
+id = "anthropic-api-key"
+description = "Anthropic API key"
+regex = '''(?i)\bsk-ant-[A-Za-z0-9_-]{90,}\b'''
+tags = ["anthropic", "secret"]
+
+# ── ElevenLabs ──────────────────────────────────────────────────────
+[[rules]]
+id = "elevenlabs-api-key"
+description = "ElevenLabs API key"
+regex = '''(?i)(?:elevenlabs|eleven_labs|xi)[\w_-]*(?:api)?[\w_-]*(?:key|token|secret)\s*[:=]\s*["']?([0-9a-f]{32})["']?'''
+tags = ["elevenlabs", "secret"]
+
+# ── Minimax ─────────────────────────────────────────────────────────
+[[rules]]
+id = "minimax-api-key"
+description = "Minimax API key"
+regex = '''(?i)(?:minimax)[\w_-]*(?:api)?[\w_-]*(?:key|token|secret)\s*[:=]\s*["']?([A-Za-z0-9_-]{32,})["']?'''
+tags = ["minimax", "secret"]
+
+# ── Generic secret patterns ─────────────────────────────────────────
+[[rules]]
+id = "generic-jwt-secret"
+description = "JWT or session secret"
+regex = '''(?i)(?:jwt|session|auth)[\w_-]*secret\s*[:=]\s*["']([^"']{16,})["']'''
+tags = ["generic", "secret"]
+
+[[rules]]
+id = "database-url-with-password"
+description = "Database connection string with embedded password"
+regex = '''(?i)(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^:]+:[^@\s]{8,}@[^\s]+'''
+tags = ["database", "secret"]
+
+[[rules]]
+id = "generic-bearer-token"
+description = "Hardcoded Bearer token"
+regex = '''(?i)["']Bearer\s+[A-Za-z0-9_\-.]{20,}["']'''
+tags = ["generic", "secret"]
+
+[[rules]]
+id = "private-key-pem"
+description = "PEM-encoded private key"
+regex = '''-----BEGIN (?:EC |DSA |ED25519 )?PRIVATE KEY-----'''
+tags = ["crypto", "secret"]
+
+[[rules]]
+id = "google-cloud-storage-hmac"
+description = "GCS HMAC key"
+regex = '''(?i)\bGOOG[0-9A-Za-z]{16,}\b'''
+tags = ["gcp", "secret"]
+
+[[rules]]
+id = "vertex-ai-key"
+description = "Vertex AI API key"
+regex = '''(?i)(?:vertex|vertexai)[\w_-]*(?:api)?[\w_-]*(?:key|token|secret)\s*[:=]\s*["']?([A-Za-z0-9_-]{20,})["']?'''
+tags = ["gcp", "vertex", "secret"]

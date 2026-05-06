@@ -8,6 +8,6 @@
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo \"No tests yet for @sonolect/config\""
+    "test": "pnpm dlx tsx@4.19.2 --test src/securityHeaders.test.ts src/rateLimiting.test.ts"
   }
 }

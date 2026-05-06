@@ -6,11 +6,14 @@ import {
   buildWhisperCommandPreview,
   buildWhisperInstallerGuidance,
   commandArgsJsonForEnv,
+  getDefaultModelPath,
   getDefaultWhisperInstallPlan,
   getWhisperAssetStatus,
+  getWhisperInstallInstructions,
   getWhisperSetupStatus,
   parseWhisperConfig,
   serializeWhisperConfig,
+  validateModelFile,
   validateWhisperConfig,
 } from "./whisperSetup";
 
@@ -188,5 +191,83 @@ describe("Whisper setup helpers", () => {
     assert.match(guidance.steps.join("\n"), /https:\/\//);
     assert.match(guidance.commandPreview, /--model/);
     assert.match(guidance.commandPreview, /sonolect-sample\.wav/);
+  });
+
+  it("returns platform-aware default model paths", () => {
+    const linuxPath = getDefaultModelPath("linux", "/home/alex");
+    assert.equal(linuxPath, "/home/alex/.local/share/sonolect/models");
+
+    const macPath = getDefaultModelPath("darwin", "/Users/alex");
+    assert.equal(
+      macPath,
+      "/Users/alex/Library/Application Support/sonolect/models",
+    );
+
+    const winPath = getDefaultModelPath("win32", "C:/Users/Alex");
+    assert.equal(winPath, "C:/Users/Alex/AppData/Roaming/sonolect/models");
+  });
+
+  it("generates install instructions per platform", () => {
+    const macGuide = getWhisperInstallInstructions("darwin");
+    assert.equal(macGuide.platform, "darwin");
+    assert.match(macGuide.installCommands.join("\n"), /brew install/);
+    assert.match(macGuide.whisperCppUrl, /whisper\.cpp/);
+    assert.match(macGuide.modelDownloadUrl, /huggingface/);
+    assert.match(macGuide.verifyCommand, /whisper-cli/);
+
+    const linuxGuide = getWhisperInstallInstructions("linux");
+    assert.equal(linuxGuide.platform, "linux");
+    assert.match(linuxGuide.installCommands.join("\n"), /apt/);
+
+    const winGuide = getWhisperInstallInstructions("win32");
+    assert.equal(winGuide.platform, "win32");
+    assert.match(winGuide.installCommands.join("\n"), /winget|scoop/);
+    assert.match(winGuide.verifyCommand, /\.exe/);
+  });
+
+  it("validates model files with mock filesystem stats", () => {
+    // Missing file
+    const missing = validateModelFile(null);
+    assert.equal(missing.exists, false);
+    assert.equal(missing.sizeOk, false);
+    assert.equal(missing.formatOk, false);
+
+    // File that does not exist
+    const notExists = validateModelFile({
+      exists: false,
+      sizeBytes: 0,
+      path: "/tmp/ggml-base.bin",
+    });
+    assert.equal(notExists.exists, false);
+
+    // Valid model file
+    const valid = validateModelFile({
+      exists: true,
+      sizeBytes: 147_951_465,
+      path: "/models/ggml-base.en.bin",
+    });
+    assert.equal(valid.exists, true);
+    assert.equal(valid.sizeOk, true);
+    assert.equal(valid.formatOk, true);
+
+    // Too small
+    const tooSmall = validateModelFile({
+      exists: true,
+      sizeBytes: 512,
+      path: "/models/ggml-base.en.bin",
+    });
+    assert.equal(tooSmall.exists, true);
+    assert.equal(tooSmall.sizeOk, false);
+    assert.equal(tooSmall.formatOk, true);
+
+    // Wrong format
+    const wrongFormat = validateModelFile({
+      exists: true,
+      sizeBytes: 50_000_000,
+      path: "/models/model.onnx",
+    });
+    assert.equal(wrongFormat.exists, true);
+    assert.equal(wrongFormat.sizeOk, true);
+    assert.equal(wrongFormat.formatOk, false);
   });
 });
