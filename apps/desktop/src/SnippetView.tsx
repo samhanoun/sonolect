@@ -89,19 +89,21 @@ export function SnippetView({
   }
 
   return (
-    <section className="glass-card management-panel">
+    <section className="glass-card management-panel" aria-labelledby="snippets-heading">
       <p className="section-title">{t("snippets.sectionTitle")}</p>
-      <h3>{t("snippets.subtitle")}</h3>
+      <h3 id="snippets-heading">{t("snippets.subtitle")}</h3>
       <p>{t("snippets.description")}</p>
 
-      <input
-        className="search-input"
-        type="text"
-        placeholder={t("snippets.searchPlaceholder")}
-        value={searchQuery}
-        onChange={(e) => onSearchChange(e.target.value)}
-        aria-label={t("snippets.searchAriaLabel")}
-      />
+      <div role="search" aria-label={t("snippets.searchAriaLabel")}>
+        <input
+          className="search-input"
+          type="text"
+          placeholder={t("snippets.searchPlaceholder")}
+          value={searchQuery}
+          onChange={(e) => onSearchChange(e.target.value)}
+          aria-label={t("snippets.searchAriaLabel")}
+        />
+      </div>
 
       <div className="form-grid two">
         <label>
@@ -151,16 +153,16 @@ export function SnippetView({
         </span>
       </div>
 
-      <div className="preference-list">
+      <div className="preference-list" role="list" aria-label={t("snippets.sectionTitle")}>
         {filtered.length === 0 ? (
-          <p className="editor-meta">
+          <p className="editor-meta" role="status" aria-live="polite">
             {snippets.length === 0
               ? t("snippets.emptyState")
               : t("snippets.noMatch")}
           </p>
         ) : null}
         {filtered.map((snippet) => (
-          <article className="preference-row" key={snippet.id}>
+          <article className="preference-row" key={snippet.id} role="listitem">
             {editingId === snippet.id ? (
               <div style={{ flex: 1 }}>
                 <div className="form-grid two">

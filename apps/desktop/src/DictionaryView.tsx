@@ -92,19 +92,21 @@ export function DictionaryView({
   }
 
   return (
-    <section className="glass-card management-panel">
+    <section className="glass-card management-panel" aria-labelledby="dictionary-heading">
       <p className="section-title">{t("dictionary.sectionTitle")}</p>
-      <h3>{t("dictionary.subtitle")}</h3>
+      <h3 id="dictionary-heading">{t("dictionary.subtitle")}</h3>
       <p>{t("dictionary.description")}</p>
 
-      <input
-        className="search-input"
-        type="text"
-        placeholder={t("dictionary.searchPlaceholder")}
-        value={searchQuery}
-        onChange={(e) => onSearchChange(e.target.value)}
-        aria-label={t("dictionary.searchAriaLabel")}
-      />
+      <div role="search" aria-label={t("dictionary.searchAriaLabel")}>
+        <input
+          className="search-input"
+          type="text"
+          placeholder={t("dictionary.searchPlaceholder")}
+          value={searchQuery}
+          onChange={(e) => onSearchChange(e.target.value)}
+          aria-label={t("dictionary.searchAriaLabel")}
+        />
+      </div>
 
       <div className="form-grid two">
         <label>
@@ -153,16 +155,16 @@ export function DictionaryView({
         </span>
       </div>
 
-      <div className="preference-list">
+      <div className="preference-list" role="list" aria-label={t("dictionary.sectionTitle")}>
         {filtered.length === 0 ? (
-          <p className="editor-meta">
+          <p className="editor-meta" role="status" aria-live="polite">
             {entries.length === 0
               ? t("dictionary.emptyState")
               : t("dictionary.noMatch")}
           </p>
         ) : null}
         {filtered.map((entry) => (
-          <article className="preference-row" key={entry.id}>
+          <article className="preference-row" key={entry.id} role="listitem">
             {editingId === entry.id ? (
               <div className="form-grid two" style={{ flex: 1 }}>
                 <input

@@ -15,7 +15,7 @@ export function StylePresetSelector({
   const presets = useMemo(() => getStylePresets(), []);
 
   return (
-    <div className="inline-actions" style={{ alignItems: "center" }}>
+    <div className="inline-actions" role="group" aria-label={t("stylePreset.label")} style={{ alignItems: "center" }}>
       <span className="editor-meta" style={{ marginRight: "0.5rem" }}>
         {t("stylePreset.label")}
       </span>
@@ -30,6 +30,8 @@ export function StylePresetSelector({
           onClick={() => onSelect(preset.id)}
           type="button"
           title={preset.description}
+          aria-current={currentPresetId === preset.id ? true : undefined}
+          aria-label={`${preset.label}: ${preset.description}`}
         >
           {preset.label}
         </button>

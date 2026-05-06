@@ -53,11 +53,11 @@ export function RetentionSettings({
   }
 
   return (
-    <div style={{ marginTop: "1.5rem" }}>
-      <div className="section-title">{t("retention.title")}</div>
+    <div style={{ marginTop: "1.5rem" }} aria-labelledby="retention-heading">
+      <div className="section-title" id="retention-heading">{t("retention.title")}</div>
       <p>{t("retention.description")}</p>
 
-      <div className="stats-grid" style={{ marginTop: "0.75rem" }}>
+      <div className="stats-grid" role="group" aria-label={t("retention.title")} style={{ marginTop: "0.75rem" }}>
         <div className="stat-item">
           <span className="stat-value">{stats.total}</span>
           <span className="stat-label">{t("retention.totalItems")}</span>
@@ -121,6 +121,7 @@ export function RetentionSettings({
           }
           onClick={handlePurge}
           type="button"
+          aria-label={confirmPurge ? t("retention.confirmPurge") : t("retention.purgeNow")}
         >
           {confirmPurge ? t("retention.confirmPurge") : t("retention.purgeNow")}
         </button>
@@ -134,7 +135,7 @@ export function RetentionSettings({
           </button>
         ) : null}
         {stats.expired > 0 ? (
-          <span className="editor-meta">
+          <span className="editor-meta" role="status" aria-live="polite">
             {stats.expired} {stats.expired === 1 ? t("retention.expiredItemsSingular") : t("retention.expiredItemsPlural")}
           </span>
         ) : null}

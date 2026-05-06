@@ -1232,7 +1232,7 @@ function App() {
   const showFloatingRecorder = recordingState === "recording";
 
   return (
-    <main className="desktop-shell">
+    <main className="desktop-shell" id="main-content">
       <div className="ambient-grid" aria-hidden="true" />
       <div className="signal-rings" aria-hidden="true" />
       <Sidebar />
@@ -1373,9 +1373,9 @@ function Sidebar() {
   ];
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" aria-label="Sidebar navigation">
       <div className="brand-block">
-        <div className="brand-mark">S</div>
+        <div className="brand-mark" aria-hidden="true">S</div>
         <div>
           <p className="eyebrow">Sonolect</p>
           <h1>Voice OS</h1>
@@ -1386,8 +1386,9 @@ function Sidebar() {
         className="record-cta"
         onClick={() => useDesktopStore.getState().toggleRecording()}
         type="button"
+        aria-label={t("sidebar.recordNow")}
       >
-        <span className="record-dot" /> {t("sidebar.recordNow")}
+        <span className="record-dot" aria-hidden="true" /> {t("sidebar.recordNow")}
         <span className="shortcut-group">
           <kbd title="Hands-free toggle">⌘⇧M</kbd>
           <kbd title="Push to talk (hold)">⌘⇧V</kbd>
@@ -1404,6 +1405,7 @@ function Sidebar() {
               if (item.id === "home") clearActiveSession();
             }}
             type="button"
+            aria-current={activeView === item.id ? "page" : undefined}
           >
             <span>{t(item.labelKey)}</span>
           </button>
@@ -1458,6 +1460,8 @@ function SidebarHistoryList() {
             void selectTranscriptSession(session.id);
           }}
           type="button"
+          aria-current={activeSessionId === session.id ? true : undefined}
+          aria-label={`${session.title} — ${session.timestamp} — ${session.duration}`}
         >
           <span className="history-title">{session.title}</span>
           <span className="history-meta">
@@ -1484,7 +1488,7 @@ function TopBar() {
         <h2>{t("topbar.headline")}</h2>
       </div>
       <div className="topbar-actions">
-        <span className="status-chip">
+        <span className="status-chip" role="status" aria-live="polite">
           {privacyLevel === "local"
             ? t("topbar.localFirst")
             : t("topbar.cloudAssisted")}{" "}
@@ -1495,8 +1499,9 @@ function TopBar() {
           className="ghost-button"
           onClick={() => setCommandOpen(true)}
           type="button"
+          aria-label={t("topbar.searchCommand")}
         >
-          {t("topbar.searchCommand")} <kbd>⌘K</kbd>
+          {t("topbar.searchCommand")} <kbd aria-hidden="true">⌘K</kbd>
         </button>
       </div>
     </header>
@@ -2379,6 +2384,7 @@ function SettingsPrivacy() {
           className={privacyLevel === "local" ? "active" : ""}
           onClick={() => setPrivacyLevel("local")}
           type="button"
+          aria-current={privacyLevel === "local" ? true : undefined}
         >
           {t("privacy.local")}
         </button>
@@ -2386,6 +2392,7 @@ function SettingsPrivacy() {
           className={privacyLevel === "cloud" ? "active" : ""}
           onClick={() => setPrivacyLevel("cloud")}
           type="button"
+          aria-current={privacyLevel === "cloud" ? true : undefined}
         >
           {t("privacy.cloud")}
         </button>
@@ -2404,6 +2411,7 @@ function SettingsPrivacy() {
           className={locale === "en" ? "active" : ""}
           onClick={() => setLocale("en")}
           type="button"
+          aria-current={locale === "en" ? true : undefined}
         >
           EN
         </button>
@@ -2411,6 +2419,7 @@ function SettingsPrivacy() {
           className={locale === "fr" ? "active" : ""}
           onClick={() => setLocale("fr")}
           type="button"
+          aria-current={locale === "fr" ? true : undefined}
         >
           FR
         </button>
@@ -2684,11 +2693,11 @@ function VoiceRecorderPill() {
       role="status"
       aria-label={t("recorder.ariaLabel")}
     >
-      <div className={isRecording ? "pill-orb active" : "pill-orb"} />
+      <div className={isRecording ? "pill-orb active" : "pill-orb"} aria-hidden="true" />
       <Waveform active={isRecording} />
-      <span className="pill-status">{statusLabel}</span>
+      <span className="pill-status" aria-live="polite">{statusLabel}</span>
       {voiceError && isDone ? (
-        <span className="pill-error">{voiceError}</span>
+        <span className="pill-error" role="alert">{voiceError}</span>
       ) : null}
       {voiceCapture && isDone ? (
         <a
@@ -2696,8 +2705,9 @@ function VoiceRecorderPill() {
           href={voiceCapture.objectUrl}
           download="sonolect-capture.webm"
           title={t("recorder.listenDownload")}
+          aria-label={t("recorder.listenDownload")}
         >
-          ↓
+          <span aria-hidden="true">↓</span>
         </a>
       ) : null}
       {isDone ? (
@@ -2706,8 +2716,9 @@ function VoiceRecorderPill() {
           onClick={resetVoiceCapture}
           type="button"
           title={t("recorder.close")}
+          aria-label={t("recorder.close")}
         >
-          ✕
+          <span aria-hidden="true">✕</span>
         </button>
       ) : null}
       <button
@@ -2715,6 +2726,7 @@ function VoiceRecorderPill() {
         disabled={isProcessing}
         onClick={toggleRecording}
         type="button"
+        aria-label={isRecording ? t("pill.stop") : isDone ? t("pill.again") : t("pill.processing")}
       >
         {isRecording ? t("pill.stop") : isDone ? t("pill.again") : "…"}
       </button>
@@ -2838,8 +2850,8 @@ function CommandPalette() {
         aria-label={t("palette.ariaLabel")}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="palette-input">
-          <span className="palette-prefix">⌘K</span>
+        <div className="palette-input" role="search" aria-label={t("palette.ariaLabel")}>
+          <span className="palette-prefix" aria-hidden="true">⌘K</span>
           <input
             ref={inputRef}
             className="palette-search"
@@ -2847,9 +2859,10 @@ function CommandPalette() {
             placeholder={t("palette.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            aria-label={t("palette.searchPlaceholder")}
           />
         </div>
-        <div className="command-list">
+        <div className="command-list" role="list" aria-label="Commands">
           {filtered.length === 0 ? (
             <p className="palette-no-results">{t("palette.noResults")}</p>
           ) : (
@@ -2888,9 +2901,9 @@ function ToastContainer() {
   const t = useT();
   if (toasts.length === 0) return null;
   return (
-    <div className="toast-container">
+    <div className="toast-container" role="status" aria-live="polite" aria-atomic="true">
       {toasts.map((toast) => (
-        <div key={toast.id} className="toast">
+        <div key={toast.id} className="toast" role="alert">
           {t(toast.message as LocaleKeys)}
         </div>
       ))}
