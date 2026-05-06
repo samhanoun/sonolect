@@ -9,6 +9,7 @@ import {
   isWizardFinished,
   type WizardState,
 } from "./onboardingWizard";
+import { useT } from "./i18n";
 
 export type OnboardingViewProps = {
   checklist: OnboardingChecklist;
@@ -21,6 +22,7 @@ export function OnboardingView({
   onComplete,
   onSkip,
 }: OnboardingViewProps) {
+  const t = useT();
   const [wizard, setWizard] = useState<WizardState>(() =>
     initWizardState(checklist),
   );
@@ -51,17 +53,14 @@ export function OnboardingView({
   if (finished) {
     return (
       <section className="glass-card management-panel">
-        <p className="section-title">First-run setup</p>
-        <h3>Sonolect is ready for dictation</h3>
-        <p>
-          All onboarding steps are complete. You can re-run setup anytime from
-          the sidebar.
-        </p>
+        <p className="section-title">{t("onboarding.sectionTitle")}</p>
+        <h3>{t("onboarding.readyTitle")}</h3>
+        <p>{t("onboarding.readyDescription")}</p>
         <div className="setup-progress">
           <span style={{ width: "100%" }} />
         </div>
         <p className="editor-meta" style={{ marginTop: "1rem" }}>
-          {progress.completed}/{progress.total} steps completed
+          {progress.completed}/{progress.total} {t("onboarding.stepsCompleted")}
         </p>
       </section>
     );
@@ -69,15 +68,15 @@ export function OnboardingView({
 
   return (
     <section className="glass-card management-panel">
-      <p className="section-title">First-run setup</p>
-      <h3>Complete setup before relying on dictation</h3>
+      <p className="section-title">{t("onboarding.sectionTitle")}</p>
+      <h3>{t("onboarding.setupTitle")}</h3>
 
       <div className="setup-progress">
         <span style={{ width: `${progress.percentage}%` }} />
       </div>
       <p className="editor-meta" style={{ marginBottom: "1rem" }}>
-        Step {wizard.currentStepIndex + 1} of {wizard.steps.length} ·{" "}
-        {progress.percentage}% complete
+        Step {wizard.currentStepIndex + 1} {t("onboarding.stepOf")} {wizard.steps.length} ·{" "}
+        {progress.percentage}% {t("onboarding.percentComplete")}
       </p>
 
       {currentStep ? (
@@ -95,7 +94,7 @@ export function OnboardingView({
               disabled={wizard.currentStepIndex === 0}
               type="button"
             >
-              Back
+              {t("onboarding.back")}
             </button>
             {currentStep.skipAllowed ? (
               <button
@@ -103,7 +102,7 @@ export function OnboardingView({
                 onClick={handleSkip}
                 type="button"
               >
-                Skip
+                {t("onboarding.skip")}
               </button>
             ) : null}
             <button
@@ -111,7 +110,7 @@ export function OnboardingView({
               onClick={handleComplete}
               type="button"
             >
-              Complete
+              {t("onboarding.complete")}
             </button>
           </div>
         </div>
@@ -129,7 +128,7 @@ export function OnboardingView({
             >
               <div>
                 <strong>
-                  {done ? "[done] " : skipped ? "[skipped] " : ""}
+                  {done ? `${t("onboarding.donePrefix")} ` : skipped ? `${t("onboarding.skippedPrefix")} ` : ""}
                   {step.title}
                 </strong>
                 <p className="editor-meta">{step.description}</p>

@@ -4,6 +4,7 @@ import {
   getRetentionStats,
   type RetentionPolicy,
 } from "./retentionControls";
+import { useT } from "./i18n";
 
 export type RetentionSettingsProps = {
   history: TranscriptHistoryRow[];
@@ -18,6 +19,7 @@ export function RetentionSettings({
   onPolicyChange,
   onPurge,
 }: RetentionSettingsProps) {
+  const t = useT();
   const [confirmPurge, setConfirmPurge] = useState(false);
 
   const stats = useMemo(
@@ -52,34 +54,31 @@ export function RetentionSettings({
 
   return (
     <div style={{ marginTop: "1.5rem" }}>
-      <div className="section-title">Data Retention</div>
-      <p>
-        Control how long transcript history is kept and how many items are
-        stored.
-      </p>
+      <div className="section-title">{t("retention.title")}</div>
+      <p>{t("retention.description")}</p>
 
       <div className="stats-grid" style={{ marginTop: "0.75rem" }}>
         <div className="stat-item">
           <span className="stat-value">{stats.total}</span>
-          <span className="stat-label">Total items</span>
+          <span className="stat-label">{t("retention.totalItems")}</span>
         </div>
         <div className="stat-item">
           <span className="stat-value">{stats.withinPolicy}</span>
-          <span className="stat-label">Within policy</span>
+          <span className="stat-label">{t("retention.withinPolicy")}</span>
         </div>
         <div className="stat-item">
           <span className="stat-value">{stats.expiring}</span>
-          <span className="stat-label">Expiring soon</span>
+          <span className="stat-label">{t("retention.expiringSoon")}</span>
         </div>
         <div className="stat-item">
           <span className="stat-value">{stats.expired}</span>
-          <span className="stat-label">Expired</span>
+          <span className="stat-label">{t("retention.expired")}</span>
         </div>
       </div>
 
       <div className="form-grid two" style={{ marginTop: "1rem" }}>
         <label>
-          <span>Max age (days)</span>
+          <span>{t("retention.maxAgeDays")}</span>
           <input
             type="number"
             min="1"
@@ -89,7 +88,7 @@ export function RetentionSettings({
           />
         </label>
         <label>
-          <span>Max items</span>
+          <span>{t("retention.maxItems")}</span>
           <input
             type="number"
             min="1"
@@ -110,10 +109,8 @@ export function RetentionSettings({
           onChange={(e) => handleAutoDelete(e.target.checked)}
         />
         <div>
-          <strong>Auto-delete</strong>
-          <p className="editor-meta">
-            Automatically remove expired transcripts when the app starts.
-          </p>
+          <strong>{t("retention.autoDelete")}</strong>
+          <p className="editor-meta">{t("retention.autoDeleteDescription")}</p>
         </div>
       </label>
 
@@ -125,7 +122,7 @@ export function RetentionSettings({
           onClick={handlePurge}
           type="button"
         >
-          {confirmPurge ? "Confirm purge" : "Purge now"}
+          {confirmPurge ? t("retention.confirmPurge") : t("retention.purgeNow")}
         </button>
         {confirmPurge ? (
           <button
@@ -133,13 +130,12 @@ export function RetentionSettings({
             onClick={() => setConfirmPurge(false)}
             type="button"
           >
-            Cancel
+            {t("retention.cancel")}
           </button>
         ) : null}
         {stats.expired > 0 ? (
           <span className="editor-meta">
-            {stats.expired} expired {stats.expired === 1 ? "item" : "items"}{" "}
-            can be purged
+            {stats.expired} {stats.expired === 1 ? t("retention.expiredItemsSingular") : t("retention.expiredItemsPlural")}
           </span>
         ) : null}
       </div>

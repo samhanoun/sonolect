@@ -5,6 +5,7 @@ import {
   importDictionary,
   exportDictionary,
 } from "./dictionaryCrud";
+import { useT } from "./i18n";
 
 export type DictionaryViewProps = {
   entries: DictionaryEntry[];
@@ -31,6 +32,8 @@ export function DictionaryView({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editSpoken, setEditSpoken] = useState("");
   const [editReplacement, setEditReplacement] = useState("");
+
+  const t = useT();
 
   const filtered = useMemo(
     () => searchDictionary(entries, searchQuery),
@@ -90,25 +93,22 @@ export function DictionaryView({
 
   return (
     <section className="glass-card management-panel">
-      <p className="section-title">Personal dictionary</p>
-      <h3>Teach Sonolect names, products, and spellings</h3>
-      <p>
-        These replacements are applied during the Wispr-style polished preview
-        before you copy text into another app.
-      </p>
+      <p className="section-title">{t("dictionary.sectionTitle")}</p>
+      <h3>{t("dictionary.subtitle")}</h3>
+      <p>{t("dictionary.description")}</p>
 
       <input
         className="search-input"
         type="text"
-        placeholder="Search dictionary entries…"
+        placeholder={t("dictionary.searchPlaceholder")}
         value={searchQuery}
         onChange={(e) => onSearchChange(e.target.value)}
-        aria-label="Search dictionary"
+        aria-label={t("dictionary.searchAriaLabel")}
       />
 
       <div className="form-grid two">
         <label>
-          <span>When I say</span>
+          <span>{t("dictionary.whenISay")}</span>
           <input
             value={spoken}
             onChange={(e) => setSpoken(e.target.value)}
@@ -116,7 +116,7 @@ export function DictionaryView({
           />
         </label>
         <label>
-          <span>Write</span>
+          <span>{t("dictionary.write")}</span>
           <input
             value={replacement}
             onChange={(e) => setReplacement(e.target.value)}
@@ -129,7 +129,7 @@ export function DictionaryView({
         onClick={handleAdd}
         type="button"
       >
-        Add dictionary entry
+        {t("dictionary.addEntry")}
       </button>
 
       <div className="inline-actions" style={{ marginTop: "0.75rem" }}>
@@ -138,7 +138,7 @@ export function DictionaryView({
           onClick={handleImport}
           type="button"
         >
-          Import CSV
+          {t("dictionary.importCsv")}
         </button>
         <button
           className="ghost-button"
@@ -146,10 +146,10 @@ export function DictionaryView({
           disabled={entries.length === 0}
           type="button"
         >
-          Export CSV
+          {t("dictionary.exportCsv")}
         </button>
         <span className="editor-meta">
-          {entries.length} {entries.length === 1 ? "entry" : "entries"}
+          {entries.length} {entries.length === 1 ? t("dictionary.entryCountSingular") : t("dictionary.entryCountPlural")}
         </span>
       </div>
 
@@ -157,8 +157,8 @@ export function DictionaryView({
         {filtered.length === 0 ? (
           <p className="editor-meta">
             {entries.length === 0
-              ? "No dictionary entries yet."
-              : "No entries match your search."}
+              ? t("dictionary.emptyState")
+              : t("dictionary.noMatch")}
           </p>
         ) : null}
         {filtered.map((entry) => (
@@ -168,26 +168,26 @@ export function DictionaryView({
                 <input
                   value={editSpoken}
                   onChange={(e) => setEditSpoken(e.target.value)}
-                  aria-label="Edit spoken form"
+                  aria-label={t("dictionary.editSpokenAriaLabel")}
                 />
                 <input
                   value={editReplacement}
                   onChange={(e) => setEditReplacement(e.target.value)}
-                  aria-label="Edit replacement"
+                  aria-label={t("dictionary.editReplacementAriaLabel")}
                 />
                 <button
                   className="ghost-button"
                   onClick={() => commitEdit(entry.id)}
                   type="button"
                 >
-                  Save
+                  {t("dictionary.save")}
                 </button>
                 <button
                   className="ghost-button"
                   onClick={() => setEditingId(null)}
                   type="button"
                 >
-                  Cancel
+                  {t("dictionary.cancel")}
                 </button>
               </div>
             ) : (
@@ -205,12 +205,12 @@ export function DictionaryView({
                   <p>{entry.replacement}</p>
                 </div>
                 <button
-                  aria-label={`Remove dictionary entry ${entry.spoken}`}
+                  aria-label={`${t("dictionary.remove")} ${entry.spoken}`}
                   className="ghost-button"
                   onClick={() => onRemove(entry.id)}
                   type="button"
                 >
-                  Remove
+                  {t("dictionary.remove")}
                 </button>
               </>
             )}

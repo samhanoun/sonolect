@@ -8,6 +8,7 @@ import {
   type SearchResult,
   type HistoryFilter,
 } from "./searchAndFilter";
+import { useT } from "./i18n";
 
 export type SearchPanelProps = {
   history: TranscriptHistoryRow[];
@@ -15,6 +16,7 @@ export type SearchPanelProps = {
 };
 
 export function SearchPanel({ history, onSelectResult }: SearchPanelProps) {
+  const t = useT();
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState<"relevance" | "date" | "duration">(
     "relevance",
@@ -51,22 +53,22 @@ export function SearchPanel({ history, onSelectResult }: SearchPanelProps) {
 
   return (
     <section className="glass-card management-panel">
-      <p className="section-title">Search transcripts</p>
-      <h3>Find past dictations by content</h3>
+      <p className="section-title">{t("search.sectionTitle")}</p>
+      <h3>{t("search.subtitle")}</h3>
 
       <input
         className="search-input"
         type="text"
-        placeholder="Search transcripts…"
+        placeholder={t("search.placeholder")}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        aria-label="Search transcripts"
+        aria-label={t("search.ariaLabel")}
         autoFocus
       />
 
       <div className="form-grid two" style={{ marginTop: "0.75rem" }}>
         <label>
-          <span>From date</span>
+          <span>{t("search.fromDate")}</span>
           <input
             type="date"
             value={dateFrom}
@@ -74,7 +76,7 @@ export function SearchPanel({ history, onSelectResult }: SearchPanelProps) {
           />
         </label>
         <label>
-          <span>To date</span>
+          <span>{t("search.toDate")}</span>
           <input
             type="date"
             value={dateTo}
@@ -84,7 +86,7 @@ export function SearchPanel({ history, onSelectResult }: SearchPanelProps) {
       </div>
       <div className="form-grid two" style={{ marginTop: "0.5rem" }}>
         <label>
-          <span>Min duration (minutes)</span>
+          <span>{t("search.minDuration")}</span>
           <input
             type="number"
             min="0"
@@ -94,7 +96,7 @@ export function SearchPanel({ history, onSelectResult }: SearchPanelProps) {
           />
         </label>
         <label>
-          <span>Sort by</span>
+          <span>{t("search.sortBy")}</span>
           <select
             className="ghost-button"
             value={sortBy}
@@ -102,21 +104,19 @@ export function SearchPanel({ history, onSelectResult }: SearchPanelProps) {
               setSortBy(e.target.value as "relevance" | "date" | "duration")
             }
           >
-            <option value="relevance">Relevance</option>
-            <option value="date">Date</option>
-            <option value="duration">Duration</option>
+            <option value="relevance">{t("search.sortRelevance")}</option>
+            <option value="date">{t("search.sortDate")}</option>
+            <option value="duration">{t("search.sortDuration")}</option>
           </select>
         </label>
       </div>
 
       <div className="preference-list" style={{ marginTop: "1rem" }}>
         {hasQuery && searchResults.length === 0 ? (
-          <p className="editor-meta">No results for "{query}".</p>
+          <p className="editor-meta">{t("search.noResults", { query })}</p>
         ) : null}
         {!hasQuery ? (
-          <p className="editor-meta">
-            Type a search query to find matching transcripts.
-          </p>
+          <p className="editor-meta">{t("search.prompt")}</p>
         ) : null}
         {searchResults.map((result: SearchResult) => (
           <article
@@ -146,7 +146,7 @@ export function SearchPanel({ history, onSelectResult }: SearchPanelProps) {
               />
             </div>
             <span className="editor-meta">
-              {result.matchCount} {result.matchCount === 1 ? "match" : "matches"}
+              {result.matchCount} {result.matchCount === 1 ? t("search.matchCountSingular") : t("search.matchCountPlural")}
             </span>
           </article>
         ))}

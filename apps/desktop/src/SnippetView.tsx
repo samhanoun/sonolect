@@ -5,6 +5,7 @@ import {
   importSnippets,
   exportSnippets,
 } from "./snippetCrud";
+import { useT } from "./i18n";
 
 export type SnippetViewProps = {
   snippets: Snippet[];
@@ -28,6 +29,8 @@ export function SnippetView({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTrigger, setEditTrigger] = useState("");
   const [editBody, setEditBody] = useState("");
+
+  const t = useT();
 
   const filtered = useMemo(
     () => searchSnippets(snippets, searchQuery),
@@ -87,25 +90,22 @@ export function SnippetView({
 
   return (
     <section className="glass-card management-panel">
-      <p className="section-title">Snippet library</p>
-      <h3>Expand voice shortcuts while dictating</h3>
-      <p>
-        Say or type a trigger like /sig and Sonolect expands it in the polished
-        preview.
-      </p>
+      <p className="section-title">{t("snippets.sectionTitle")}</p>
+      <h3>{t("snippets.subtitle")}</h3>
+      <p>{t("snippets.description")}</p>
 
       <input
         className="search-input"
         type="text"
-        placeholder="Search snippets…"
+        placeholder={t("snippets.searchPlaceholder")}
         value={searchQuery}
         onChange={(e) => onSearchChange(e.target.value)}
-        aria-label="Search snippets"
+        aria-label={t("snippets.searchAriaLabel")}
       />
 
       <div className="form-grid two">
         <label>
-          <span>Trigger</span>
+          <span>{t("snippets.trigger")}</span>
           <input
             value={trigger}
             onChange={(e) => setTrigger(e.target.value)}
@@ -113,7 +113,7 @@ export function SnippetView({
           />
         </label>
         <label>
-          <span>Expansion</span>
+          <span>{t("snippets.expansion")}</span>
           <textarea
             value={body}
             onChange={(e) => setBody(e.target.value)}
@@ -127,7 +127,7 @@ export function SnippetView({
         onClick={handleAdd}
         type="button"
       >
-        Add snippet
+        {t("snippets.addSnippet")}
       </button>
 
       <div className="inline-actions" style={{ marginTop: "0.75rem" }}>
@@ -136,7 +136,7 @@ export function SnippetView({
           onClick={handleImport}
           type="button"
         >
-          Import CSV
+          {t("snippets.importCsv")}
         </button>
         <button
           className="ghost-button"
@@ -144,10 +144,10 @@ export function SnippetView({
           disabled={snippets.length === 0}
           type="button"
         >
-          Export CSV
+          {t("snippets.exportCsv")}
         </button>
         <span className="editor-meta">
-          {snippets.length} {snippets.length === 1 ? "snippet" : "snippets"}
+          {snippets.length} {snippets.length === 1 ? t("snippets.snippetCountSingular") : t("snippets.snippetCountPlural")}
         </span>
       </div>
 
@@ -155,8 +155,8 @@ export function SnippetView({
         {filtered.length === 0 ? (
           <p className="editor-meta">
             {snippets.length === 0
-              ? "No snippets yet."
-              : "No snippets match your search."}
+              ? t("snippets.emptyState")
+              : t("snippets.noMatch")}
           </p>
         ) : null}
         {filtered.map((snippet) => (
@@ -167,12 +167,12 @@ export function SnippetView({
                   <input
                     value={editTrigger}
                     onChange={(e) => setEditTrigger(e.target.value)}
-                    aria-label="Edit trigger"
+                    aria-label={t("snippets.editTriggerAriaLabel")}
                   />
                   <textarea
                     value={editBody}
                     onChange={(e) => setEditBody(e.target.value)}
-                    aria-label="Edit body"
+                    aria-label={t("snippets.editBodyAriaLabel")}
                     rows={2}
                   />
                 </div>
@@ -182,14 +182,14 @@ export function SnippetView({
                     onClick={() => commitEdit(snippet.id)}
                     type="button"
                   >
-                    Save
+                    {t("snippets.save")}
                   </button>
                   <button
                     className="ghost-button"
                     onClick={() => setEditingId(null)}
                     type="button"
                   >
-                    Cancel
+                    {t("snippets.cancel")}
                   </button>
                 </div>
               </div>
@@ -210,12 +210,12 @@ export function SnippetView({
                   </p>
                 </div>
                 <button
-                  aria-label={`Remove snippet ${snippet.trigger}`}
+                  aria-label={`${t("snippets.remove")} ${snippet.trigger}`}
                   className="ghost-button"
                   onClick={() => onRemove(snippet.id)}
                   type="button"
                 >
-                  Remove
+                  {t("snippets.remove")}
                 </button>
               </>
             )}
