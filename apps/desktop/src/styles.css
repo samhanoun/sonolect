@@ -1419,3 +1419,106 @@ kbd {
   font-size: 12px;
   font-weight: 800;
 }
+
+.primary-button.compact {
+  padding: 10px 14px;
+  min-height: auto;
+}
+
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.polish-preview-card,
+.management-panel {
+  display: grid;
+  gap: 16px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.preview-text {
+  white-space: pre-wrap;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.form-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.form-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.form-grid label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.form-grid input {
+  width: 100%;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 11px 12px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.preference-list {
+  display: grid;
+  gap: 10px;
+}
+
+.preference-row {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 13px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.preference-row p {
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.preference-row.check-row {
+  justify-content: flex-start;
+  cursor: pointer;
+}
+
+.preference-row.check-row input {
+  width: 18px;
+  height: 18px;
+}
+
+.setup-progress {
+  overflow: hidden;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.setup-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-violet), var(--accent-cyan));
+}

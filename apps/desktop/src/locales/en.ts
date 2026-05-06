@@ -4,6 +4,8 @@ export const en = {
   "nav.history": "History",
   "nav.agents": "Agents",
   "nav.settings": "Settings",
+  "nav.onboarding": "Setup",
+  "nav.dictionary": "Dictionary",
   "nav.home": "Home",
   "nav.snippets": "Snippets",
   "nav.transforms": "Transforms",
@@ -212,6 +214,7 @@ export const en = {
   // Toast
   "toast.transformComplete": "Transcript transformed successfully",
   "toast.copySuccess": "Transcript copied to clipboard",
+  "toast.insertionReady": "Polished dictation ready to paste",
 
   // Transform
   "editor.transforming": "Transforming…",
