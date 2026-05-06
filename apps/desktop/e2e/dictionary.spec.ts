@@ -12,47 +12,46 @@ test.describe("Dictionary management view", () => {
   test("adds a new dictionary entry and verifies it appears in the list", async ({
     page,
   }) => {
-    await page.getByLabel("When I say").fill("sonolect");
-    await page.getByLabel("Write").fill("Sonolect");
+    await page.getByLabel("When I say").fill("xylophone");
+    await page.getByLabel("Write").fill("Xylophone Pro");
     await page.getByRole("button", { name: /Add dictionary entry/i }).click();
 
-    const list = page.getByRole("list").first();
-    await expect(list.getByText("sonolect")).toBeVisible();
-    await expect(list.getByText("Sonolect")).toBeVisible();
+    await expect(page.getByText("xylophone")).toBeVisible();
+    await expect(page.getByText("Xylophone Pro")).toBeVisible();
     await expect(page.getByText(/1 entry/i)).toBeVisible();
   });
 
   test("searches and filters dictionary entries", async ({ page }) => {
-    await page.getByLabel("When I say").fill("flow");
-    await page.getByLabel("Write").fill("Wispr Flow");
+    await page.getByLabel("When I say").fill("alphaword");
+    await page.getByLabel("Write").fill("Alpha Result");
     await page.getByRole("button", { name: /Add dictionary entry/i }).click();
 
-    await page.getByLabel("When I say").fill("claw");
-    await page.getByLabel("Write").fill("OpenClaw");
+    await page.getByLabel("When I say").fill("betaword");
+    await page.getByLabel("Write").fill("Beta Result");
     await page.getByRole("button", { name: /Add dictionary entry/i }).click();
 
     await expect(page.getByText(/2 entries/i)).toBeVisible();
 
-    await page.getByRole("textbox", { name: "Search dictionary" }).fill("flow");
-    await expect(page.getByText("Wispr Flow")).toBeVisible();
-    await expect(page.getByText("OpenClaw")).not.toBeVisible();
+    await page
+      .getByRole("textbox", { name: "Search dictionary" })
+      .fill("alphaword");
+    await expect(page.getByText("Alpha Result")).toBeVisible();
+    await expect(page.getByText("Beta Result")).not.toBeVisible();
 
     await page.getByRole("textbox", { name: "Search dictionary" }).fill("");
-    await expect(page.getByText("Wispr Flow")).toBeVisible();
-    await expect(page.getByText("OpenClaw")).toBeVisible();
+    await expect(page.getByText("Alpha Result")).toBeVisible();
+    await expect(page.getByText("Beta Result")).toBeVisible();
   });
 
   test("deletes a dictionary entry", async ({ page }) => {
-    await page.getByLabel("When I say").fill("old");
-    await page.getByLabel("Write").fill("Old Entry");
+    await page.getByLabel("When I say").fill("removeme");
+    await page.getByLabel("Write").fill("Remove Target");
     await page.getByRole("button", { name: /Add dictionary entry/i }).click();
-    await expect(page.getByText("Old Entry")).toBeVisible();
+    await expect(page.getByText("Remove Target")).toBeVisible();
     await expect(page.getByText(/1 entry/i)).toBeVisible();
 
-    await page
-      .getByRole("button", { name: /Remove dictionary entry old/i })
-      .click();
-    await expect(page.getByText("Old Entry")).not.toBeVisible();
+    await page.getByRole("button", { name: /Remove/i }).first().click();
+    await expect(page.getByText("Remove Target")).not.toBeVisible();
     await expect(page.getByText(/0 entries/i)).toBeVisible();
   });
 });

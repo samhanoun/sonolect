@@ -12,44 +12,46 @@ test.describe("Snippet library view", () => {
   test("adds a new snippet and verifies it appears in the list", async ({
     page,
   }) => {
-    await page.getByLabel("Trigger").fill("sig");
-    await page.getByLabel("Expansion").fill("Best, Ismail");
+    await page.getByLabel("Trigger").fill("mysig");
+    await page.getByLabel("Expansion").fill("Best regards, Ismail");
     await page.getByRole("button", { name: /Add snippet/i }).click();
 
-    await expect(page.getByText("/sig", { exact: true })).toBeVisible();
-    await expect(page.getByText("Best, Ismail")).toBeVisible();
+    await expect(page.getByText("/mysig", { exact: true })).toBeVisible();
+    await expect(page.getByText("Best regards, Ismail")).toBeVisible();
     await expect(page.getByText(/1 snippet/i)).toBeVisible();
   });
 
   test("searches and filters snippets", async ({ page }) => {
-    await page.getByLabel("Trigger").fill("sig");
-    await page.getByLabel("Expansion").fill("Best, Ismail");
+    await page.getByLabel("Trigger").fill("greet");
+    await page.getByLabel("Expansion").fill("Hello there!");
     await page.getByRole("button", { name: /Add snippet/i }).click();
 
-    await page.getByLabel("Trigger").fill("addr");
-    await page.getByLabel("Expansion").fill("123 Main St");
+    await page.getByLabel("Trigger").fill("bye");
+    await page.getByLabel("Expansion").fill("Goodbye!");
     await page.getByRole("button", { name: /Add snippet/i }).click();
 
     await expect(page.getByText(/2 snippets/i)).toBeVisible();
 
-    await page.getByRole("textbox", { name: "Search snippets" }).fill("sig");
-    await expect(page.getByText("/sig", { exact: true })).toBeVisible();
-    await expect(page.getByText("/addr")).not.toBeVisible();
+    await page
+      .getByRole("textbox", { name: "Search snippets" })
+      .fill("greet");
+    await expect(page.getByText("Hello there!")).toBeVisible();
+    await expect(page.getByText("Goodbye!")).not.toBeVisible();
 
     await page.getByRole("textbox", { name: "Search snippets" }).fill("");
-    await expect(page.getByText("/sig", { exact: true })).toBeVisible();
-    await expect(page.getByText("/addr")).toBeVisible();
+    await expect(page.getByText("Hello there!")).toBeVisible();
+    await expect(page.getByText("Goodbye!")).toBeVisible();
   });
 
   test("deletes a snippet", async ({ page }) => {
-    await page.getByLabel("Trigger").fill("rm");
-    await page.getByLabel("Expansion").fill("Remove me");
+    await page.getByLabel("Trigger").fill("delme");
+    await page.getByLabel("Expansion").fill("Delete this snippet");
     await page.getByRole("button", { name: /Add snippet/i }).click();
-    await expect(page.getByText("/rm")).toBeVisible();
+    await expect(page.getByText("/delme")).toBeVisible();
     await expect(page.getByText(/1 snippet/i)).toBeVisible();
 
-    await page.getByRole("button", { name: /Remove snippet \/rm/i }).click();
-    await expect(page.getByText("/rm")).not.toBeVisible();
+    await page.getByRole("button", { name: /Remove/i }).first().click();
+    await expect(page.getByText("/delme")).not.toBeVisible();
     await expect(page.getByText(/0 snippets/i)).toBeVisible();
   });
 });

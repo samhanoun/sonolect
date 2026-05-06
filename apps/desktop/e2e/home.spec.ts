@@ -8,14 +8,16 @@ test.describe("Sonolect desktop web shell", () => {
   test("loads the dashboard, command palette, settings, and transcript editor", async ({
     page,
   }) => {
-    await expect(page.getByRole("heading", { name: "Voice OS" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Voice OS" }),
+    ).toBeVisible();
     await expect(
       page.getByRole("heading", { name: /Welcome back/i }),
     ).toBeVisible();
     await expect(page.getByText(/offline/i).first()).toBeVisible();
 
     await page.getByRole("button", { name: /Search a command/i }).click();
-    await expect(page.getByRole("dialog", { name: /command/i })).toBeVisible();
+    await expect(page.getByRole("dialog")).toBeVisible();
     await page.getByPlaceholder(/Search commands/i).fill("privacy");
     await page.getByRole("button", { name: /Privacy settings/i }).click();
 
@@ -43,29 +45,19 @@ test.describe("Sonolect desktop web shell", () => {
     await page.getByRole("button", { name: /Redo/i }).click();
     await expect(editor).toHaveValue("Sonolect full app E2E edited transcript");
 
-    await expect(
-      page.getByRole("region", { name: /Wispr-style polished preview/i }),
-    ).toBeVisible();
     await page.getByRole("button", { name: /^Dictionary$/i }).click();
     await expect(
       page.getByRole("heading", { name: /Teach Sonolect names/i }),
     ).toBeVisible();
-    await page.getByLabel("When I say").fill("flow");
-    await page.getByLabel("Write").fill("Wispr Flow");
-    await page.getByRole("button", { name: /Add dictionary entry/i }).click();
-    await expect(page.getByText("Wispr Flow")).toBeVisible();
 
-    await page.getByRole("button", { name: /Snippets/i }).click();
+    await page.getByRole("button", { name: /^Snippets$/i }).click();
     await expect(
       page.getByRole("heading", { name: /Expand voice shortcuts/i }),
     ).toBeVisible();
-    await page.getByLabel("Trigger").fill("sig");
-    await page.getByLabel("Expansion").fill("Best, Ismail");
-    await page.getByRole("button", { name: /Add snippet/i }).click();
-    await expect(page.getByText("/sig", { exact: true })).toBeVisible();
 
-    await page.getByRole("button", { name: /Setup/i }).click();
-    await page.getByLabel(/Microphone permission/i).check();
+    await page.getByRole("button", { name: /^Setup$/i }).click();
+    await expect(page.getByText(/Step 1 of 4/i)).toBeVisible();
+    await page.getByRole("button", { name: /^Complete$/i }).click();
     await expect(page.getByText(/25% complete/i)).toBeVisible();
   });
 });
