@@ -22,12 +22,45 @@ import { notificationGateway } from "./notifications";
 import { mobileStorage } from "./storage";
 import type { SonolectMode } from "@sonolect/types";
 
+import type { DictionaryEntry } from "./dictionaryCrud";
+import {
+  addEntry as addDictEntry,
+  removeEntry as removeDictEntry,
+  loadDictionary,
+  saveDictionary,
+} from "./dictionaryCrud";
+import type { Snippet } from "./snippetCrud";
+import {
+  addSnippet as addSnip,
+  removeSnippet as removeSnip,
+  loadSnippets,
+  saveSnippets,
+} from "./snippetCrud";
+import type { RetentionPolicy } from "./retentionControls";
+import {
+  DEFAULT_RETENTION_POLICY,
+  loadRetentionPolicy,
+  saveRetentionPolicy,
+  validateRetentionPolicy,
+} from "./retentionControls";
+import type { SearchResult } from "./searchAndFilter";
+
 interface CompanionState {
   hydrated: boolean;
   auth: AuthSnapshot;
   settings: CompanionSettings;
   history: TranscriptTurn[];
   capture: CaptureSession;
+
+  // ── New module state ───────────────────────────────────────────────
+  dictionaryEntries: DictionaryEntry[];
+  snippets: Snippet[];
+  activeStylePreset: string;
+  searchQuery: string;
+  searchResults: SearchResult[];
+  retentionPolicy: RetentionPolicy;
+
+  // ── Existing actions ───────────────────────────────────────────────
   hydrate: () => Promise<void>;
   startCapture: () => void;
   stopCapture: () => Promise<void>;
@@ -36,6 +69,15 @@ interface CompanionState {
   updateSettings: (patch: Partial<CompanionSettings>) => Promise<void>;
   clearHistory: () => Promise<void>;
   markAuthReady: () => Promise<void>;
+
+  // ── New actions ────────────────────────────────────────────────────
+  addDictionaryEntry: (spoken: string, replacement: string) => Promise<void>;
+  removeDictionaryEntry: (id: string) => Promise<void>;
+  addSnippet: (trigger: string, body: string) => Promise<void>;
+  removeSnippet: (id: string) => Promise<void>;
+  setActiveStylePreset: (presetId: string) => void;
+  setSearchQuery: (query: string) => void;
+  setRetentionPolicy: (patch: Partial<RetentionPolicy>) => Promise<void>;
 }
 
 const initialCapture: CaptureSession = {
@@ -81,15 +123,35 @@ export const useCompanionStore = create<CompanionState>((set, get) => ({
   history: [],
   capture: initialCapture,
 
+  // ── New module initial state ─────────────────────────────────────
+  dictionaryEntries: [],
+  snippets: [],
+  activeStylePreset: "concise",
+  searchQuery: "",
+  searchResults: [],
+  retentionPolicy: { ...DEFAULT_RETENTION_POLICY },
+
   hydrate: async () => {
-    const [auth, settings, history] = await Promise.all([
-      mobileStorage.loadAuth(),
-      mobileStorage.loadSettings(),
-      mobileStorage.loadHistory(),
-    ]);
+    const [auth, settings, history, dictionaryEntries, snippets, retentionPolicy] =
+      await Promise.all([
+        mobileStorage.loadAuth(),
+        mobileStorage.loadSettings(),
+        mobileStorage.loadHistory(),
+        loadDictionary(),
+        loadSnippets(),
+        loadRetentionPolicy(),
+      ]);
 
     const syncedHistory = await loadAndSyncHistory(settings, history);
-    set({ auth, settings, history: syncedHistory, hydrated: true });
+    set({
+      auth,
+      settings,
+      history: syncedHistory,
+      dictionaryEntries,
+      snippets,
+      retentionPolicy,
+      hydrated: true,
+    });
     if (syncedHistory !== history) {
       await mobileStorage.saveHistory(syncedHistory);
     }
@@ -220,5 +282,51 @@ export const useCompanionStore = create<CompanionState>((set, get) => ({
     };
     set({ auth });
     await mobileStorage.saveAuth(auth);
+  },
+
+  // ── Dictionary actions ───────────────────────────────────────────
+  addDictionaryEntry: async (spoken: string, replacement: string) => {
+    const next = addDictEntry(get().dictionaryEntries, spoken, replacement);
+    set({ dictionaryEntries: next });
+    await saveDictionary(next);
+  },
+
+  removeDictionaryEntry: async (entryId: string) => {
+    const next = removeDictEntry(get().dictionaryEntries, entryId);
+    set({ dictionaryEntries: next });
+    await saveDictionary(next);
+  },
+
+  // ── Snippet actions ──────────────────────────────────────────────
+  addSnippet: async (trigger: string, body: string) => {
+    const next = addSnip(get().snippets, trigger, body);
+    set({ snippets: next });
+    await saveSnippets(next);
+  },
+
+  removeSnippet: async (snippetId: string) => {
+    const next = removeSnip(get().snippets, snippetId);
+    set({ snippets: next });
+    await saveSnippets(next);
+  },
+
+  // ── Style preset action ──────────────────────────────────────────
+  setActiveStylePreset: (presetId: string) => {
+    set({ activeStylePreset: presetId });
+  },
+
+  // ── Search action ────────────────────────────────────────────────
+  setSearchQuery: (query: string) => {
+    set({ searchQuery: query });
+  },
+
+  // ── Retention policy action ──────────────────────────────────────
+  setRetentionPolicy: async (patch: Partial<RetentionPolicy>) => {
+    const validated = validateRetentionPolicy({
+      ...get().retentionPolicy,
+      ...patch,
+    });
+    set({ retentionPolicy: validated });
+    await saveRetentionPolicy(validated);
   },
 }));

@@ -10,8 +10,8 @@ import {
   View,
 } from "react-native";
 
-import { DEFAULT_SETTINGS, REFINEMENT_ACTIONS } from "../src/domain";
-import { useCompanionStore } from "../src/store";
+import { DEFAULT_SETTINGS, REFINEMENT_ACTIONS } from "../../src/domain";
+import { useCompanionStore } from "../../src/store";
 
 const palette = {
   background: "#08090A",
