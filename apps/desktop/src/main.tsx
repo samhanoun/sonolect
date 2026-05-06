@@ -124,7 +124,13 @@ type RecordingState =
   | "uploading"
   | "completed"
   | "error";
-type ViewId = "home" | "settings" | "dictionary" | "snippets" | "onboarding" | "search";
+type ViewId =
+  | "home"
+  | "settings"
+  | "dictionary"
+  | "snippets"
+  | "onboarding"
+  | "search";
 
 type VoiceCaptureResult = VoiceCaptureMetadata & {
   objectUrl: string;
@@ -1266,14 +1272,10 @@ function WorkspaceRouter() {
   const activeSessionId = useDesktopStore((state) => state.activeSessionId);
   const t = useT();
 
-  const dictionaryEntries = useDesktopStore(
-    (state) => state.dictionaryEntries,
-  );
+  const dictionaryEntries = useDesktopStore((state) => state.dictionaryEntries);
   const snippets = useDesktopStore((state) => state.snippets);
   const checklist = useDesktopStore((state) => state.onboardingChecklist);
-  const transcriptHistory = useDesktopStore(
-    (state) => state.transcriptHistory,
-  );
+  const transcriptHistory = useDesktopStore((state) => state.transcriptHistory);
   const dictionarySearch = useDesktopStore((state) => state.dictionarySearch);
   const snippetSearch = useDesktopStore((state) => state.snippetSearch);
 
@@ -1375,7 +1377,9 @@ function Sidebar() {
   return (
     <aside className="sidebar" aria-label="Sidebar navigation">
       <div className="brand-block">
-        <div className="brand-mark" aria-hidden="true">S</div>
+        <div className="brand-mark" aria-hidden="true">
+          S
+        </div>
         <div>
           <p className="eyebrow">Sonolect</p>
           <h1>Voice OS</h1>
@@ -1388,7 +1392,8 @@ function Sidebar() {
         type="button"
         aria-label={t("sidebar.recordNow")}
       >
-        <span className="record-dot" aria-hidden="true" /> {t("sidebar.recordNow")}
+        <span className="record-dot" aria-hidden="true" />{" "}
+        {t("sidebar.recordNow")}
         <span className="shortcut-group">
           <kbd title="Hands-free toggle">⌘⇧M</kbd>
           <kbd title="Push to talk (hold)">⌘⇧V</kbd>
@@ -2693,11 +2698,18 @@ function VoiceRecorderPill() {
       role="status"
       aria-label={t("recorder.ariaLabel")}
     >
-      <div className={isRecording ? "pill-orb active" : "pill-orb"} aria-hidden="true" />
+      <div
+        className={isRecording ? "pill-orb active" : "pill-orb"}
+        aria-hidden="true"
+      />
       <Waveform active={isRecording} />
-      <span className="pill-status" aria-live="polite">{statusLabel}</span>
+      <span className="pill-status" aria-live="polite">
+        {statusLabel}
+      </span>
       {voiceError && isDone ? (
-        <span className="pill-error" role="alert">{voiceError}</span>
+        <span className="pill-error" role="alert">
+          {voiceError}
+        </span>
       ) : null}
       {voiceCapture && isDone ? (
         <a
@@ -2726,7 +2738,13 @@ function VoiceRecorderPill() {
         disabled={isProcessing}
         onClick={toggleRecording}
         type="button"
-        aria-label={isRecording ? t("pill.stop") : isDone ? t("pill.again") : t("pill.processing")}
+        aria-label={
+          isRecording
+            ? t("pill.stop")
+            : isDone
+              ? t("pill.again")
+              : t("pill.processing")
+        }
       >
         {isRecording ? t("pill.stop") : isDone ? t("pill.again") : "…"}
       </button>
@@ -2801,13 +2819,10 @@ function CommandPalette() {
     "recording:ptt": () => useDesktopStore.getState().toggleRecording(),
     "editing:undo": () => useDesktopStore.getState().undoTranscriptEdit(),
     "editing:redo": () => useDesktopStore.getState().redoTranscriptEdit(),
-    "editing:transform": () =>
-      useDesktopStore.getState().transformTranscript(),
+    "editing:transform": () => useDesktopStore.getState().transformTranscript(),
     "editing:style": () => setActiveView("settings"),
     "editing:copy": () =>
-      void navigator.clipboard.writeText(
-        useDesktopStore.getState().transcript,
-      ),
+      void navigator.clipboard.writeText(useDesktopStore.getState().transcript),
     "editing:insert": () =>
       void useDesktopStore.getState().insertPolishedDictation(),
     "navigation:history": () => {
@@ -2850,8 +2865,14 @@ function CommandPalette() {
         aria-label={t("palette.ariaLabel")}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="palette-input" role="search" aria-label={t("palette.ariaLabel")}>
-          <span className="palette-prefix" aria-hidden="true">⌘K</span>
+        <div
+          className="palette-input"
+          role="search"
+          aria-label={t("palette.ariaLabel")}
+        >
+          <span className="palette-prefix" aria-hidden="true">
+            ⌘K
+          </span>
           <input
             ref={inputRef}
             className="palette-search"
@@ -2901,7 +2922,12 @@ function ToastContainer() {
   const t = useT();
   if (toasts.length === 0) return null;
   return (
-    <div className="toast-container" role="status" aria-live="polite" aria-atomic="true">
+    <div
+      className="toast-container"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
       {toasts.map((toast) => (
         <div key={toast.id} className="toast" role="alert">
           {t(toast.message as LocaleKeys)}

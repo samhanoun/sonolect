@@ -132,15 +132,21 @@ export const useCompanionStore = create<CompanionState>((set, get) => ({
   retentionPolicy: { ...DEFAULT_RETENTION_POLICY },
 
   hydrate: async () => {
-    const [auth, settings, history, dictionaryEntries, snippets, retentionPolicy] =
-      await Promise.all([
-        mobileStorage.loadAuth(),
-        mobileStorage.loadSettings(),
-        mobileStorage.loadHistory(),
-        loadDictionary(),
-        loadSnippets(),
-        loadRetentionPolicy(),
-      ]);
+    const [
+      auth,
+      settings,
+      history,
+      dictionaryEntries,
+      snippets,
+      retentionPolicy,
+    ] = await Promise.all([
+      mobileStorage.loadAuth(),
+      mobileStorage.loadSettings(),
+      mobileStorage.loadHistory(),
+      loadDictionary(),
+      loadSnippets(),
+      loadRetentionPolicy(),
+    ]);
 
     const syncedHistory = await loadAndSyncHistory(settings, history);
     set({

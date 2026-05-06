@@ -26,8 +26,7 @@ describe("sanitizeHtml", () => {
   });
 
   it("removes <object> and <embed> tags", () => {
-    const input =
-      '<object data="x"></object><embed src="y">';
+    const input = '<object data="x"></object><embed src="y">';
     const result = sanitizeHtml(input);
     assert.ok(!result.includes("object"));
     assert.ok(!result.includes("embed"));
@@ -59,7 +58,8 @@ describe("sanitizeHtml", () => {
   });
 
   it("removes <style> tags and their content", () => {
-    const input = "<style>body { background: url('javascript:alert(1)') }</style><p>safe</p>";
+    const input =
+      "<style>body { background: url('javascript:alert(1)') }</style><p>safe</p>";
     const result = sanitizeHtml(input);
     assert.ok(!result.includes("style"));
     assert.ok(result.includes("safe"));
@@ -83,7 +83,7 @@ describe("sanitizeHtml", () => {
   });
 
   it("handles mixed-case tags", () => {
-    const input = '<ScRiPt>alert(1)</ScRiPt>';
+    const input = "<ScRiPt>alert(1)</ScRiPt>";
     const result = sanitizeHtml(input);
     assert.ok(!result.toLowerCase().includes("script"));
   });
@@ -111,14 +111,14 @@ describe("sanitizeHtml", () => {
 
 describe("sanitizeFilePath", () => {
   it("allows simple relative paths", () => {
-    assert.strictEqual(sanitizeFilePath("uploads/file.wav"), "uploads/file.wav");
+    assert.strictEqual(
+      sanitizeFilePath("uploads/file.wav"),
+      "uploads/file.wav",
+    );
   });
 
   it("allows nested paths", () => {
-    assert.strictEqual(
-      sanitizeFilePath("a/b/c/d.txt"),
-      "a/b/c/d.txt",
-    );
+    assert.strictEqual(sanitizeFilePath("a/b/c/d.txt"), "a/b/c/d.txt");
   });
 
   it("rejects absolute paths (Unix)", () => {
@@ -195,7 +195,7 @@ describe("sanitizeTranscriptText", () => {
   });
 
   it("HTML-encodes quotes", () => {
-    const result = sanitizeTranscriptText('He said "hello" & \'goodbye\'');
+    const result = sanitizeTranscriptText("He said \"hello\" & 'goodbye'");
     assert.ok(result.includes("&quot;"));
     assert.ok(result.includes("&#x27;"));
   });

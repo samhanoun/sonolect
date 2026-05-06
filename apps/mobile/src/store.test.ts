@@ -1,17 +1,9 @@
 import * as assert from "node:assert/strict";
 import { describe, it, beforeEach } from "node:test";
 
-import {
-  addEntry,
-  removeEntry,
-  searchDictionary,
-} from "./dictionaryCrud";
+import { addEntry, removeEntry, searchDictionary } from "./dictionaryCrud";
 import type { DictionaryEntry } from "./dictionaryCrud";
-import {
-  addSnippet,
-  removeSnippet,
-  searchSnippets,
-} from "./snippetCrud";
+import { addSnippet, removeSnippet, searchSnippets } from "./snippetCrud";
 import type { Snippet } from "./snippetCrud";
 import {
   validateRetentionPolicy,

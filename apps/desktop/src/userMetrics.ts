@@ -124,10 +124,7 @@ export function formatTimeSaved(ms: number): string {
   return `${minutes}m saved`;
 }
 
-export function calculateStreak(
-  metrics: UserMetrics,
-  today?: string,
-): number {
+export function calculateStreak(metrics: UserMetrics, today?: string): number {
   const todayDate = today ?? new Date().toISOString().slice(0, 10);
   const lastActive = metrics.lastActiveDate;
 
@@ -180,8 +177,7 @@ export function loadMetrics(): UserMetrics {
         typeof parsed.averageLatencyMs === "number"
           ? parsed.averageLatencyMs
           : 0,
-      streakDays:
-        typeof parsed.streakDays === "number" ? parsed.streakDays : 0,
+      streakDays: typeof parsed.streakDays === "number" ? parsed.streakDays : 0,
       lastActiveDate:
         typeof parsed.lastActiveDate === "string" ? parsed.lastActiveDate : "",
     };

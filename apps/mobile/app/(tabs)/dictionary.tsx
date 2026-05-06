@@ -49,18 +49,14 @@ export default function DictionaryScreen() {
 
   const handleDelete = useCallback(
     (entry: DictionaryEntry) => {
-      Alert.alert(
-        "Remove entry",
-        `Delete "${entry.spoken}"?`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: () => void removeEntry(entry.id),
-          },
-        ],
-      );
+      Alert.alert("Remove entry", `Delete "${entry.spoken}"?`, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => void removeEntry(entry.id),
+        },
+      ]);
     },
     [removeEntry],
   );

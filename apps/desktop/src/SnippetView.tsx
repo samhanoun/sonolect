@@ -1,10 +1,6 @@
 import React, { useState, useMemo } from "react";
 import type { Snippet } from "./wisprWorkflow";
-import {
-  searchSnippets,
-  importSnippets,
-  exportSnippets,
-} from "./snippetCrud";
+import { searchSnippets, importSnippets, exportSnippets } from "./snippetCrud";
 import { useT } from "./i18n";
 
 export type SnippetViewProps = {
@@ -89,7 +85,10 @@ export function SnippetView({
   }
 
   return (
-    <section className="glass-card management-panel" aria-labelledby="snippets-heading">
+    <section
+      className="glass-card management-panel"
+      aria-labelledby="snippets-heading"
+    >
       <p className="section-title">{t("snippets.sectionTitle")}</p>
       <h3 id="snippets-heading">{t("snippets.subtitle")}</h3>
       <p>{t("snippets.description")}</p>
@@ -133,11 +132,7 @@ export function SnippetView({
       </button>
 
       <div className="inline-actions" style={{ marginTop: "0.75rem" }}>
-        <button
-          className="ghost-button"
-          onClick={handleImport}
-          type="button"
-        >
+        <button className="ghost-button" onClick={handleImport} type="button">
           {t("snippets.importCsv")}
         </button>
         <button
@@ -149,11 +144,18 @@ export function SnippetView({
           {t("snippets.exportCsv")}
         </button>
         <span className="editor-meta">
-          {snippets.length} {snippets.length === 1 ? t("snippets.snippetCountSingular") : t("snippets.snippetCountPlural")}
+          {snippets.length}{" "}
+          {snippets.length === 1
+            ? t("snippets.snippetCountSingular")
+            : t("snippets.snippetCountPlural")}
         </span>
       </div>
 
-      <div className="preference-list" role="list" aria-label={t("snippets.sectionTitle")}>
+      <div
+        className="preference-list"
+        role="list"
+        aria-label={t("snippets.sectionTitle")}
+      >
         {filtered.length === 0 ? (
           <p className="editor-meta" role="status" aria-live="polite">
             {snippets.length === 0
@@ -207,7 +209,15 @@ export function SnippetView({
                   style={{ cursor: "pointer" }}
                 >
                   <strong>{snippet.trigger}</strong>
-                  <p className="editor-meta" style={{ maxWidth: "24ch", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <p
+                    className="editor-meta"
+                    style={{
+                      maxWidth: "24ch",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
                     {snippet.body}
                   </p>
                 </div>

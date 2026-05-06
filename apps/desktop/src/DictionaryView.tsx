@@ -11,10 +11,7 @@ export type DictionaryViewProps = {
   entries: DictionaryEntry[];
   onAdd: (spoken: string, replacement: string) => void;
   onRemove: (id: string) => void;
-  onUpdate: (
-    id: string,
-    updates: Partial<Omit<DictionaryEntry, "id">>,
-  ) => void;
+  onUpdate: (id: string, updates: Partial<Omit<DictionaryEntry, "id">>) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
 };
@@ -92,7 +89,10 @@ export function DictionaryView({
   }
 
   return (
-    <section className="glass-card management-panel" aria-labelledby="dictionary-heading">
+    <section
+      className="glass-card management-panel"
+      aria-labelledby="dictionary-heading"
+    >
       <p className="section-title">{t("dictionary.sectionTitle")}</p>
       <h3 id="dictionary-heading">{t("dictionary.subtitle")}</h3>
       <p>{t("dictionary.description")}</p>
@@ -135,11 +135,7 @@ export function DictionaryView({
       </button>
 
       <div className="inline-actions" style={{ marginTop: "0.75rem" }}>
-        <button
-          className="ghost-button"
-          onClick={handleImport}
-          type="button"
-        >
+        <button className="ghost-button" onClick={handleImport} type="button">
           {t("dictionary.importCsv")}
         </button>
         <button
@@ -151,11 +147,18 @@ export function DictionaryView({
           {t("dictionary.exportCsv")}
         </button>
         <span className="editor-meta">
-          {entries.length} {entries.length === 1 ? t("dictionary.entryCountSingular") : t("dictionary.entryCountPlural")}
+          {entries.length}{" "}
+          {entries.length === 1
+            ? t("dictionary.entryCountSingular")
+            : t("dictionary.entryCountPlural")}
         </span>
       </div>
 
-      <div className="preference-list" role="list" aria-label={t("dictionary.sectionTitle")}>
+      <div
+        className="preference-list"
+        role="list"
+        aria-label={t("dictionary.sectionTitle")}
+      >
         {filtered.length === 0 ? (
           <p className="editor-meta" role="status" aria-live="polite">
             {entries.length === 0

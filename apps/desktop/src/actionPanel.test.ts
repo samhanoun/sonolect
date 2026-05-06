@@ -324,11 +324,7 @@ describe("actionPanel", () => {
     });
 
     it("returns placeholder for share-via-link", async () => {
-      const result = await executeAction(
-        "share-via-link",
-        "text",
-        fullContext,
-      );
+      const result = await executeAction("share-via-link", "text", fullContext);
       assert.equal(result.success, false);
       assert.ok(result.message.includes("coming soon"));
     });

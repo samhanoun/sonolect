@@ -31,45 +31,35 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: "Home",
-          tabBarIcon: ({ focused }) => (
-            <TabIcon label="H" focused={focused} />
-          ),
+          tabBarIcon: ({ focused }) => <TabIcon label="H" focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="dictionary"
         options={{
           title: "Dictionary",
-          tabBarIcon: ({ focused }) => (
-            <TabIcon label="D" focused={focused} />
-          ),
+          tabBarIcon: ({ focused }) => <TabIcon label="D" focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="snippets"
         options={{
           title: "Snippets",
-          tabBarIcon: ({ focused }) => (
-            <TabIcon label="S" focused={focused} />
-          ),
+          tabBarIcon: ({ focused }) => <TabIcon label="S" focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="search"
         options={{
           title: "Search",
-          tabBarIcon: ({ focused }) => (
-            <TabIcon label="Q" focused={focused} />
-          ),
+          tabBarIcon: ({ focused }) => <TabIcon label="Q" focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
           title: "Settings",
-          tabBarIcon: ({ focused }) => (
-            <TabIcon label="G" focused={focused} />
-          ),
+          tabBarIcon: ({ focused }) => <TabIcon label="G" focused={focused} />,
         }}
       />
     </Tabs>

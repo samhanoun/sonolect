@@ -58,13 +58,13 @@ export function announce(
 
 // ── Focus trap utility ───────────────────────────────────────────
 const FOCUSABLE_SELECTOR = [
-  'a[href]',
-  'button:not([disabled])',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
   '[tabindex]:not([tabindex="-1"])',
-].join(', ');
+].join(", ");
 
 /**
  * Traps keyboard focus within a container element (e.g. modals/dialogs).
@@ -100,7 +100,10 @@ export function trapFocus(container: HTMLElement): () => void {
  * Creates a visually-hidden "Skip to content" link as the first child
  * of the body. Becomes visible on focus for keyboard users.
  */
-export function createSkipLink(targetId: string, label = "Skip to content"): HTMLAnchorElement {
+export function createSkipLink(
+  targetId: string,
+  label = "Skip to content",
+): HTMLAnchorElement {
   const link = document.createElement("a");
   link.href = `#${targetId}`;
   link.textContent = label;

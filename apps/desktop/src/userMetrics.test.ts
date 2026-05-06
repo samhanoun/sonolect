@@ -177,17 +177,29 @@ describe("userMetrics", () => {
     });
 
     it("keeps streak on same day", () => {
-      const m = { ...createDefaultMetrics(), lastActiveDate: "2026-05-06", streakDays: 3 };
+      const m = {
+        ...createDefaultMetrics(),
+        lastActiveDate: "2026-05-06",
+        streakDays: 3,
+      };
       assert.equal(calculateStreak(m, "2026-05-06"), 3);
     });
 
     it("increments streak on consecutive day", () => {
-      const m = { ...createDefaultMetrics(), lastActiveDate: "2026-05-05", streakDays: 3 };
+      const m = {
+        ...createDefaultMetrics(),
+        lastActiveDate: "2026-05-05",
+        streakDays: 3,
+      };
       assert.equal(calculateStreak(m, "2026-05-06"), 4);
     });
 
     it("resets streak after a gap", () => {
-      const m = { ...createDefaultMetrics(), lastActiveDate: "2026-05-03", streakDays: 5 };
+      const m = {
+        ...createDefaultMetrics(),
+        lastActiveDate: "2026-05-03",
+        streakDays: 5,
+      };
       assert.equal(calculateStreak(m, "2026-05-06"), 1);
     });
   });

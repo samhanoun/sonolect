@@ -31,9 +31,15 @@ describe("a11y utility module", () => {
 
   // ── Announce helper ─────────────────────────────────────────────
   it("announce() creates element with role=status and aria-live", () => {
-    assert.match(a11ySource, /setAttribute\(\s*["']role["']\s*,\s*["']status["']\s*\)/);
+    assert.match(
+      a11ySource,
+      /setAttribute\(\s*["']role["']\s*,\s*["']status["']\s*\)/,
+    );
     assert.match(a11ySource, /setAttribute\(\s*["']aria-live["']/);
-    assert.match(a11ySource, /setAttribute\(\s*["']aria-atomic["']\s*,\s*["']true["']\s*\)/);
+    assert.match(
+      a11ySource,
+      /setAttribute\(\s*["']aria-atomic["']\s*,\s*["']true["']\s*\)/,
+    );
   });
 
   it("announce() applies visually-hidden styles", () => {
@@ -79,10 +85,7 @@ describe("a11y utility module", () => {
 
   // ── Reduced motion detection ───────────────────────────────────
   it("prefersReducedMotion checks matchMedia for prefers-reduced-motion", () => {
-    assert.match(
-      a11ySource,
-      /prefers-reduced-motion:\s*reduce/,
-    );
+    assert.match(a11ySource, /prefers-reduced-motion:\s*reduce/);
     assert.match(a11ySource, /matchMedia/);
   });
 

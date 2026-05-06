@@ -20,10 +20,7 @@ export {
   buildSecurityHeaders,
   fastifySecurityConfig,
 } from "./securityHeaders";
-export type {
-  CspDirectives,
-  SecurityHeadersOptions,
-} from "./securityHeaders";
+export type { CspDirectives, SecurityHeadersOptions } from "./securityHeaders";
 
 export {
   DEFAULT_RATE_LIMITS,
@@ -31,7 +28,4 @@ export {
   buildRateLimitConfig,
   toFastifyRateLimitOptions,
 } from "./rateLimiting";
-export type {
-  RateLimitPreset,
-  RateLimitConfig,
-} from "./rateLimiting";
+export type { RateLimitPreset, RateLimitConfig } from "./rateLimiting";

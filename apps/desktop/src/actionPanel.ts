@@ -252,19 +252,35 @@ export async function executeAction(
     // ── Export actions ───────────────────────────────────────────────
     if (actionId === "export-markdown") {
       const exported = exportTranscript({ format: "md", transcript: text });
-      return { actionId, success: true, message: `Exported: ${exported.filename}` };
+      return {
+        actionId,
+        success: true,
+        message: `Exported: ${exported.filename}`,
+      };
     }
     if (actionId === "export-text") {
       const exported = exportTranscript({ format: "txt", transcript: text });
-      return { actionId, success: true, message: `Exported: ${exported.filename}` };
+      return {
+        actionId,
+        success: true,
+        message: `Exported: ${exported.filename}`,
+      };
     }
     if (actionId === "export-srt") {
       const exported = exportTranscript({ format: "srt", transcript: text });
-      return { actionId, success: true, message: `Exported: ${exported.filename}` };
+      return {
+        actionId,
+        success: true,
+        message: `Exported: ${exported.filename}`,
+      };
     }
     if (actionId === "export-json") {
       const exported = exportTranscript({ format: "json", transcript: text });
-      return { actionId, success: true, message: `Exported: ${exported.filename}` };
+      return {
+        actionId,
+        success: true,
+        message: `Exported: ${exported.filename}`,
+      };
     }
 
     // ── Create-category transforms ──────────────────────────────────

@@ -72,7 +72,9 @@ export async function loadDictionary(): Promise<DictionaryEntry[]> {
   }
 }
 
-export async function saveDictionary(entries: DictionaryEntry[]): Promise<void> {
+export async function saveDictionary(
+  entries: DictionaryEntry[],
+): Promise<void> {
   await getStorage().setItem(DICTIONARY_KEY, JSON.stringify(entries));
 }
 

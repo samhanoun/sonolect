@@ -16,13 +16,12 @@ import type { RetentionPolicy } from "./retentionControls";
 const store = new Map<string, string>();
 setRetentionStorage({
   getItem: async (key) => store.get(key) ?? null,
-  setItem: async (key, value) => { store.set(key, value); },
+  setItem: async (key, value) => {
+    store.set(key, value);
+  },
 });
 
-function makeRow(
-  id: string,
-  updatedAt: string,
-): TranscriptHistoryRow {
+function makeRow(id: string, updatedAt: string): TranscriptHistoryRow {
   return {
     id,
     title: `Session ${id}`,
@@ -76,10 +75,7 @@ describe("retentionControls (mobile)", () => {
     it("marks items over maxItems for removal", () => {
       const now = new Date();
       const history = Array.from({ length: 5 }, (_, i) =>
-        makeRow(
-          `item-${i}`,
-          new Date(now.getTime() - i * 1000).toISOString(),
-        ),
+        makeRow(`item-${i}`, new Date(now.getTime() - i * 1000).toISOString()),
       );
 
       const result = applyRetentionPolicy(history, {
@@ -170,10 +166,7 @@ describe("retentionControls (mobile)", () => {
     });
 
     it("clamps maxItems to safe range", () => {
-      assert.strictEqual(
-        validateRetentionPolicy({ maxItems: 0 }).maxItems,
-        1,
-      );
+      assert.strictEqual(validateRetentionPolicy({ maxItems: 0 }).maxItems, 1);
       assert.strictEqual(
         validateRetentionPolicy({ maxItems: 999999 }).maxItems,
         100_000,

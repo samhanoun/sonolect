@@ -16,7 +16,9 @@ import {
 const store = new Map<string, string>();
 setDictionaryStorage({
   getItem: async (key) => store.get(key) ?? null,
-  setItem: async (key, value) => { store.set(key, value); },
+  setItem: async (key, value) => {
+    store.set(key, value);
+  },
 });
 
 describe("dictionaryCrud (mobile)", () => {

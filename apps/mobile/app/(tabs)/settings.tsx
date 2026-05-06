@@ -150,9 +150,7 @@ export default function SettingsScreen() {
             {privacyLevels.map((level) => (
               <Pressable
                 key={level.key}
-                onPress={() =>
-                  void updateSettings({ privacyLevel: level.key })
-                }
+                onPress={() => void updateSettings({ privacyLevel: level.key })}
                 style={[
                   styles.pill,
                   settings.privacyLevel === level.key && styles.pillActive,
@@ -161,7 +159,8 @@ export default function SettingsScreen() {
                 <Text
                   style={[
                     styles.pillText,
-                    settings.privacyLevel === level.key && styles.pillTextActive,
+                    settings.privacyLevel === level.key &&
+                      styles.pillTextActive,
                   ]}
                 >
                   {level.label}

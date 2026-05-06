@@ -43,9 +43,8 @@ describe("View component exports", () => {
 // ── Style preset application updates polished preview ──────────
 describe("Style preset integration", () => {
   it("applyStylePreset transforms text with a known preset", async () => {
-    const { applyStylePreset, getStylePresets } = await import(
-      "./stylePresets"
-    );
+    const { applyStylePreset, getStylePresets } =
+      await import("./stylePresets");
     const presets = getStylePresets();
     assert.ok(presets.length > 0, "Should have at least one preset");
 
@@ -80,9 +79,8 @@ describe("Style preset integration", () => {
 // ── Search returns results for matching queries ────────────────
 describe("Search integration", () => {
   it("searchTranscripts returns results for known content", async () => {
-    const { searchTranscripts, filterHistory, sortResults } = await import(
-      "./searchAndFilter"
-    );
+    const { searchTranscripts, filterHistory, sortResults } =
+      await import("./searchAndFilter");
     const history = [
       {
         id: "1",
@@ -132,9 +130,8 @@ describe("Search integration", () => {
 // ── Retention policy loads/saves roundtrip ─────────────────────
 describe("Retention policy roundtrip", () => {
   it("default policy has sensible values", async () => {
-    const { DEFAULT_RETENTION_POLICY, loadRetentionPolicy } = await import(
-      "./retentionControls"
-    );
+    const { DEFAULT_RETENTION_POLICY, loadRetentionPolicy } =
+      await import("./retentionControls");
     assert.equal(DEFAULT_RETENTION_POLICY.maxAgeDays, 90);
     assert.equal(DEFAULT_RETENTION_POLICY.maxItems, 1000);
     assert.equal(DEFAULT_RETENTION_POLICY.autoDeleteEnabled, false);
@@ -199,9 +196,8 @@ describe("Command registry integration", () => {
   });
 
   it("searchCommands filters by label", async () => {
-    const { DEFAULT_COMMANDS, searchCommands } = await import(
-      "./commandRegistry"
-    );
+    const { DEFAULT_COMMANDS, searchCommands } =
+      await import("./commandRegistry");
     const results = searchCommands(DEFAULT_COMMANDS, "dictionary");
     assert.ok(results.length >= 1);
     assert.ok(results.some((cmd) => cmd.id.includes("dictionary")));
@@ -241,9 +237,8 @@ describe("Snippet CRUD integration", () => {
 // ── Onboarding wizard integration ──────────────────────────────
 describe("Onboarding wizard integration", () => {
   it("wizard starts at first incomplete step", async () => {
-    const { initWizardState, wizardProgress, isWizardFinished } = await import(
-      "./onboardingWizard"
-    );
+    const { initWizardState, wizardProgress, isWizardFinished } =
+      await import("./onboardingWizard");
     const state = initWizardState({
       micPermission: true,
       shortcutPrimer: false,

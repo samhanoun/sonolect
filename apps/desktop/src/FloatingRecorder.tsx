@@ -115,8 +115,12 @@ export function FloatingRecorderOverlay({
       aria-label="Floating recorder"
     >
       <div className="floating-recorder__header">
-        <span className="floating-recorder__label" aria-live="polite">{label}</span>
-        <span className="floating-recorder__timer" aria-live="off">{timer}</span>
+        <span className="floating-recorder__label" aria-live="polite">
+          {label}
+        </span>
+        <span className="floating-recorder__timer" aria-live="off">
+          {timer}
+        </span>
         <button
           className="floating-recorder__btn floating-recorder__btn--minimize"
           aria-label="Minimize recorder"
@@ -143,7 +147,10 @@ export function FloatingRecorderOverlay({
       )}
 
       {recordingState === "previewing" && polishedPreview !== null && (
-        <div className="floating-recorder__preview" aria-label="Polished preview">
+        <div
+          className="floating-recorder__preview"
+          aria-label="Polished preview"
+        >
           {polishedPreview}
         </div>
       )}

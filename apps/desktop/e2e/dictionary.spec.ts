@@ -16,8 +16,9 @@ test.describe("Dictionary management view", () => {
     await page.getByLabel("Write").fill("Sonolect");
     await page.getByRole("button", { name: /Add dictionary entry/i }).click();
 
-    await expect(page.getByText("sonolect")).toBeVisible();
-    await expect(page.getByText("Sonolect")).toBeVisible();
+    const list = page.getByRole("list").first();
+    await expect(list.getByText("sonolect")).toBeVisible();
+    await expect(list.getByText("Sonolect")).toBeVisible();
     await expect(page.getByText(/1 entry/i)).toBeVisible();
   });
 
@@ -32,11 +33,11 @@ test.describe("Dictionary management view", () => {
 
     await expect(page.getByText(/2 entries/i)).toBeVisible();
 
-    await page.getByLabel("Search dictionary").fill("flow");
+    await page.getByRole("textbox", { name: "Search dictionary" }).fill("flow");
     await expect(page.getByText("Wispr Flow")).toBeVisible();
     await expect(page.getByText("OpenClaw")).not.toBeVisible();
 
-    await page.getByLabel("Search dictionary").fill("");
+    await page.getByRole("textbox", { name: "Search dictionary" }).fill("");
     await expect(page.getByText("Wispr Flow")).toBeVisible();
     await expect(page.getByText("OpenClaw")).toBeVisible();
   });

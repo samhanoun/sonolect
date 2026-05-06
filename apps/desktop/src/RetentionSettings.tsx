@@ -1,9 +1,6 @@
 import React, { useState, useMemo } from "react";
 import type { TranscriptHistoryRow } from "./transcriptHistory";
-import {
-  getRetentionStats,
-  type RetentionPolicy,
-} from "./retentionControls";
+import { getRetentionStats, type RetentionPolicy } from "./retentionControls";
 import { useT } from "./i18n";
 
 export type RetentionSettingsProps = {
@@ -54,10 +51,17 @@ export function RetentionSettings({
 
   return (
     <div style={{ marginTop: "1.5rem" }} aria-labelledby="retention-heading">
-      <div className="section-title" id="retention-heading">{t("retention.title")}</div>
+      <div className="section-title" id="retention-heading">
+        {t("retention.title")}
+      </div>
       <p>{t("retention.description")}</p>
 
-      <div className="stats-grid" role="group" aria-label={t("retention.title")} style={{ marginTop: "0.75rem" }}>
+      <div
+        className="stats-grid"
+        role="group"
+        aria-label={t("retention.title")}
+        style={{ marginTop: "0.75rem" }}
+      >
         <div className="stat-item">
           <span className="stat-value">{stats.total}</span>
           <span className="stat-label">{t("retention.totalItems")}</span>
@@ -116,12 +120,12 @@ export function RetentionSettings({
 
       <div className="inline-actions" style={{ marginTop: "0.75rem" }}>
         <button
-          className={
-            confirmPurge ? "primary-button compact" : "ghost-button"
-          }
+          className={confirmPurge ? "primary-button compact" : "ghost-button"}
           onClick={handlePurge}
           type="button"
-          aria-label={confirmPurge ? t("retention.confirmPurge") : t("retention.purgeNow")}
+          aria-label={
+            confirmPurge ? t("retention.confirmPurge") : t("retention.purgeNow")
+          }
         >
           {confirmPurge ? t("retention.confirmPurge") : t("retention.purgeNow")}
         </button>
@@ -136,7 +140,10 @@ export function RetentionSettings({
         ) : null}
         {stats.expired > 0 ? (
           <span className="editor-meta" role="status" aria-live="polite">
-            {stats.expired} {stats.expired === 1 ? t("retention.expiredItemsSingular") : t("retention.expiredItemsPlural")}
+            {stats.expired}{" "}
+            {stats.expired === 1
+              ? t("retention.expiredItemsSingular")
+              : t("retention.expiredItemsPlural")}
           </span>
         ) : null}
       </div>

@@ -184,10 +184,7 @@ describe("llmRewriter", () => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       try {
-        const result = await rewriteWithLlm(
-          { text: "um hello there" },
-          config,
-        );
+        const result = await rewriteWithLlm({ text: "um hello there" }, config);
         assert.equal(result.method, "cloud");
         assert.equal(result.rewritten, "Hello there.");
         assert.ok(result.changes.includes("LLM-powered rewrite"));
@@ -226,10 +223,7 @@ describe("llmRewriter", () => {
     });
 
     it("uses local rules when provider is local", async () => {
-      const result = await rewrite(
-        { text: "um hello" },
-        { provider: "local" },
-      );
+      const result = await rewrite({ text: "um hello" }, { provider: "local" });
       assert.equal(result.method, "local");
     });
 

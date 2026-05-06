@@ -71,7 +71,10 @@ describe("buildRateLimitConfig", () => {
     });
     assert.strictEqual(config.auth.max, 3);
     // timeWindow should remain from defaults
-    assert.strictEqual(config.auth.timeWindow, DEFAULT_RATE_LIMITS.auth.timeWindow);
+    assert.strictEqual(
+      config.auth.timeWindow,
+      DEFAULT_RATE_LIMITS.auth.timeWindow,
+    );
     // Other presets untouched
     assert.deepStrictEqual(config.general, DEFAULT_RATE_LIMITS.general);
   });

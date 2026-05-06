@@ -79,7 +79,10 @@ describe("serializeCsp", () => {
     assert.ok(serialized.includes("default-src 'self'"));
     assert.ok(serialized.includes("object-src 'none'"));
     assert.ok(serialized.includes("upgrade-insecure-requests"));
-    assert.ok(serialized.includes("; "), "Directives should be semicolon-separated");
+    assert.ok(
+      serialized.includes("; "),
+      "Directives should be semicolon-separated",
+    );
   });
 
   it("produces no trailing semicolons", () => {
@@ -125,8 +128,12 @@ describe("buildSecurityHeaders", () => {
 
   it("sets HSTS with 2-year max-age by default", () => {
     const headers = buildSecurityHeaders();
-    assert.ok(headers["Strict-Transport-Security"]!.includes("max-age=63072000"));
-    assert.ok(headers["Strict-Transport-Security"]!.includes("includeSubDomains"));
+    assert.ok(
+      headers["Strict-Transport-Security"]!.includes("max-age=63072000"),
+    );
+    assert.ok(
+      headers["Strict-Transport-Security"]!.includes("includeSubDomains"),
+    );
     assert.ok(headers["Strict-Transport-Security"]!.includes("preload"));
   });
 

@@ -15,7 +15,10 @@ import {
   highlightMatches,
   searchTranscripts,
 } from "../../src/searchAndFilter";
-import type { SearchResult, TranscriptHistoryRow } from "../../src/searchAndFilter";
+import type {
+  SearchResult,
+  TranscriptHistoryRow,
+} from "../../src/searchAndFilter";
 
 const palette = {
   background: "#08090A",
@@ -63,7 +66,9 @@ export default function SearchScreen() {
   const filteredRows = useMemo(() => {
     let result = rows;
     if (filterMode === "recent") {
-      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const weekAgo = new Date(
+        Date.now() - 7 * 24 * 60 * 60 * 1000,
+      ).toISOString();
       result = filterHistory(result, { dateFrom: weekAgo });
     } else if (filterMode === "long") {
       result = filterHistory(result, { minDuration: 60000 });

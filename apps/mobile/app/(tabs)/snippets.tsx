@@ -49,18 +49,14 @@ export default function SnippetScreen() {
 
   const handleDelete = useCallback(
     (snippet: Snippet) => {
-      Alert.alert(
-        "Remove snippet",
-        `Delete "${snippet.trigger}"?`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: () => void removeSnippet(snippet.id),
-          },
-        ],
-      );
+      Alert.alert("Remove snippet", `Delete "${snippet.trigger}"?`, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => void removeSnippet(snippet.id),
+        },
+      ]);
     },
     [removeSnippet],
   );

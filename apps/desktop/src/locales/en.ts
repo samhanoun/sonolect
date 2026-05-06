@@ -311,7 +311,7 @@ export const en = {
   "search.sortRelevance": "Relevance",
   "search.sortDate": "Date",
   "search.sortDuration": "Duration",
-  "search.noResults": "No results for \"{query}\".",
+  "search.noResults": 'No results for "{query}".',
   "search.prompt": "Type a search query to find matching transcripts.",
   "search.matchCountSingular": "match",
   "search.matchCountPlural": "matches",

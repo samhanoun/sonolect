@@ -41,10 +41,7 @@ export function sanitizeHtml(input: string): string {
     /<\s*script\b[^>]*>[\s\S]*?<\s*\/\s*script\s*>/gi,
     "",
   );
-  result = result.replace(
-    /<\s*style\b[^>]*>[\s\S]*?<\s*\/\s*style\s*>/gi,
-    "",
-  );
+  result = result.replace(/<\s*style\b[^>]*>[\s\S]*?<\s*\/\s*style\s*>/gi, "");
 
   // Remove remaining dangerous tags (self-closing or unclosed)
   result = result.replace(DANGEROUS_TAG_PATTERN, "");
@@ -84,7 +81,9 @@ export function sanitizeFilePath(input: string): string | null {
   if (/^\//.test(result) || /^[A-Za-z]:/.test(result)) return null;
 
   // Remove any `..` path segments
-  const segments = result.split("/").filter((seg) => seg !== ".." && seg !== ".");
+  const segments = result
+    .split("/")
+    .filter((seg) => seg !== ".." && seg !== ".");
 
   if (segments.length === 0) return null;
 

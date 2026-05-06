@@ -73,7 +73,8 @@ describe("WCAG 2.1 AA accessibility audit", () => {
       it(`${name}: all <button> elements have text content or aria-label`, () => {
         const buttons = extractButtonBlocks(source);
         // Buttons with only icon content must have aria-label
-        const iconOnlyPattern = /<button[^>]*>\s*[✕✓↓▶Ⅱ⌘⇧&ndash;–—·•]\s*<\/button>/g;
+        const iconOnlyPattern =
+          /<button[^>]*>\s*[✕✓↓▶Ⅱ⌘⇧&ndash;–—·•]\s*<\/button>/g;
         const iconOnlyMatches = source.match(iconOnlyPattern) || [];
         for (const iconBtn of iconOnlyMatches) {
           assert.match(
@@ -115,7 +116,10 @@ describe("WCAG 2.1 AA accessibility audit", () => {
 
     it("RetentionSettings form fields are wrapped in labels", () => {
       // Both max age and max items have parent <label> elements
-      assert.match(retentionSettingsSource, /<label>[\s\S]*?maxAgeDays|maxItems/);
+      assert.match(
+        retentionSettingsSource,
+        /<label>[\s\S]*?maxAgeDays|maxItems/,
+      );
     });
   });
 
@@ -147,7 +151,7 @@ describe("WCAG 2.1 AA accessibility audit", () => {
     });
 
     it("main.tsx nav has aria-label", () => {
-      assert.match(mainSource, /nav.*aria-label.*Main navigation/);
+      assert.match(mainSource, /nav[\s\S]*?aria-label[\s\S]*?Main navigation/);
     });
 
     it("StylePresetSelector has role='group'", () => {
@@ -155,7 +159,7 @@ describe("WCAG 2.1 AA accessibility audit", () => {
     });
 
     it("RetentionSettings stats-grid has role='group'", () => {
-      assert.match(retentionSettingsSource, /stats-grid.*role="group"/);
+      assert.match(retentionSettingsSource, /stats-grid[\s\S]*?role="group"/);
     });
   });
 
@@ -186,11 +190,17 @@ describe("WCAG 2.1 AA accessibility audit", () => {
     });
 
     it("FloatingRecorder label has aria-live", () => {
-      assert.match(floatingRecorderSource, /floating-recorder__label[\s\S]*?aria-live/);
+      assert.match(
+        floatingRecorderSource,
+        /floating-recorder__label[\s\S]*?aria-live/,
+      );
     });
 
     it("RetentionSettings expired count has aria-live", () => {
-      assert.match(retentionSettingsSource, /role="status"[\s\S]*?aria-live="polite"/);
+      assert.match(
+        retentionSettingsSource,
+        /role="status"[\s\S]*?aria-live="polite"/,
+      );
     });
 
     it("main.tsx status chip has role='status'", () => {
@@ -201,7 +211,7 @@ describe("WCAG 2.1 AA accessibility audit", () => {
   // ── aria-current for active items ───────────────────────────────
   describe("aria-current on active items", () => {
     it("main.tsx nav items use aria-current='page'", () => {
-      assert.match(mainSource, /aria-current.*"page"/);
+      assert.match(mainSource, /aria-current[\s\S]*?"page"/);
     });
 
     it("StylePresetSelector uses aria-current on active preset", () => {
@@ -209,7 +219,7 @@ describe("WCAG 2.1 AA accessibility audit", () => {
     });
 
     it("OnboardingView uses aria-current='step' on active step", () => {
-      assert.match(onboardingViewSource, /aria-current.*"step"/);
+      assert.match(onboardingViewSource, /aria-current[\s\S]*?"step"/);
     });
 
     it("main.tsx history cards use aria-current", () => {
@@ -217,14 +227,17 @@ describe("WCAG 2.1 AA accessibility audit", () => {
     });
 
     it("main.tsx privacy toggle uses aria-current", () => {
-      assert.match(mainSource, /privacy.*aria-current|aria-current.*privacy/);
+      assert.match(
+        mainSource,
+        /privacy[\s\S]*?aria-current|aria-current[\s\S]*?privacy/,
+      );
     });
   });
 
   // ── role='list' and role='listitem' ─────────────────────────────
   describe("list semantics", () => {
     it("DictionaryView preference-list has role='list'", () => {
-      assert.match(dictionaryViewSource, /preference-list.*role="list"/);
+      assert.match(dictionaryViewSource, /preference-list[\s\S]*?role="list"/);
     });
 
     it("DictionaryView items have role='listitem'", () => {
@@ -232,7 +245,7 @@ describe("WCAG 2.1 AA accessibility audit", () => {
     });
 
     it("SnippetView preference-list has role='list'", () => {
-      assert.match(snippetViewSource, /preference-list.*role="list"/);
+      assert.match(snippetViewSource, /preference-list[\s\S]*?role="list"/);
     });
 
     it("SnippetView items have role='listitem'", () => {
@@ -240,11 +253,11 @@ describe("WCAG 2.1 AA accessibility audit", () => {
     });
 
     it("SearchPanel results list has role='list'", () => {
-      assert.match(searchPanelSource, /preference-list.*role="list"/);
+      assert.match(searchPanelSource, /preference-list[\s\S]*?role="list"/);
     });
 
     it("OnboardingView steps list has role='list'", () => {
-      assert.match(onboardingViewSource, /preference-list.*role="list"/);
+      assert.match(onboardingViewSource, /preference-list[\s\S]*?role="list"/);
     });
 
     it("OnboardingView steps have role='listitem'", () => {
@@ -252,7 +265,7 @@ describe("WCAG 2.1 AA accessibility audit", () => {
     });
 
     it("CommandPalette command-list has role='list'", () => {
-      assert.match(mainSource, /command-list.*role="list"/);
+      assert.match(mainSource, /command-list[\s\S]*?role="list"/);
     });
   });
 
@@ -275,27 +288,30 @@ describe("WCAG 2.1 AA accessibility audit", () => {
   // ── Decorative elements marked aria-hidden ──────────────────────
   describe("decorative elements are aria-hidden", () => {
     it("main.tsx ambient-grid is aria-hidden", () => {
-      assert.match(mainSource, /ambient-grid.*aria-hidden="true"/);
+      assert.match(mainSource, /ambient-grid[\s\S]*?aria-hidden="true"/);
     });
 
     it("main.tsx signal-rings is aria-hidden", () => {
-      assert.match(mainSource, /signal-rings.*aria-hidden="true"/);
+      assert.match(mainSource, /signal-rings[\s\S]*?aria-hidden="true"/);
     });
 
     it("main.tsx brand-mark is aria-hidden", () => {
-      assert.match(mainSource, /brand-mark.*aria-hidden="true"/);
+      assert.match(mainSource, /brand-mark[\s\S]*?aria-hidden="true"/);
     });
 
     it("main.tsx record-dot is aria-hidden", () => {
-      assert.match(mainSource, /record-dot.*aria-hidden="true"/);
+      assert.match(mainSource, /record-dot[\s\S]*?aria-hidden="true"/);
     });
 
     it("main.tsx pill-orb is aria-hidden", () => {
-      assert.match(mainSource, /pill-orb.*aria-hidden="true"/);
+      assert.match(mainSource, /pill-orb[\s\S]*?aria-hidden="true"/);
     });
 
     it("FloatingRecorder minimized status-dot is aria-hidden", () => {
-      assert.match(floatingRecorderSource, /status-dot.*aria-hidden="true"/);
+      assert.match(
+        floatingRecorderSource,
+        /status-dot[\s\S]*?aria-hidden="true"/,
+      );
     });
   });
 
@@ -312,7 +328,10 @@ describe("WCAG 2.1 AA accessibility audit", () => {
 
     it("main.tsx icon-only download link has aria-hidden span", () => {
       // The ↓ download icon should be wrapped with aria-hidden
-      assert.match(mainSource, /aria-hidden="true".*↓|↓.*aria-hidden/);
+      assert.match(
+        mainSource,
+        /aria-hidden="true"[\s\S]*?↓|↓[\s\S]*?aria-hidden/,
+      );
     });
   });
 
@@ -339,7 +358,10 @@ describe("WCAG 2.1 AA accessibility audit", () => {
   describe("keyboard accessibility", () => {
     it("timeline entries respond to Enter and Space keys", () => {
       assert.match(mainSource, /timeline-entry[\s\S]*?onKeyDown/);
-      assert.match(mainSource, /event\.key === "Enter" \|\| event\.key === " "/);
+      assert.match(
+        mainSource,
+        /event\.key === "Enter" \|\| event\.key === " "/,
+      );
     });
 
     it("DictionaryView entries respond to Enter key", () => {
@@ -370,7 +392,10 @@ describe("WCAG 2.1 AA accessibility audit", () => {
   // ── aria-labelledby for section headings ────────────────────────
   describe("sections have aria-labelledby for headings", () => {
     it("DictionaryView section uses aria-labelledby", () => {
-      assert.match(dictionaryViewSource, /aria-labelledby="dictionary-heading"/);
+      assert.match(
+        dictionaryViewSource,
+        /aria-labelledby="dictionary-heading"/,
+      );
       assert.match(dictionaryViewSource, /id="dictionary-heading"/);
     });
 
@@ -390,7 +415,10 @@ describe("WCAG 2.1 AA accessibility audit", () => {
     });
 
     it("RetentionSettings uses aria-labelledby", () => {
-      assert.match(retentionSettingsSource, /aria-labelledby="retention-heading"/);
+      assert.match(
+        retentionSettingsSource,
+        /aria-labelledby="retention-heading"/,
+      );
       assert.match(retentionSettingsSource, /id="retention-heading"/);
     });
   });
@@ -425,11 +453,11 @@ describe("WCAG 2.1 AA accessibility audit", () => {
   // ── Alert role on error messages ────────────────────────────────
   describe("error states use role='alert'", () => {
     it("main.tsx voice error has role='alert'", () => {
-      assert.match(mainSource, /pill-error.*role="alert"/);
+      assert.match(mainSource, /pill-error[\s\S]*?role="alert"/);
     });
 
     it("main.tsx toast items have role='alert'", () => {
-      assert.match(mainSource, /class.*toast.*role="alert"/);
+      assert.match(mainSource, /class[\s\S]*?toast[\s\S]*?role="alert"/);
     });
   });
 });

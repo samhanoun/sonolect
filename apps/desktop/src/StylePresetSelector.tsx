@@ -15,7 +15,12 @@ export function StylePresetSelector({
   const presets = useMemo(() => getStylePresets(), []);
 
   return (
-    <div className="inline-actions" role="group" aria-label={t("stylePreset.label")} style={{ alignItems: "center" }}>
+    <div
+      className="inline-actions"
+      role="group"
+      aria-label={t("stylePreset.label")}
+      style={{ alignItems: "center" }}
+    >
       <span className="editor-meta" style={{ marginRight: "0.5rem" }}>
         {t("stylePreset.label")}
       </span>

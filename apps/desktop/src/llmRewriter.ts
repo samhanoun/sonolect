@@ -5,7 +5,12 @@ import { applyStylePreset } from "./stylePresets";
 // Types
 // ---------------------------------------------------------------------------
 
-export type StylePresetId = "concise" | "professional" | "casual" | "technical" | "custom";
+export type StylePresetId =
+  | "concise"
+  | "professional"
+  | "casual"
+  | "technical"
+  | "custom";
 
 export type RewriteRequest = {
   text: string;
@@ -87,10 +92,14 @@ export function buildRewritePrompt(request: RewriteRequest): string {
 
   if (request.style) {
     const styleGuide: Record<StylePresetId, string> = {
-      concise: "Make the text concise: remove redundancy, shorten sentences, keep the core meaning.",
-      professional: "Use a professional tone: formal language, no contractions, business-appropriate.",
-      casual: "Use a casual tone: conversational, friendly, contractions are fine.",
-      technical: "Use a technical style: precise terminology, structured, no ambiguity.",
+      concise:
+        "Make the text concise: remove redundancy, shorten sentences, keep the core meaning.",
+      professional:
+        "Use a professional tone: formal language, no contractions, business-appropriate.",
+      casual:
+        "Use a casual tone: conversational, friendly, contractions are fine.",
+      technical:
+        "Use a technical style: precise terminology, structured, no ambiguity.",
       custom: "",
     };
     const guide = styleGuide[request.style];
