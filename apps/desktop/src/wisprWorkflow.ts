@@ -18,7 +18,7 @@ export type OnboardingChecklist = {
 };
 
 export type InsertionPlan = {
-  method: "clipboard-fallback" | "manual-copy";
+  method: "native-insert" | "clipboard-fallback" | "manual-copy";
   text: string;
   status: string;
 };
@@ -108,6 +108,7 @@ export function polishDictation(
 export function buildInsertionPlan(
   text: string,
   clipboardAvailable: boolean,
+  nativeInsertionAvailable = false,
 ): InsertionPlan {
   const trimmed = text.trim();
   if (!trimmed) {
@@ -115,6 +116,13 @@ export function buildInsertionPlan(
       method: "manual-copy",
       text: "",
       status: "Nothing to insert yet.",
+    };
+  }
+  if (nativeInsertionAvailable) {
+    return {
+      method: "native-insert",
+      text: trimmed,
+      status: "Inserted polished dictation into the active app.",
     };
   }
   if (clipboardAvailable) {

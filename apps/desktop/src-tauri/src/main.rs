@@ -208,9 +208,121 @@ fn transcribe_audio(payload: WhisperPayload) -> Result<WhisperResult, String> {
     result
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InsertionResult {
+    ok: bool,
+    method: String,
+    status: String,
+}
+
+fn command_exists(program: &str) -> bool {
+    Command::new(program)
+        .arg("--version")
+        .output()
+        .map(|output| {
+            output.status.success() || !output.stderr.is_empty() || !output.stdout.is_empty()
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "linux")]
+fn run_native_insert(text: &str) -> Result<(), String> {
+    let script = if command_exists("wl-copy") && command_exists("wtype") {
+        "printf %s \"$SONOLECT_INSERT_TEXT\" | wl-copy && wtype -M ctrl v -m ctrl"
+    } else if command_exists("xclip") && command_exists("xdotool") {
+        "printf %s \"$SONOLECT_INSERT_TEXT\" | xclip -selection clipboard && xdotool key ctrl+v"
+    } else if command_exists("xsel") && command_exists("xdotool") {
+        "printf %s \"$SONOLECT_INSERT_TEXT\" | xsel --clipboard --input && xdotool key ctrl+v"
+    } else {
+        return Err(
+            "Install wl-copy+wtype or xclip/xsel+xdotool for direct Linux insertion".to_owned(),
+        );
+    };
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(script)
+        .env("SONOLECT_INSERT_TEXT", text)
+        .output()
+        .map_err(|error| format!("Failed to run Linux insertion command: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn run_native_insert(text: &str) -> Result<(), String> {
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg("set the clipboard to (system attribute \"SONOLECT_INSERT_TEXT\")")
+        .arg("-e")
+        .arg("tell application \"System Events\" to keystroke \"v\" using command down")
+        .env("SONOLECT_INSERT_TEXT", text)
+        .output()
+        .map_err(|error| format!("Failed to run macOS insertion command: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn run_native_insert(text: &str) -> Result<(), String> {
+    let script = "$text = $env:SONOLECT_INSERT_TEXT; Set-Clipboard -Value $text; Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('^v')";
+    let output = Command::new("powershell")
+        .arg("-NoProfile")
+        .arg("-NonInteractive")
+        .arg("-Command")
+        .arg(script)
+        .env("SONOLECT_INSERT_TEXT", text)
+        .output()
+        .map_err(|error| format!("Failed to run Windows insertion command: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn run_native_insert(_text: &str) -> Result<(), String> {
+    Err("Direct insertion is unsupported on this operating system".to_owned())
+}
+
+#[tauri::command]
+fn insert_text_into_active_app(text: String) -> InsertionResult {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return InsertionResult {
+            ok: false,
+            method: "clipboard-fallback".to_owned(),
+            status: "Nothing to insert yet.".to_owned(),
+        };
+    }
+    match run_native_insert(trimmed) {
+        Ok(()) => InsertionResult {
+            ok: true,
+            method: "native-insert".to_owned(),
+            status: "Inserted polished dictation into the active app.".to_owned(),
+        },
+        Err(error) => InsertionResult {
+            ok: false,
+            method: "clipboard-fallback".to_owned(),
+            status: format!("Native insertion unavailable: {error}"),
+        },
+    }
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![transcribe_audio])
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![
+            transcribe_audio,
+            insert_text_into_active_app
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Sonolect desktop app");
 }
@@ -248,6 +360,15 @@ mod tests {
 
         assert_eq!(result.text, "hello offline whisper");
         assert!(result.segments.is_empty());
+    }
+
+    #[test]
+    fn reports_empty_native_insertion_as_clipboard_fallback() {
+        let result = insert_text_into_active_app("   ".to_owned());
+
+        assert!(!result.ok);
+        assert_eq!(result.method, "clipboard-fallback");
+        assert_eq!(result.status, "Nothing to insert yet.");
     }
 
     #[test]
