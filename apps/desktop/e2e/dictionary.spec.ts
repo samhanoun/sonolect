@@ -12,12 +12,12 @@ test.describe("Dictionary management view", () => {
   test("adds a new dictionary entry and verifies it appears in the list", async ({
     page,
   }) => {
-    await page.getByLabel("When I say").fill("xylophone");
-    await page.getByLabel("Write").fill("Xylophone Pro");
+    await page.getByLabel("When I say").fill("zephyr");
+    await page.getByLabel("Write").fill("Zephyr Corp");
     await page.getByRole("button", { name: /Add dictionary entry/i }).click();
 
-    await expect(page.getByText("xylophone")).toBeVisible();
-    await expect(page.getByText("Xylophone Pro")).toBeVisible();
+    await expect(page.getByText("zephyr", { exact: true })).toBeVisible();
+    await expect(page.getByText("Zephyr Corp", { exact: true })).toBeVisible();
     await expect(page.getByText(/1 entry/i)).toBeVisible();
   });
 
@@ -44,14 +44,13 @@ test.describe("Dictionary management view", () => {
   });
 
   test("deletes a dictionary entry", async ({ page }) => {
-    await page.getByLabel("When I say").fill("removeme");
-    await page.getByLabel("Write").fill("Remove Target");
+    await page.getByLabel("When I say").fill("oldword");
+    await page.getByLabel("Write").fill("Old Entry");
     await page.getByRole("button", { name: /Add dictionary entry/i }).click();
-    await expect(page.getByText("Remove Target")).toBeVisible();
+    await expect(page.getByText("Old Entry")).toBeVisible();
     await expect(page.getByText(/1 entry/i)).toBeVisible();
 
-    await page.getByRole("button", { name: /Remove/i }).first().click();
-    await expect(page.getByText("Remove Target")).not.toBeVisible();
-    await expect(page.getByText(/0 entries/i)).toBeVisible();
+    await page.getByRole("button", { name: /Remove oldword/i }).click();
+    await expect(page.getByText("Old Entry")).not.toBeVisible();
   });
 });

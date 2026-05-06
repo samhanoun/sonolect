@@ -17,7 +17,7 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
 
 export default function TabsLayout() {
   return (
-    // @ts-expect-error expo-router Tabs typed against React 19 while project uses React 18
+    // @ts-ignore expo-router Tabs has React version-dependent type variance
     <Tabs
       screenOptions={{
         headerShown: false,

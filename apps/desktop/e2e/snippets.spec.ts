@@ -32,9 +32,7 @@ test.describe("Snippet library view", () => {
 
     await expect(page.getByText(/2 snippets/i)).toBeVisible();
 
-    await page
-      .getByRole("textbox", { name: "Search snippets" })
-      .fill("greet");
+    await page.getByRole("textbox", { name: "Search snippets" }).fill("greet");
     await expect(page.getByText("Hello there!")).toBeVisible();
     await expect(page.getByText("Goodbye!")).not.toBeVisible();
 
@@ -50,7 +48,10 @@ test.describe("Snippet library view", () => {
     await expect(page.getByText("/delme")).toBeVisible();
     await expect(page.getByText(/1 snippet/i)).toBeVisible();
 
-    await page.getByRole("button", { name: /Remove/i }).first().click();
+    await page
+      .getByRole("button", { name: /Remove/i })
+      .first()
+      .click();
     await expect(page.getByText("/delme")).not.toBeVisible();
     await expect(page.getByText(/0 snippets/i)).toBeVisible();
   });
