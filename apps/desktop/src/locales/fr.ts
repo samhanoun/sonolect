@@ -6,6 +6,8 @@ export const fr: Record<LocaleKeys, string> = {
   "nav.history": "Historique",
   "nav.agents": "Agents",
   "nav.settings": "Réglages",
+  "nav.onboarding": "Configuration",
+  "nav.dictionary": "Dictionnaire",
   "nav.home": "Accueil",
   "nav.snippets": "Extraits",
   "nav.transforms": "Transformations",
@@ -218,6 +220,7 @@ export const fr: Record<LocaleKeys, string> = {
   // Toast
   "toast.transformComplete": "Transcription transformée avec succès",
   "toast.copySuccess": "Transcription copiée dans le presse-papiers",
+  "toast.insertionReady": "Dictée polie prête à coller",
 
   // Transform
   "editor.transforming": "Transformation…",

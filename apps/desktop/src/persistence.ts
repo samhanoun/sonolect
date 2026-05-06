@@ -12,6 +12,9 @@ export const SETTINGS_KEYS = {
   sttLanguage: `${KEY_PREFIX}sttLanguage`,
   privacyLevel: `${KEY_PREFIX}privacyLevel`,
   whisperConfig: `${KEY_PREFIX}whisperConfig`,
+  dictionaryEntries: `${KEY_PREFIX}dictionaryEntries`,
+  snippets: `${KEY_PREFIX}snippets`,
+  onboardingChecklist: `${KEY_PREFIX}onboardingChecklist`,
   transcriptDraft: `${KEY_PREFIX}transcriptDraft`,
 } as const;
 

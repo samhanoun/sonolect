@@ -62,6 +62,17 @@ import {
   createTranscriptUndoStack,
   type TranscriptUndoSnapshot,
 } from "./transcriptUndo";
+import {
+  buildInsertionPlan,
+  isOnboardingComplete,
+  normalizeDictionaryEntry,
+  normalizeSnippet,
+  onboardingProgress,
+  polishDictation,
+  type DictionaryEntry,
+  type OnboardingChecklist,
+  type Snippet,
+} from "./wisprWorkflow";
 import "./styles.css";
 
 type PrivacyLevel = "local" | "cloud";
@@ -72,7 +83,7 @@ type RecordingState =
   | "uploading"
   | "completed"
   | "error";
-type ViewId = "home" | "settings";
+type ViewId = "home" | "settings" | "dictionary" | "snippets" | "onboarding";
 
 type VoiceCaptureResult = VoiceCaptureMetadata & {
   objectUrl: string;
@@ -104,6 +115,11 @@ type DesktopState = {
   transcriptHistoryError: string | undefined;
   voiceCapture: VoiceCaptureResult | undefined;
   voiceError: string | undefined;
+  polishedPreview: string;
+  insertionStatus: string | undefined;
+  dictionaryEntries: DictionaryEntry[];
+  snippets: Snippet[];
+  onboardingChecklist: OnboardingChecklist;
   locale: SupportedLocale;
   setLocale: (locale: SupportedLocale) => void;
   sttLanguage: string;
@@ -122,6 +138,16 @@ type DesktopState = {
   setActiveSession: (sessionId: string, transcript: string) => void;
   clearActiveSession: () => void;
   setTranscript: (value: string) => void;
+  applyPolishedPreview: () => void;
+  insertPolishedDictation: () => Promise<void>;
+  addDictionaryEntry: (spoken: string, replacement: string) => void;
+  removeDictionaryEntry: (id: string) => void;
+  addSnippet: (trigger: string, body: string) => void;
+  removeSnippet: (id: string) => void;
+  setOnboardingStep: (
+    step: keyof OnboardingChecklist,
+    complete: boolean,
+  ) => void;
   undoTranscriptEdit: () => void;
   redoTranscriptEdit: () => void;
   toggleSegmentSelection: (segmentId: string) => void;
@@ -204,6 +230,15 @@ function syncSegments(
   };
 }
 
+function polishedForState(
+  state: Pick<DesktopState, "transcript" | "dictionaryEntries" | "snippets">,
+) {
+  return polishDictation(state.transcript, {
+    dictionary: state.dictionaryEntries,
+    snippets: state.snippets,
+  });
+}
+
 const restoredDraft = loadTranscriptDraft();
 const initialTranscriptSnapshot: TranscriptUndoSnapshot = restoredDraft
   ? {
@@ -215,6 +250,57 @@ const initialTranscriptSnapshot: TranscriptUndoSnapshot = restoredDraft
 const transcriptUndoStack = createTranscriptUndoStack(
   initialTranscriptSnapshot,
 );
+
+const defaultOnboardingChecklist: OnboardingChecklist = {
+  micPermission: false,
+  shortcutPrimer: false,
+  whisperSetup: false,
+  privacyChoice: false,
+};
+
+function loadJsonArray<T>(
+  key: string,
+  normalize: (value: Partial<T>) => T | null,
+  maxItems = 100,
+): T[] {
+  const raw = loadSettings(key);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.slice(0, maxItems).flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      try {
+        const normalized = normalize(item as Partial<T>);
+        return normalized ? [normalized] : [];
+      } catch {
+        return [];
+      }
+    });
+  } catch {
+    return [];
+  }
+}
+
+function loadOnboardingChecklist(): OnboardingChecklist {
+  const raw = loadSettings(SETTINGS_KEYS.onboardingChecklist);
+  if (!raw) return defaultOnboardingChecklist;
+  try {
+    const parsed = JSON.parse(raw) as Partial<OnboardingChecklist>;
+    return {
+      micPermission: Boolean(parsed.micPermission),
+      shortcutPrimer: Boolean(parsed.shortcutPrimer),
+      whisperSetup: Boolean(parsed.whisperSetup),
+      privacyChoice: Boolean(parsed.privacyChoice),
+    };
+  } catch {
+    return defaultOnboardingChecklist;
+  }
+}
+
+function saveJsonSetting(key: string, value: unknown) {
+  saveSettings(key, JSON.stringify(value));
+}
 
 function undoFlags() {
   return {
@@ -272,6 +358,20 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
   transcriptHistoryError: undefined,
   voiceCapture: undefined,
   voiceError: undefined,
+  polishedPreview: polishDictation(initialTranscriptSnapshot.transcript, {
+    dictionary: loadJsonArray<DictionaryEntry>(
+      SETTINGS_KEYS.dictionaryEntries,
+      normalizeDictionaryEntry,
+    ),
+    snippets: loadJsonArray<Snippet>(SETTINGS_KEYS.snippets, normalizeSnippet),
+  }),
+  insertionStatus: undefined,
+  dictionaryEntries: loadJsonArray<DictionaryEntry>(
+    SETTINGS_KEYS.dictionaryEntries,
+    normalizeDictionaryEntry,
+  ),
+  snippets: loadJsonArray<Snippet>(SETTINGS_KEYS.snippets, normalizeSnippet),
+  onboardingChecklist: loadOnboardingChecklist(),
   transforming: false,
   toasts: [],
   locale:
@@ -411,6 +511,10 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
                 return {
                   ...nextBaseState,
                   ...withUndoSnapshot(state, next),
+                  polishedPreview: polishDictation(next.transcript, {
+                    dictionary: state.dictionaryEntries,
+                    snippets: state.snippets,
+                  }),
                 };
               }
               const next = syncTranscriptText(
@@ -419,6 +523,10 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
               return {
                 ...nextBaseState,
                 ...withUndoSnapshot(state, next),
+                polishedPreview: polishDictation(next.transcript, {
+                  dictionary: state.dictionaryEntries,
+                  snippets: state.snippets,
+                }),
               };
             });
           })
@@ -504,6 +612,10 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
         activeSessionId: fallback.id,
         ...next,
         ...undoFlags(),
+        polishedPreview: polishDictation(next.transcript, {
+          dictionary: get().dictionaryEntries,
+          snippets: get().snippets,
+        }),
         draftRestored: false,
       });
     }
@@ -522,6 +634,10 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
           activeSessionId: detail.id,
           ...next,
           ...undoFlags(),
+          polishedPreview: polishDictation(next.transcript, {
+            dictionary: state.dictionaryEntries,
+            snippets: state.snippets,
+          }),
           draftRestored: false,
           transcriptHistory: state.transcriptHistory.map((item) =>
             item.id === detail.id ? detail : item,
@@ -543,6 +659,10 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
       activeSessionId: sessionId,
       ...next,
       ...undoFlags(),
+      polishedPreview: polishDictation(next.transcript, {
+        dictionary: get().dictionaryEntries,
+        snippets: get().snippets,
+      }),
       draftRestored: false,
     });
   },
@@ -558,20 +678,142 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
       activeSessionId: null,
       ...next,
       ...undoFlags(),
+      polishedPreview: "",
+      insertionStatus: undefined,
       draftRestored: false,
     });
   },
   setTranscript: (value) =>
-    set((state) => withUndoSnapshot(state, syncTranscriptText(value))),
+    set((state) => ({
+      ...withUndoSnapshot(state, syncTranscriptText(value)),
+      polishedPreview: polishDictation(value, {
+        dictionary: state.dictionaryEntries,
+        snippets: state.snippets,
+      }),
+    })),
+  applyPolishedPreview: () => {
+    const { polishedPreview } = get();
+    if (!polishedPreview.trim()) return;
+    set((state) => {
+      const next = syncTranscriptText(polishedPreview);
+      return {
+        ...withUndoSnapshot(state, next),
+        polishedPreview: polishedForState({
+          ...state,
+          transcript: next.transcript,
+        }),
+      };
+    });
+  },
+  insertPolishedDictation: async () => {
+    const { polishedPreview, transcript, addToast } = get();
+    const plan = buildInsertionPlan(
+      polishedPreview || transcript,
+      Boolean(navigator.clipboard?.writeText),
+    );
+    if (plan.method === "clipboard-fallback") {
+      try {
+        await navigator.clipboard.writeText(plan.text);
+        set({ insertionStatus: plan.status });
+        addToast("toast.insertionReady");
+      } catch {
+        set({
+          insertionStatus:
+            "Clipboard copy was blocked. Select the polished text and copy it manually.",
+        });
+      }
+      return;
+    }
+    set({ insertionStatus: plan.status });
+  },
+  addDictionaryEntry: (spoken, replacement) => {
+    const entry = normalizeDictionaryEntry({ spoken, replacement });
+    if (!entry) return;
+    set((state) => {
+      const dictionaryEntries = [...state.dictionaryEntries, entry];
+      saveJsonSetting(SETTINGS_KEYS.dictionaryEntries, dictionaryEntries);
+      return {
+        dictionaryEntries,
+        polishedPreview: polishDictation(state.transcript, {
+          dictionary: dictionaryEntries,
+          snippets: state.snippets,
+        }),
+      };
+    });
+  },
+  removeDictionaryEntry: (id) =>
+    set((state) => {
+      const dictionaryEntries = state.dictionaryEntries.filter(
+        (entry) => entry.id !== id,
+      );
+      saveJsonSetting(SETTINGS_KEYS.dictionaryEntries, dictionaryEntries);
+      return {
+        dictionaryEntries,
+        polishedPreview: polishDictation(state.transcript, {
+          dictionary: dictionaryEntries,
+          snippets: state.snippets,
+        }),
+      };
+    }),
+  addSnippet: (trigger, body) => {
+    const snippet = normalizeSnippet({ trigger, body });
+    if (!snippet) return;
+    set((state) => {
+      const snippets = [...state.snippets, snippet];
+      saveJsonSetting(SETTINGS_KEYS.snippets, snippets);
+      return {
+        snippets,
+        polishedPreview: polishDictation(state.transcript, {
+          dictionary: state.dictionaryEntries,
+          snippets,
+        }),
+      };
+    });
+  },
+  removeSnippet: (id) =>
+    set((state) => {
+      const snippets = state.snippets.filter((snippet) => snippet.id !== id);
+      saveJsonSetting(SETTINGS_KEYS.snippets, snippets);
+      return {
+        snippets,
+        polishedPreview: polishDictation(state.transcript, {
+          dictionary: state.dictionaryEntries,
+          snippets,
+        }),
+      };
+    }),
+  setOnboardingStep: (step, complete) =>
+    set((state) => {
+      const onboardingChecklist = {
+        ...state.onboardingChecklist,
+        [step]: complete,
+      };
+      saveJsonSetting(SETTINGS_KEYS.onboardingChecklist, onboardingChecklist);
+      return { onboardingChecklist };
+    }),
   undoTranscriptEdit: () => {
     const snapshot = transcriptUndoStack.undo();
     if (!snapshot) return;
-    set({ ...snapshot, ...undoFlags() });
+    set((state) => ({
+      ...snapshot,
+      ...undoFlags(),
+      polishedPreview: polishedForState({
+        ...state,
+        transcript: snapshot.transcript,
+      }),
+    }));
   },
   redoTranscriptEdit: () => {
     const snapshot = transcriptUndoStack.redo();
     if (!snapshot) return;
-    set({ ...snapshot, ...undoFlags() });
+    set((state) => ({
+      ...snapshot,
+      ...undoFlags(),
+      polishedPreview: polishedForState({
+        ...state,
+        transcript: snapshot.transcript,
+      }),
+    }));
   },
   toggleSegmentSelection: (segmentId) =>
     set((state) => ({
@@ -580,31 +822,39 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
         : [...state.selectedSegmentIds, segmentId],
     })),
   updateSegmentText: (segmentId, text) =>
-    set((state) =>
-      withUndoSnapshot(
-        state,
-        syncSegments(
-          state.transcriptSegments.map((segment) =>
-            segment.id === segmentId ? { ...segment, text } : segment,
-          ),
-          state.selectedSegmentIds,
+    set((state) => {
+      const next = syncSegments(
+        state.transcriptSegments.map((segment) =>
+          segment.id === segmentId ? { ...segment, text } : segment,
         ),
-      ),
-    ),
+        state.selectedSegmentIds,
+      );
+      return {
+        ...withUndoSnapshot(state, next),
+        polishedPreview: polishedForState({
+          ...state,
+          transcript: next.transcript,
+        }),
+      };
+    }),
   updateSegmentSpeaker: (segmentId, speaker) =>
-    set((state) =>
-      withUndoSnapshot(
-        state,
-        syncSegments(
-          state.transcriptSegments.map((segment) =>
-            segment.id === segmentId
-              ? assignSpeakerLabel(segment, speaker)
-              : segment,
-          ),
-          state.selectedSegmentIds,
+    set((state) => {
+      const next = syncSegments(
+        state.transcriptSegments.map((segment) =>
+          segment.id === segmentId
+            ? assignSpeakerLabel(segment, speaker)
+            : segment,
         ),
-      ),
-    ),
+        state.selectedSegmentIds,
+      );
+      return {
+        ...withUndoSnapshot(state, next),
+        polishedPreview: polishedForState({
+          ...state,
+          transcript: next.transcript,
+        }),
+      };
+    }),
   mergeSelectedSegments: () => {
     const { transcriptSegments, selectedSegmentIds } = get();
     if (selectedSegmentIds.length !== 2) return;
@@ -613,7 +863,16 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
       selectedSegmentIds[0]!,
       selectedSegmentIds[1]!,
     );
-    set((state) => withUndoSnapshot(state, syncSegments(merged, [])));
+    set((state) => {
+      const next = syncSegments(merged, []);
+      return {
+        ...withUndoSnapshot(state, next),
+        polishedPreview: polishedForState({
+          ...state,
+          transcript: next.transcript,
+        }),
+      };
+    });
   },
   splitSelectedSegment: () => {
     const { transcriptSegments, selectedSegmentIds } = get();
@@ -627,7 +886,16 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
       segment.id,
       splitAtReadableMidpoint(segment.text),
     );
-    set((state) => withUndoSnapshot(state, syncSegments(split, [])));
+    set((state) => {
+      const next = syncSegments(split, []);
+      return {
+        ...withUndoSnapshot(state, next),
+        polishedPreview: polishedForState({
+          ...state,
+          transcript: next.transcript,
+        }),
+      };
+    });
   },
   addToast: (message) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -654,10 +922,17 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
     const firstWords = cleaned.split(/\s+/).slice(0, 6).join(" ");
     const title = `# ${firstWords}${firstWords.length < cleaned.length ? "…" : ""}`;
     const transformed = `${title}\n\n${paragraphs.join("\n\n")}`;
-    set((state) => ({
-      ...withUndoSnapshot(state, syncTranscriptText(transformed)),
-      transforming: false,
-    }));
+    set((state) => {
+      const next = syncTranscriptText(transformed);
+      return {
+        ...withUndoSnapshot(state, next),
+        polishedPreview: polishedForState({
+          ...state,
+          transcript: next.transcript,
+        }),
+        transforming: false,
+      };
+    });
     addToast("toast.transformComplete");
   },
 }));
@@ -794,6 +1069,18 @@ function WorkspaceRouter() {
         <div className="workspace-grid">
           <SettingsPrivacy />
         </div>
+      ) : activeView === "dictionary" ? (
+        <div className="workspace-grid">
+          <DictionaryPanel />
+        </div>
+      ) : activeView === "snippets" ? (
+        <div className="workspace-grid">
+          <SnippetsPanel />
+        </div>
+      ) : activeView === "onboarding" ? (
+        <div className="workspace-grid">
+          <OnboardingPanel />
+        </div>
       ) : activeSessionId ? (
         <div className="workspace-grid">
           <TranscriptDetail />
@@ -817,6 +1104,9 @@ function Sidebar() {
 
   const navItems: Array<{ id: ViewId; labelKey: LocaleKeys }> = [
     { id: "home", labelKey: "nav.home" },
+    { id: "onboarding", labelKey: "nav.onboarding" },
+    { id: "dictionary", labelKey: "nav.dictionary" },
+    { id: "snippets", labelKey: "nav.snippets" },
     { id: "settings", labelKey: "nav.settings" },
   ];
 
@@ -1259,6 +1549,14 @@ function TranscriptDetail() {
     (state) => state.splitSelectedSegment,
   );
   const transforming = useDesktopStore((state) => state.transforming);
+  const polishedPreview = useDesktopStore((state) => state.polishedPreview);
+  const insertionStatus = useDesktopStore((state) => state.insertionStatus);
+  const applyPolishedPreview = useDesktopStore(
+    (state) => state.applyPolishedPreview,
+  );
+  const insertPolishedDictation = useDesktopStore(
+    (state) => state.insertPolishedDictation,
+  );
   const transformTranscript = useDesktopStore(
     (state) => state.transformTranscript,
   );
@@ -1449,6 +1747,41 @@ function TranscriptDetail() {
         </div>
       </section>
 
+      <section
+        className="polish-preview-card"
+        aria-label="Wispr-style polished preview"
+      >
+        <div>
+          <p className="section-title">Wispr-style auto-edit</p>
+          <h4>Raw speech → polished text</h4>
+        </div>
+        <p className="preview-text">
+          {polishedPreview ||
+            "Record or type a dictation to see the cleaned preview."}
+        </p>
+        {insertionStatus ? (
+          <p className="editor-meta">{insertionStatus}</p>
+        ) : null}
+        <div className="inline-actions">
+          <button
+            className="ghost-button"
+            disabled={!polishedPreview.trim()}
+            onClick={applyPolishedPreview}
+            type="button"
+          >
+            Replace editor with preview
+          </button>
+          <button
+            className="primary-button compact"
+            disabled={!polishedPreview.trim() && !transcript.trim()}
+            onClick={() => void insertPolishedDictation()}
+            type="button"
+          >
+            Copy for active app
+          </button>
+        </div>
+      </section>
+
       <footer className="editor-footer">
         <span>
           {wordCount} {t("editor.wordCount")}
@@ -1478,6 +1811,220 @@ function TranscriptDetail() {
           {transforming ? t("editor.transforming") : t("editor.transformCta")}
         </button>
       </footer>
+    </section>
+  );
+}
+
+/* ── Product Setup Panels ────────────────────────────────────── */
+
+function DictionaryPanel() {
+  const entries = useDesktopStore((state) => state.dictionaryEntries);
+  const addDictionaryEntry = useDesktopStore(
+    (state) => state.addDictionaryEntry,
+  );
+  const removeDictionaryEntry = useDesktopStore(
+    (state) => state.removeDictionaryEntry,
+  );
+  const [spoken, setSpoken] = useState("");
+  const [replacement, setReplacement] = useState("");
+
+  return (
+    <section className="glass-card management-panel">
+      <p className="section-title">Personal dictionary</p>
+      <h3>Teach Sonolect names, products, and spellings</h3>
+      <p>
+        These replacements are applied during the Wispr-style polished preview
+        before you copy text into another app.
+      </p>
+      <div className="form-grid two">
+        <label>
+          <span>When I say</span>
+          <input
+            value={spoken}
+            onChange={(event) => setSpoken(event.target.value)}
+            placeholder="open claw"
+          />
+        </label>
+        <label>
+          <span>Write</span>
+          <input
+            value={replacement}
+            onChange={(event) => setReplacement(event.target.value)}
+            placeholder="OpenClaw"
+          />
+        </label>
+      </div>
+      <button
+        className="primary-button compact"
+        onClick={() => {
+          addDictionaryEntry(spoken, replacement);
+          setSpoken("");
+          setReplacement("");
+        }}
+        type="button"
+      >
+        Add dictionary entry
+      </button>
+      <div className="preference-list">
+        {entries.length === 0 ? (
+          <p className="editor-meta">No dictionary entries yet.</p>
+        ) : null}
+        {entries.map((entry) => (
+          <article className="preference-row" key={entry.id}>
+            <div>
+              <strong>{entry.spoken}</strong>
+              <p>{entry.replacement}</p>
+            </div>
+            <button
+              aria-label={`Remove dictionary entry ${entry.spoken}`}
+              className="ghost-button"
+              onClick={() => removeDictionaryEntry(entry.id)}
+              type="button"
+            >
+              Remove
+            </button>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SnippetsPanel() {
+  const snippets = useDesktopStore((state) => state.snippets);
+  const addSnippet = useDesktopStore((state) => state.addSnippet);
+  const removeSnippet = useDesktopStore((state) => state.removeSnippet);
+  const [trigger, setTrigger] = useState("");
+  const [body, setBody] = useState("");
+
+  return (
+    <section className="glass-card management-panel">
+      <p className="section-title">Snippet library</p>
+      <h3>Expand voice shortcuts while dictating</h3>
+      <p>
+        Say or type a trigger like /sig and Sonolect expands it in the polished
+        preview.
+      </p>
+      <div className="form-grid two">
+        <label>
+          <span>Trigger</span>
+          <input
+            value={trigger}
+            onChange={(event) => setTrigger(event.target.value)}
+            placeholder="/sig"
+          />
+        </label>
+        <label>
+          <span>Expansion</span>
+          <input
+            value={body}
+            onChange={(event) => setBody(event.target.value)}
+            placeholder="Best, Ismail"
+          />
+        </label>
+      </div>
+      <button
+        className="primary-button compact"
+        onClick={() => {
+          addSnippet(trigger, body);
+          setTrigger("");
+          setBody("");
+        }}
+        type="button"
+      >
+        Add snippet
+      </button>
+      <div className="preference-list">
+        {snippets.length === 0 ? (
+          <p className="editor-meta">No snippets yet.</p>
+        ) : null}
+        {snippets.map((snippet) => (
+          <article className="preference-row" key={snippet.id}>
+            <div>
+              <strong>{snippet.trigger}</strong>
+              <p>{snippet.body}</p>
+            </div>
+            <button
+              aria-label={`Remove snippet ${snippet.trigger}`}
+              className="ghost-button"
+              onClick={() => removeSnippet(snippet.id)}
+              type="button"
+            >
+              Remove
+            </button>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function OnboardingPanel() {
+  const checklist = useDesktopStore((state) => state.onboardingChecklist);
+  const setOnboardingStep = useDesktopStore((state) => state.setOnboardingStep);
+  const percent = onboardingProgress(checklist);
+  const done = isOnboardingComplete(checklist);
+  const items: Array<{
+    key: keyof OnboardingChecklist;
+    title: string;
+    detail: string;
+  }> = [
+    {
+      key: "micPermission",
+      title: "Microphone permission",
+      detail: "Verify the app can request and receive audio input.",
+    },
+    {
+      key: "shortcutPrimer",
+      title: "Global shortcut primer",
+      detail: "Learn hands-free toggle ⌘⇧M and push-to-talk ⌘⇧V.",
+    },
+    {
+      key: "whisperSetup",
+      title: "Whisper setup",
+      detail:
+        "Configure local Whisper command/model or confirm offline demo mode.",
+    },
+    {
+      key: "privacyChoice",
+      title: "Privacy choice",
+      detail:
+        "Choose local-first or cloud-assisted processing and retention behavior.",
+    },
+  ];
+
+  return (
+    <section className="glass-card management-panel">
+      <p className="section-title">First-run setup</p>
+      <h3>
+        {done
+          ? "Sonolect is ready for dictation"
+          : "Complete setup before relying on dictation"}
+      </h3>
+      <p>
+        {percent}% complete · Wispr-style loop requires mic, shortcut,
+        transcription, and privacy confidence.
+      </p>
+      <div className="setup-progress">
+        <span style={{ width: `${percent}%` }} />
+      </div>
+      <div className="preference-list">
+        {items.map((item) => (
+          <label className="preference-row check-row" key={item.key}>
+            <input
+              type="checkbox"
+              checked={checklist[item.key]}
+              onChange={(event) =>
+                setOnboardingStep(item.key, event.target.checked)
+              }
+            />
+            <div>
+              <strong>{item.title}</strong>
+              <p>{item.detail}</p>
+            </div>
+          </label>
+        ))}
+      </div>
     </section>
   );
 }
@@ -1961,26 +2508,51 @@ function CommandPalette() {
   const [search, setSearch] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const commands: Array<{
-    labelKey: LocaleKeys;
-    hintKey: LocaleKeys;
+    label: string;
+    hint: string;
     action: () => void;
   }> = [
     {
-      labelKey: "palette.newCapture",
-      hintKey: "palette.newCaptureHint",
+      label: t("palette.newCapture"),
+      hint: t("palette.newCaptureHint"),
       action: () => useDesktopStore.getState().toggleRecording(),
     },
     {
-      labelKey: "palette.openHistory",
-      hintKey: "palette.openHistoryHint",
+      label: "Copy polished dictation",
+      hint: "Clipboard fallback for the app you were using",
+      action: () => void useDesktopStore.getState().insertPolishedDictation(),
+    },
+    {
+      label: "Apply polished preview",
+      hint: "Replace raw transcript with cleaned text",
+      action: () => useDesktopStore.getState().applyPolishedPreview(),
+    },
+    {
+      label: "Open first-run setup",
+      hint: "Mic, shortcuts, Whisper, privacy",
+      action: () => setActiveView("onboarding"),
+    },
+    {
+      label: "Open dictionary",
+      hint: "Names, products, custom spelling",
+      action: () => setActiveView("dictionary"),
+    },
+    {
+      label: "Open snippets",
+      hint: "Voice shortcuts and expansions",
+      action: () => setActiveView("snippets"),
+    },
+    {
+      label: t("palette.openHistory"),
+      hint: t("palette.openHistoryHint"),
       action: () => {
         setActiveView("home");
         clearActiveSession();
       },
     },
     {
-      labelKey: "palette.privacySettings",
-      hintKey: "palette.privacySettingsHint",
+      label: t("palette.privacySettings"),
+      hint: t("palette.privacySettingsHint"),
       action: () => setActiveView("settings"),
     },
   ];
@@ -1993,8 +2565,7 @@ function CommandPalette() {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return (
-      t(cmd.labelKey).toLowerCase().includes(q) ||
-      t(cmd.hintKey).toLowerCase().includes(q)
+      cmd.label.toLowerCase().includes(q) || cmd.hint.toLowerCase().includes(q)
     );
   });
 
@@ -2027,15 +2598,15 @@ function CommandPalette() {
           ) : (
             filtered.map((command) => (
               <button
-                key={command.labelKey}
+                key={command.label}
                 onClick={() => {
                   command.action();
                   setCommandOpen(false);
                 }}
                 type="button"
               >
-                <span>{t(command.labelKey)}</span>
-                <small>{t(command.hintKey)}</small>
+                <span>{command.label}</span>
+                <small>{command.hint}</small>
               </button>
             ))
           )}
