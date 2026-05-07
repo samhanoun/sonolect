@@ -385,9 +385,9 @@ export async function createApp(
 
   function buildRewritePromptBackend(body: {
     text: string;
-    style?: StylePresetId;
-    instruction?: string;
-    context?: string;
+    style?: StylePresetId | undefined;
+    instruction?: string | undefined;
+    context?: string | undefined;
   }): string {
     const parts: string[] = [
       "You are a professional editor. Rewrite the following dictated text.",
@@ -480,7 +480,12 @@ export async function createApp(
         });
       }
 
-      const prompt = buildRewritePromptBackend(body);
+      const prompt = buildRewritePromptBackend({
+        text: body.text,
+        style: body.style as StylePresetId | undefined,
+        instruction: body.instruction,
+        context: body.context,
+      });
       const start = Date.now();
       const rewritten = await callLlmBackend(
         prompt,
