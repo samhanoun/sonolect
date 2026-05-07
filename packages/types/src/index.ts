@@ -376,3 +376,51 @@ export interface EnqueueWorkerTaskRequest<TPayload = unknown> {
   type: string;
   payload: TPayload;
 }
+
+/* ─── Team Collaboration ─── */
+
+export type TeamMemberRole = "owner" | "admin" | "member";
+export type TeamInviteStatus = "pending" | "accepted" | "expired";
+export type SharedResourceType = "dictionary" | "snippet" | "style-preset";
+
+export interface Team {
+  id: string;
+  name: string;
+  slug: string;
+  ownerId: string;
+  createdAt: string;
+}
+
+export interface TeamMember {
+  userId: string;
+  teamId: string;
+  role: TeamMemberRole;
+  joinedAt: string;
+}
+
+export interface TeamInvite {
+  id: string;
+  teamId: string;
+  email: string;
+  role: "admin" | "member";
+  invitedBy: string;
+  createdAt: string;
+  expiresAt: string;
+  status: TeamInviteStatus;
+}
+
+export interface SharedResource {
+  id: string;
+  teamId: string;
+  resourceType: SharedResourceType;
+  data: unknown;
+  updatedBy: string;
+  updatedAt: string;
+  version: number;
+}
+
+export interface TeamSyncManifest {
+  teamId: string;
+  resources: SharedResource[];
+  lastSyncAt: string;
+}
