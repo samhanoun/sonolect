@@ -33,6 +33,10 @@ import {
 } from "./persistence";
 import { STT_LANGUAGES } from "./sttLanguages";
 import {
+  detectLanguageFromWhisperOutput,
+  type DetectedLanguage,
+} from "./languageDetection";
+import {
   assignSpeakerLabel,
   mergeTranscriptSegments,
   segmentsToText,
@@ -163,6 +167,7 @@ type DesktopState = {
   voiceCapture: VoiceCaptureResult | undefined;
   voiceError: string | undefined;
   polishedPreview: string;
+  detectedLanguage: DetectedLanguage | null;
   insertionStatus: string | undefined;
   dictionaryEntries: DictionaryEntry[];
   snippets: Snippet[];
@@ -435,6 +440,7 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
     ),
     snippets: loadJsonArray<Snippet>(SETTINGS_KEYS.snippets, normalizeSnippet),
   }),
+  detectedLanguage: null,
   insertionStatus: undefined,
   dictionaryEntries: loadJsonArray<DictionaryEntry>(
     SETTINGS_KEYS.dictionaryEntries,
@@ -635,6 +641,11 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
                 recordingState: "completed" as const,
                 voiceCapture: capture,
                 voiceError: undefined,
+                detectedLanguage: detectLanguageFromWhisperOutput(
+                  api.language
+                    ? { language: api.language, text: api.transcript ?? "" }
+                    : { text: api.transcript ?? "" },
+                ),
               };
               if (api.segments?.length) {
                 const captureSegments = api.segments.map((segment, index) => ({
@@ -705,6 +716,7 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
         recordingState: "idle",
         voiceError: undefined,
         voiceCapture: undefined,
+        detectedLanguage: null,
       };
     }),
   setActiveView: (view) => set({ activeView: view }),
@@ -2645,6 +2657,7 @@ function VoiceRecorderPill() {
   const recordingState = useDesktopStore((state) => state.recordingState);
   const voiceCapture = useDesktopStore((state) => state.voiceCapture);
   const voiceError = useDesktopStore((state) => state.voiceError);
+  const detectedLanguage = useDesktopStore((state) => state.detectedLanguage);
   const toggleRecording = useDesktopStore((state) => state.toggleRecording);
   const resetVoiceCapture = useDesktopStore((state) => state.resetVoiceCapture);
   const t = useT();
@@ -2706,6 +2719,15 @@ function VoiceRecorderPill() {
       <span className="pill-status" aria-live="polite">
         {statusLabel}
       </span>
+      {detectedLanguage && isDone ? (
+        <span
+          className="pill-lang"
+          title={`Detected: ${detectedLanguage.name} (${detectedLanguage.code})`}
+          aria-label={`Detected language: ${detectedLanguage.name}`}
+        >
+          {detectedLanguage.code.toUpperCase()}
+        </span>
+      ) : null}
       {voiceError && isDone ? (
         <span className="pill-error" role="alert">
           {voiceError}

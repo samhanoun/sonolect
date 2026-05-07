@@ -29,3 +29,51 @@ export {
   toFastifyRateLimitOptions,
 } from "./rateLimiting";
 export type { RateLimitPreset, RateLimitConfig } from "./rateLimiting";
+
+export {
+  AUDIT_ACTIONS,
+  DEFAULT_AUDIT_CONFIG,
+  createAuditEvent,
+  redactSensitiveFields,
+  formatAuditEntry,
+  filterAuditLog,
+  auditLogSummary,
+} from "./auditLog";
+export type {
+  AuditEvent,
+  AuditLogConfig,
+  AuditAction,
+  AuditLogFilters,
+  AuditLogSummary,
+} from "./auditLog";
+
+export {
+  DEFAULT_RETENTION_RULES,
+  classifyData,
+  getRetentionRule,
+  buildGdprExport,
+  buildDeletionManifest,
+  validateEncryptionRequirement,
+  isDataExpired,
+} from "./dataGovernance";
+export type {
+  DataClassification,
+  DataRetentionRule,
+  GdprExportRequest,
+  GdprExportResult,
+} from "./dataGovernance";
+
+export {
+  PRIVACY_PRESETS,
+  getPrivacyConfig,
+  isCloudAllowed,
+  isAudioStorageAllowed,
+  shouldRedactBeforeCloud,
+  validatePrivacyCompliance,
+} from "./privacyEnforcement";
+export type {
+  PrivacyMode,
+  PrivacyConfig,
+  PrivacyOperation,
+  PrivacyComplianceResult,
+} from "./privacyEnforcement";
