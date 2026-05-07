@@ -1,0 +1,58 @@
+{
+  "name": "sonolect-voice",
+  "displayName": "Sonolect Voice for VS Code",
+  "description": "Voice dictation for code — speak naturally, get clean code",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "sonolect",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onCommand:sonolect.startDictation"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "sonolect.startDictation",
+        "title": "Sonolect: Start Voice Dictation",
+        "icon": "$(mic)"
+      },
+      {
+        "command": "sonolect.stopDictation",
+        "title": "Sonolect: Stop Voice Dictation",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "sonolect.toggleDictation",
+        "title": "Sonolect: Toggle Voice Dictation",
+        "icon": "$(mic)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "sonolect.toggleDictation",
+        "key": "ctrl+shift+m",
+        "mac": "cmd+shift+m"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"VS Code extension tests require vscode test runner — run SDK tests instead\""
+  },
+  "dependencies": {
+    "@sonolect/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0"
+  }
+}
