@@ -512,8 +512,6 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
   meetingHistory: [],
   systemAudioStatus: null,
   startMeeting: (title: string) => {
-    const { createMeetingSession } =
-      require("./meetingMode") as typeof import("./meetingMode");
     const session = createMeetingSession({
       title,
       participants: [],
@@ -524,27 +522,21 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
     set({ activeMeeting: session });
   },
   pauseActiveMeeting: () => {
-    const { pauseMeeting } =
-      require("./meetingMode") as typeof import("./meetingMode");
     set((state) => {
       if (!state.activeMeeting) return {};
-      return { activeMeeting: pauseMeeting(state.activeMeeting) };
+      return { activeMeeting: pauseMeetingSession(state.activeMeeting) };
     });
   },
   resumeActiveMeeting: () => {
-    const { resumeMeeting } =
-      require("./meetingMode") as typeof import("./meetingMode");
     set((state) => {
       if (!state.activeMeeting) return {};
-      return { activeMeeting: resumeMeeting(state.activeMeeting) };
+      return { activeMeeting: resumeMeetingSession(state.activeMeeting) };
     });
   },
   endActiveMeeting: () => {
-    const { endMeeting } =
-      require("./meetingMode") as typeof import("./meetingMode");
     set((state) => {
       if (!state.activeMeeting) return {};
-      const ended = endMeeting(state.activeMeeting);
+      const ended = endMeetingSession(state.activeMeeting);
       return {
         activeMeeting: ended,
         meetingHistory: [ended, ...state.meetingHistory],
@@ -1613,9 +1605,7 @@ function WorkspaceRouter() {
             onResumeMeeting={() =>
               useDesktopStore.getState().resumeActiveMeeting()
             }
-            onEndMeeting={() =>
-              useDesktopStore.getState().endActiveMeeting()
-            }
+            onEndMeeting={() => useDesktopStore.getState().endActiveMeeting()}
             onSelectMeeting={(id) =>
               useDesktopStore.getState().selectMeeting(id)
             }
