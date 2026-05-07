@@ -89,7 +89,7 @@ describe("redactSensitiveFields", () => {
       action: "login",
       resource: "auth",
       outcome: "success",
-      details: { password: "s3cret", locale: "en-US" },
+      details: { password: "FAKE_TEST_VALUE", locale: "en-US" },
     };
     const redacted = redactSensitiveFields(event);
     assert.strictEqual("password" in (redacted.details ?? {}), false);
