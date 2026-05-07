@@ -258,6 +258,467 @@ export async function createApp(
     },
   );
 
+  // -------------------------------------------------------------------------
+  // LLM proxy routes — keep API keys server-side only
+  // -------------------------------------------------------------------------
+
+  const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY?.trim();
+
+  // Simple in-memory rate limiter per userId
+  const llmRateLimits = new Map<string, { count: number; resetAt: number }>();
+  const LLM_RATE_LIMIT_MAX = 30; // requests per window
+  const LLM_RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
+
+  function checkLlmRateLimit(userId: string): boolean {
+    const now = Date.now();
+    const entry = llmRateLimits.get(userId);
+    if (!entry || now >= entry.resetAt) {
+      llmRateLimits.set(userId, {
+        count: 1,
+        resetAt: now + LLM_RATE_LIMIT_WINDOW_MS,
+      });
+      return true;
+    }
+    if (entry.count >= LLM_RATE_LIMIT_MAX) return false;
+    entry.count++;
+    return true;
+  }
+
+  // --- Backend LLM callers (adapted from desktop llmRewriter / aiSummary) ---
+
+  type LlmProvider = "openai" | "anthropic";
+
+  function resolveProvider():
+    | { provider: LlmProvider; apiKey: string }
+    | undefined {
+    if (OPENAI_API_KEY) return { provider: "openai", apiKey: OPENAI_API_KEY };
+    if (ANTHROPIC_API_KEY)
+      return { provider: "anthropic", apiKey: ANTHROPIC_API_KEY };
+    return undefined;
+  }
+
+  async function callOpenAiBackend(
+    prompt: string,
+    apiKey: string,
+    maxTokens: number,
+    temperature: number,
+  ): Promise<string> {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: maxTokens,
+        temperature,
+      }),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`OpenAI API error ${response.status}: ${body}`);
+    }
+    const json = (await response.json()) as {
+      choices?: { message?: { content?: string } }[];
+    };
+    const content = json.choices?.[0]?.message?.content;
+    if (!content) throw new Error("OpenAI returned empty response");
+    return content.trim();
+  }
+
+  async function callAnthropicBackend(
+    prompt: string,
+    apiKey: string,
+    maxTokens: number,
+    temperature: number,
+  ): Promise<string> {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: maxTokens,
+        messages: [{ role: "user", content: prompt }],
+        temperature,
+      }),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Anthropic API error ${response.status}: ${body}`);
+    }
+    const json = (await response.json()) as {
+      content?: { type?: string; text?: string }[];
+    };
+    const textBlock = json.content?.find((b) => b.type === "text");
+    if (!textBlock?.text) throw new Error("Anthropic returned empty response");
+    return textBlock.text.trim();
+  }
+
+  async function callLlmBackend(
+    prompt: string,
+    provider: LlmProvider,
+    apiKey: string,
+    maxTokens: number,
+    temperature: number,
+  ): Promise<string> {
+    if (provider === "openai") {
+      return callOpenAiBackend(prompt, apiKey, maxTokens, temperature);
+    }
+    return callAnthropicBackend(prompt, apiKey, maxTokens, temperature);
+  }
+
+  // --- Rewrite prompt builder (mirrors desktop logic) ---
+
+  type StylePresetId =
+    | "concise"
+    | "professional"
+    | "casual"
+    | "technical"
+    | "custom";
+
+  function buildRewritePromptBackend(body: {
+    text: string;
+    style?: StylePresetId;
+    instruction?: string;
+    context?: string;
+  }): string {
+    const parts: string[] = [
+      "You are a professional editor. Rewrite the following dictated text.",
+      "Preserve the speaker's intent and meaning.",
+      "Remove filler words, fix grammar, and improve clarity.",
+    ];
+    if (body.style) {
+      const styleGuide: Record<StylePresetId, string> = {
+        concise:
+          "Make the text concise: remove redundancy, shorten sentences, keep the core meaning.",
+        professional:
+          "Use a professional tone: formal language, no contractions, business-appropriate.",
+        casual:
+          "Use a casual tone: conversational, friendly, contractions are fine.",
+        technical:
+          "Use a technical style: precise terminology, structured, no ambiguity.",
+        custom: "",
+      };
+      const guide = styleGuide[body.style];
+      if (guide) parts.push(guide);
+    }
+    if (body.instruction)
+      parts.push(`Additional instruction: ${body.instruction}`);
+    if (body.context) parts.push(`Context about the text: ${body.context}`);
+    parts.push("Return ONLY the rewritten text, no commentary or explanation.");
+    parts.push("");
+    parts.push(`Text to rewrite:\n${body.text}`);
+    return parts.join("\n");
+  }
+
+  // --- Schemas ---
+
+  const llmRewriteSchema = z.object({
+    text: z.string().min(1).max(50_000),
+    style: z
+      .enum(["concise", "professional", "casual", "technical", "custom"])
+      .optional(),
+    instruction: z.string().max(2000).optional(),
+    context: z.string().max(5000).optional(),
+  });
+
+  const summaryStyleSchema = z.enum([
+    "brief",
+    "detailed",
+    "bullets",
+    "action-items",
+    "meeting-notes",
+  ]);
+
+  const llmSummarizeSchema = z.object({
+    transcript: z.string().min(1).max(200_000),
+    segments: z
+      .array(
+        z.object({
+          id: z.string(),
+          text: z.string(),
+          startMs: z.number(),
+          endMs: z.number(),
+          speaker: z.string().optional(),
+        }),
+      )
+      .optional(),
+    style: summaryStyleSchema,
+    maxLength: z.number().int().min(50).max(50_000).optional(),
+  });
+
+  // --- POST /llm/rewrite ---
+
+  app.post("/llm/rewrite", async (request, reply) => {
+    try {
+      const { userId } = getRouteContext(request);
+      if (!checkLlmRateLimit(userId)) {
+        return reply.status(429).send({
+          error: "rate_limit_exceeded",
+          message: "Too many LLM requests. Please try again later.",
+        });
+      }
+
+      const body = parseBody(llmRewriteSchema, request);
+      const resolved = resolveProvider();
+
+      if (!resolved) {
+        // No API keys — return a local-fallback-style result
+        return reply.send({
+          original: body.text,
+          rewritten: body.text,
+          method: "local",
+          latencyMs: 0,
+          changes: [],
+        });
+      }
+
+      const prompt = buildRewritePromptBackend(body);
+      const start = Date.now();
+      const rewritten = await callLlmBackend(
+        prompt,
+        resolved.provider,
+        resolved.apiKey,
+        1024,
+        0.3,
+      );
+      const latencyMs = Date.now() - start;
+
+      const changes: string[] = ["LLM-powered rewrite"];
+      if (body.style) changes.push(`Applied ${body.style} style`);
+
+      app.log.info(
+        {
+          userId,
+          provider: resolved.provider,
+          latencyMs,
+          textLength: body.text.length,
+        },
+        "LLM rewrite completed",
+      );
+
+      return reply.send({
+        original: body.text,
+        rewritten,
+        method: "cloud",
+        latencyMs,
+        changes,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return sendValidationError(reply, error);
+      }
+      app.log.error(error, "LLM rewrite failed");
+      return reply.status(502).send({
+        error: "llm_error",
+        message:
+          "LLM request failed. Client should fall back to local processing.",
+      });
+    }
+  });
+
+  // --- POST /llm/summarize ---
+
+  function buildSummaryPromptBackend(
+    body: z.infer<typeof llmSummarizeSchema>,
+  ): string {
+    const parts: string[] = [];
+    parts.push(
+      "You are a meeting assistant. Analyze the following transcript and return a JSON response.",
+    );
+    parts.push("Do NOT include any text outside the JSON object.");
+    parts.push("");
+
+    const maxLen = body.maxLength ?? 500;
+
+    switch (body.style) {
+      case "brief":
+        parts.push(
+          `Provide a 2-3 sentence summary (max ${maxLen} chars) capturing the main points.`,
+        );
+        break;
+      case "detailed":
+        parts.push(
+          `Provide a detailed paragraph summary (max ${maxLen} chars) with all key points, context, and nuances.`,
+        );
+        break;
+      case "bullets":
+        parts.push(
+          "Provide a bullet-point list of the key points discussed. Each bullet should be a concise statement.",
+        );
+        break;
+      case "action-items":
+        parts.push(
+          "Extract all action items from the transcript. For each, identify who is responsible (if mentioned) and the priority (high/medium/low).",
+        );
+        break;
+      case "meeting-notes":
+        parts.push(
+          "Generate full meeting minutes including: attendees, agenda topics discussed, key decisions made, and action items with assignees.",
+        );
+        break;
+    }
+
+    parts.push("");
+    parts.push("Return valid JSON matching this schema:");
+    parts.push(
+      JSON.stringify(
+        {
+          summary: "string — the summary text",
+          actionItems: [
+            {
+              text: "string",
+              assignee: "string or null",
+              priority: "high | medium | low",
+              dueDate: "string or null",
+            },
+          ],
+          keyDecisions: ["string"],
+          participants: ["string"],
+        },
+        null,
+        2,
+      ),
+    );
+
+    if (body.segments && body.segments.length > 0) {
+      parts.push("");
+      parts.push("Speaker-labelled transcript:");
+      for (const seg of body.segments) {
+        const label = seg.speaker ?? "Unknown";
+        parts.push(`[${label}]: ${seg.text}`);
+      }
+    } else {
+      parts.push("");
+      parts.push("Transcript:");
+      parts.push(body.transcript);
+    }
+
+    return parts.join("\n");
+  }
+
+  function parseLlmSummaryResponse(raw: string) {
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return { summary: raw };
+
+    try {
+      const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+      const result: Record<string, unknown> = {};
+
+      if (typeof parsed.summary === "string") result.summary = parsed.summary;
+
+      if (Array.isArray(parsed.actionItems)) {
+        result.actionItems = (parsed.actionItems as Record<string, unknown>[])
+          .filter((item) => typeof item.text === "string")
+          .map((item) => ({
+            text: item.text as string,
+            assignee:
+              typeof item.assignee === "string" ? item.assignee : undefined,
+            priority:
+              item.priority === "high" ||
+              item.priority === "medium" ||
+              item.priority === "low"
+                ? item.priority
+                : "medium",
+            dueDate:
+              typeof item.dueDate === "string" ? item.dueDate : undefined,
+          }));
+      }
+
+      if (Array.isArray(parsed.keyDecisions)) {
+        result.keyDecisions = (parsed.keyDecisions as unknown[]).filter(
+          (d): d is string => typeof d === "string",
+        );
+      }
+
+      if (Array.isArray(parsed.participants)) {
+        result.participants = (parsed.participants as unknown[]).filter(
+          (p): p is string => typeof p === "string",
+        );
+      }
+
+      return result;
+    } catch {
+      return { summary: raw };
+    }
+  }
+
+  app.post("/llm/summarize", async (request, reply) => {
+    try {
+      const { userId } = getRouteContext(request);
+      if (!checkLlmRateLimit(userId)) {
+        return reply.status(429).send({
+          error: "rate_limit_exceeded",
+          message: "Too many LLM requests. Please try again later.",
+        });
+      }
+
+      const body = parseBody(llmSummarizeSchema, request);
+      const resolved = resolveProvider();
+
+      if (!resolved) {
+        // No API keys — return empty-ish result so client falls back to local
+        return reply.send({
+          summary: "",
+          actionItems: [],
+          keyDecisions: [],
+          participants: [],
+          method: "local",
+          latencyMs: 0,
+        });
+      }
+
+      const prompt = buildSummaryPromptBackend(body);
+      const start = Date.now();
+      const raw = await callLlmBackend(
+        prompt,
+        resolved.provider,
+        resolved.apiKey,
+        2048,
+        0.2,
+      );
+      const latencyMs = Date.now() - start;
+
+      const parsed = parseLlmSummaryResponse(raw);
+
+      app.log.info(
+        {
+          userId,
+          provider: resolved.provider,
+          latencyMs,
+          transcriptLength: body.transcript.length,
+        },
+        "LLM summarize completed",
+      );
+
+      return reply.send({
+        summary: (parsed.summary as string) ?? "",
+        actionItems: (parsed.actionItems as unknown[]) ?? [],
+        keyDecisions: (parsed.keyDecisions as string[]) ?? [],
+        participants: (parsed.participants as string[]) ?? [],
+        method: "cloud",
+        latencyMs,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return sendValidationError(reply, error);
+      }
+      app.log.error(error, "LLM summarize failed");
+      return reply.status(502).send({
+        error: "llm_error",
+        message:
+          "LLM request failed. Client should fall back to local processing.",
+      });
+    }
+  });
+
   return app;
 }
 

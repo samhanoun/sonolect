@@ -562,7 +562,9 @@ describe("summarize (smart dispatcher)", () => {
     assert.equal(result.method, "local");
   });
 
-  it("uses local when API key is missing", async () => {
+  it("falls back to local when no backend URL configured", async () => {
+    // No VITE_SONOLECT_API_URL set, summarizeWithLlm will throw and
+    // the dispatcher catches it, falling back to local
     const result = await summarize(
       { transcript: SAMPLE_TRANSCRIPT, style: "brief" },
       { provider: "openai" },
@@ -593,7 +595,7 @@ describe("summarize (smart dispatcher)", () => {
     assert.ok(result.participants.includes("Bob"));
   });
 
-  it("falls back to local on cloud failure", async () => {
+  it("falls back to local on backend proxy network failure", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => {
       throw new Error("Network unavailable");
@@ -601,7 +603,6 @@ describe("summarize (smart dispatcher)", () => {
     try {
       const config: LlmRewriterConfig = {
         provider: "openai",
-        apiKey: "fake-key",
       };
       const result = await summarize(
         { transcript: SAMPLE_TRANSCRIPT, style: "brief" },
@@ -614,133 +615,18 @@ describe("summarize (smart dispatcher)", () => {
     }
   });
 
-  it("returns cloud result on successful OpenAI response", async () => {
+  it("falls back to local on backend proxy HTTP error", async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  summary: "This meeting covered the project update.",
-                  actionItems: [
-                    {
-                      text: "Review the budget",
-                      assignee: "Bob",
-                      priority: "high",
-                    },
-                  ],
-                  keyDecisions: ["Launch next month"],
-                  participants: ["Alice", "Bob"],
-                }),
-              },
-            },
-          ],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+    globalThis.fetch = async () => new Response("Bad Gateway", { status: 502 });
     try {
       const config: LlmRewriterConfig = {
         provider: "openai",
-        apiKey: "test-key",
-      };
-      const result = await summarize(
-        { transcript: SAMPLE_TRANSCRIPT, style: "brief" },
-        config,
-      );
-      assert.equal(result.method, "cloud");
-      assert.equal(result.summary, "This meeting covered the project update.");
-      assert.equal(result.actionItems.length, 1);
-      assert.equal(result.actionItems[0]!.assignee, "Bob");
-      assert.deepEqual(result.keyDecisions, ["Launch next month"]);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it("returns cloud result on successful Anthropic response", async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                summary: "Anthropic summary here.",
-                actionItems: [],
-                keyDecisions: ["Use React"],
-                participants: ["Alice"],
-              }),
-            },
-          ],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    try {
-      const config: LlmRewriterConfig = {
-        provider: "anthropic",
-        apiKey: "test-key",
-      };
-      const result = await summarize(
-        { transcript: SAMPLE_TRANSCRIPT, style: "brief" },
-        config,
-      );
-      assert.equal(result.method, "cloud");
-      assert.equal(result.summary, "Anthropic summary here.");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it("falls back to local on HTTP error", async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () =>
-      new Response("Unauthorized", { status: 401 });
-    try {
-      const config: LlmRewriterConfig = {
-        provider: "openai",
-        apiKey: "bad-key",
       };
       const result = await summarize(
         { transcript: SAMPLE_TRANSCRIPT, style: "brief" },
         config,
       );
       assert.equal(result.method, "local");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it("handles LLM returning non-JSON gracefully", async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content:
-                  "Here is a summary of the meeting with no JSON format.",
-              },
-            },
-          ],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    try {
-      const config: LlmRewriterConfig = {
-        provider: "openai",
-        apiKey: "test-key",
-      };
-      const result = await summarize(
-        { transcript: SAMPLE_TRANSCRIPT, style: "brief" },
-        config,
-      );
-      // Should still return a result (using the raw text as summary)
-      assert.equal(result.method, "cloud");
-      assert.ok(result.summary.length > 0);
     } finally {
       globalThis.fetch = originalFetch;
     }

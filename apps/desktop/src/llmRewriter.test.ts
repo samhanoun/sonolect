@@ -118,12 +118,15 @@ describe("llmRewriter", () => {
       assert.ok(!result.rewritten.includes("um "));
     });
 
-    it("falls back to local rules on network error (openai)", async () => {
-      // No real API key, so fetch will fail -> fallback
-      const config: LlmRewriterConfig = {
-        provider: "openai",
-        apiKey: "fake-key-for-test",
-      };
+    it("falls back to local when API_URL is not configured", async () => {
+      // No VITE_SONOLECT_API_URL set, so rewriteWithLlm should fall back to local
+      const config: LlmRewriterConfig = { provider: "openai" };
+      const result = await rewriteWithLlm({ text: "um hello" }, config);
+      assert.equal(result.method, "local");
+    });
+
+    it("falls back to local rules on network error (backend proxy)", async () => {
+      const config: LlmRewriterConfig = { provider: "openai" };
       const originalFetch = globalThis.fetch;
       globalThis.fetch = async () => {
         throw new Error("Network unavailable");
@@ -136,80 +139,14 @@ describe("llmRewriter", () => {
       }
     });
 
-    it("falls back to local rules on network error (anthropic)", async () => {
-      const config: LlmRewriterConfig = {
-        provider: "anthropic",
-        apiKey: "fake-key-for-test",
-      };
+    it("falls back on non-ok HTTP response from backend proxy", async () => {
+      const config: LlmRewriterConfig = { provider: "openai" };
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = async () => {
-        throw new Error("Network unavailable");
-      };
+      globalThis.fetch = async () =>
+        new Response("Bad Gateway", { status: 502 });
       try {
         const result = await rewriteWithLlm({ text: "um hello" }, config);
         assert.equal(result.method, "local");
-      } finally {
-        globalThis.fetch = originalFetch;
-      }
-    });
-
-    it("falls back on non-ok HTTP response", async () => {
-      const config: LlmRewriterConfig = {
-        provider: "openai",
-        apiKey: "fake-key",
-      };
-      const originalFetch = globalThis.fetch;
-      globalThis.fetch = async () =>
-        new Response("Unauthorized", { status: 401 });
-      try {
-        const result = await rewriteWithLlm({ text: "um hello" }, config);
-        assert.equal(result.method, "local");
-      } finally {
-        globalThis.fetch = originalFetch;
-      }
-    });
-
-    it("returns cloud result on successful OpenAI response", async () => {
-      const config: LlmRewriterConfig = {
-        provider: "openai",
-        apiKey: "test-key",
-        model: "gpt-4o-mini",
-      };
-      const originalFetch = globalThis.fetch;
-      globalThis.fetch = async () =>
-        new Response(
-          JSON.stringify({
-            choices: [{ message: { content: "Hello there." } }],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      try {
-        const result = await rewriteWithLlm({ text: "um hello there" }, config);
-        assert.equal(result.method, "cloud");
-        assert.equal(result.rewritten, "Hello there.");
-        assert.ok(result.changes.includes("LLM-powered rewrite"));
-      } finally {
-        globalThis.fetch = originalFetch;
-      }
-    });
-
-    it("returns cloud result on successful Anthropic response", async () => {
-      const config: LlmRewriterConfig = {
-        provider: "anthropic",
-        apiKey: "test-key",
-      };
-      const originalFetch = globalThis.fetch;
-      globalThis.fetch = async () =>
-        new Response(
-          JSON.stringify({
-            content: [{ type: "text", text: "Polished text here." }],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      try {
-        const result = await rewriteWithLlm({ text: "raw input" }, config);
-        assert.equal(result.method, "cloud");
-        assert.equal(result.rewritten, "Polished text here.");
       } finally {
         globalThis.fetch = originalFetch;
       }
@@ -227,32 +164,13 @@ describe("llmRewriter", () => {
       assert.equal(result.method, "local");
     });
 
-    it("uses local rules when api key is missing", async () => {
+    it("falls back to local when no backend URL configured", async () => {
+      // No VITE_SONOLECT_API_URL set, so it should fall back to local
       const result = await rewrite(
         { text: "um hello" },
         { provider: "openai" },
       );
       assert.equal(result.method, "local");
-    });
-
-    it("attempts cloud when config has provider and key", async () => {
-      const originalFetch = globalThis.fetch;
-      globalThis.fetch = async () =>
-        new Response(
-          JSON.stringify({
-            choices: [{ message: { content: "Clean text." } }],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
-      try {
-        const result = await rewrite(
-          { text: "um hello" },
-          { provider: "openai", apiKey: "key" },
-        );
-        assert.equal(result.method, "cloud");
-      } finally {
-        globalThis.fetch = originalFetch;
-      }
     });
   });
 });

@@ -1,5 +1,6 @@
 import type { TranscriptSegment } from "./segmentEditor";
 import type { LlmRewriterConfig } from "./llmRewriter";
+import { createAuthHeaders } from "./localDevAuth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -258,145 +259,62 @@ export function buildSummaryPrompt(request: SummaryRequest): string {
 }
 
 // ---------------------------------------------------------------------------
-// LLM-backed summarization
+// LLM-backed summarization (via backend proxy)
 // ---------------------------------------------------------------------------
 
-async function callLlm(
-  prompt: string,
-  config: LlmRewriterConfig,
-): Promise<string> {
-  if (config.provider === "openai") {
-    const model = config.model ?? "gpt-4o-mini";
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: config.maxTokens ?? 2048,
-        temperature: config.temperature ?? 0.2,
-      }),
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`OpenAI API error ${response.status}: ${body}`);
-    }
-
-    const json = (await response.json()) as {
-      choices?: { message?: { content?: string } }[];
-    };
-    const content = json.choices?.[0]?.message?.content;
-    if (!content) throw new Error("OpenAI returned empty response");
-    return content.trim();
-  }
-
-  if (config.provider === "anthropic") {
-    const model = config.model ?? "claude-sonnet-4-20250514";
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": config.apiKey!,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: config.maxTokens ?? 2048,
-        messages: [{ role: "user", content: prompt }],
-        temperature: config.temperature ?? 0.2,
-      }),
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Anthropic API error ${response.status}: ${body}`);
-    }
-
-    const json = (await response.json()) as {
-      content?: { type?: string; text?: string }[];
-    };
-    const textBlock = json.content?.find((b) => b.type === "text");
-    if (!textBlock?.text) throw new Error("Anthropic returned empty response");
-    return textBlock.text.trim();
-  }
-
-  throw new Error(`Unsupported provider: ${config.provider}`);
-}
-
-function parseLlmResponse(raw: string): Partial<SummaryResult> {
-  // Try to extract JSON from the response (might be wrapped in markdown fences)
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    return { summary: raw };
-  }
-
-  try {
-    const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
-    const result: Partial<SummaryResult> = {};
-
-    if (typeof parsed.summary === "string") {
-      result.summary = parsed.summary;
-    }
-
-    if (Array.isArray(parsed.actionItems)) {
-      result.actionItems = (parsed.actionItems as Record<string, unknown>[])
-        .filter((item) => typeof item.text === "string")
-        .map((item) => ({
-          text: item.text as string,
-          assignee:
-            typeof item.assignee === "string" ? item.assignee : undefined,
-          priority:
-            item.priority === "high" ||
-            item.priority === "medium" ||
-            item.priority === "low"
-              ? item.priority
-              : "medium",
-          dueDate: typeof item.dueDate === "string" ? item.dueDate : undefined,
-        }));
-    }
-
-    if (Array.isArray(parsed.keyDecisions)) {
-      result.keyDecisions = (parsed.keyDecisions as unknown[]).filter(
-        (d): d is string => typeof d === "string",
-      );
-    }
-
-    if (Array.isArray(parsed.participants)) {
-      result.participants = (parsed.participants as unknown[]).filter(
-        (p): p is string => typeof p === "string",
-      );
-    }
-
-    return result;
-  } catch {
-    return { summary: raw };
-  }
-}
+const SUMMARY_API_URL = (
+  typeof import.meta !== "undefined"
+    ? import.meta.env?.VITE_SONOLECT_API_URL?.trim()
+    : undefined
+) as string | undefined;
 
 export async function summarizeWithLlm(
   request: SummaryRequest,
-  config: LlmRewriterConfig,
+  _config: LlmRewriterConfig,
 ): Promise<SummaryResult> {
-  const prompt = buildSummaryPrompt(request);
-  const start = Date.now();
+  const apiUrl = SUMMARY_API_URL;
+  if (!apiUrl) {
+    throw new Error("Backend API URL not configured");
+  }
 
-  const raw = await callLlm(prompt, config);
-  const parsed = parseLlmResponse(raw);
+  const start = Date.now();
+  const endpoint = new URL("/llm/summarize", apiUrl).toString();
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...createAuthHeaders(),
+    },
+    body: JSON.stringify({
+      transcript: request.transcript,
+      ...(request.segments ? { segments: request.segments } : {}),
+      style: request.style,
+      ...(request.maxLength !== undefined
+        ? { maxLength: request.maxLength }
+        : {}),
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Backend LLM proxy error ${response.status}`);
+  }
+
+  const result = (await response.json()) as SummaryResult;
 
   const participants =
-    parsed.participants ??
-    (request.segments ? extractParticipants(request.segments) : []);
+    result.participants && result.participants.length > 0
+      ? result.participants
+      : request.segments
+        ? extractParticipants(request.segments)
+        : [];
 
   return {
-    summary: parsed.summary ?? "",
-    actionItems: parsed.actionItems ?? [],
-    keyDecisions: parsed.keyDecisions ?? [],
+    summary: result.summary ?? "",
+    actionItems: result.actionItems ?? [],
+    keyDecisions: result.keyDecisions ?? [],
     participants,
-    method: "cloud",
+    method: result.method ?? "cloud",
     latencyMs: Date.now() - start,
   };
 }
@@ -558,8 +476,8 @@ export async function summarize(
     };
   }
 
-  // No config, local provider, or missing API key — use local
-  if (!config || config.provider === "local" || !config.apiKey) {
+  // No config or local provider — use local
+  if (!config || config.provider === "local") {
     return summarizeLocally(request);
   }
 
