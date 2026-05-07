@@ -9,7 +9,7 @@
     "start": "node dist/index.js",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx src/routes.smoke.ts && tsx src/local-audio-worker.smoke.ts && tsx src/local-audio-worker-daemon.smoke.ts",
+    "test": "tsx src/handlers/audio-handler.test.ts && tsx src/handlers/agent-handler.test.ts && tsx src/handlers/billing-handler.test.ts && tsx src/routes.smoke.ts && tsx src/local-audio-worker.smoke.ts && tsx src/local-audio-worker-daemon.smoke.ts",
     "local:audio": "tsx src/local-audio-worker.ts",
     "local:audio:daemon": "tsx src/local-audio-worker-daemon.ts"
   },
