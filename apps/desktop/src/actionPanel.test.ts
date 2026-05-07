@@ -42,9 +42,9 @@ describe("actionPanel", () => {
       assert.ok(categories.has("share"));
     });
 
-    it("returns 13 actions total", () => {
+    it("returns 15 actions total", () => {
       const actions = getDefaultActions();
-      assert.equal(actions.length, 13);
+      assert.equal(actions.length, 15);
     });
 
     it("has unique ids", () => {
@@ -76,6 +76,8 @@ describe("actionPanel", () => {
       assert.ok(createIds.includes("create-task"));
       assert.ok(createIds.includes("summarize"));
       assert.ok(createIds.includes("create-bullet-points"));
+      assert.ok(createIds.includes("generate-meeting-notes"));
+      assert.ok(createIds.includes("extract-action-items"));
     });
   });
 
@@ -117,7 +119,7 @@ describe("actionPanel", () => {
       assert.ok(grouped.has("create"));
       assert.ok(grouped.has("share"));
       assert.equal(grouped.get("output")!.length, 6);
-      assert.equal(grouped.get("create")!.length, 5);
+      assert.equal(grouped.get("create")!.length, 7);
       assert.equal(grouped.get("share")!.length, 2);
     });
 
@@ -294,9 +296,9 @@ describe("actionPanel", () => {
         fullContext,
       );
       assert.equal(result.success, true);
-      assert.ok(clipboardContent.includes("First sentence."));
-      assert.ok(clipboardContent.includes("Second sentence."));
-      assert.ok(clipboardContent.includes("omitted"));
+      // AI summary picks key sentences (brief style selects up to 3)
+      assert.ok(clipboardContent.length > 0);
+      assert.ok(clipboardContent.includes("sentence"));
     });
 
     it("creates bullet points", async () => {

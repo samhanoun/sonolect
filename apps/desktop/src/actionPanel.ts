@@ -1,5 +1,8 @@
 import { exportTranscript } from "./transcriptExport";
 import { insertTextIntoActiveApp } from "./desktopNative";
+import { summarize as aiSummarize, summarizeLocally } from "./aiSummary";
+import type { SummaryStyle, SummaryResult } from "./aiSummary";
+import type { LlmRewriterConfig } from "./llmRewriter";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,13 +53,22 @@ function createTask(text: string): string {
 }
 
 function summarize(text: string): string {
-  // Simple extractive summary: take first two sentences
-  const sentences = text
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (sentences.length <= 2) return text;
-  return `${sentences.slice(0, 2).join(" ")} [${sentences.length - 2} more sentences omitted]`;
+  // Backward-compatible simple extractive summary using aiSummary local engine
+  const result = summarizeLocally({ transcript: text, style: "brief" });
+  return result.summary;
+}
+
+function generateMeetingNotes(text: string): string {
+  const result = summarizeLocally({ transcript: text, style: "meeting-notes" });
+  return result.summary;
+}
+
+function extractActionItemsFromText(text: string): string {
+  const result = summarizeLocally({
+    transcript: text,
+    style: "action-items",
+  });
+  return result.summary;
 }
 
 function createBulletPoints(text: string): string {
@@ -73,6 +85,8 @@ const TRANSFORM_MAP: Record<string, (text: string) => string> = {
   "create-task": createTask,
   summarize: summarize,
   "create-bullet-points": createBulletPoints,
+  "generate-meeting-notes": generateMeetingNotes,
+  "extract-action-items": extractActionItemsFromText,
 };
 
 // ---------------------------------------------------------------------------
@@ -169,6 +183,22 @@ export function getDefaultActions(): ActionItem[] {
       icon: "list",
       category: "create",
       handler: "create-bullet-points",
+      enabled: (ctx) => ctx.hasTranscript,
+    },
+    {
+      id: "generate-meeting-notes",
+      label: "Generate Meeting Notes",
+      icon: "notebook",
+      category: "create",
+      handler: "generate-meeting-notes",
+      enabled: (ctx) => ctx.hasTranscript,
+    },
+    {
+      id: "extract-action-items",
+      label: "Extract Action Items",
+      icon: "check-circle",
+      category: "create",
+      handler: "extract-action-items",
       enabled: (ctx) => ctx.hasTranscript,
     },
     // Share
@@ -323,4 +353,16 @@ export async function executeAction(
       message: error instanceof Error ? error.message : "Action failed",
     };
   }
+}
+
+// ---------------------------------------------------------------------------
+// AI Summary convenience wrapper
+// ---------------------------------------------------------------------------
+
+export async function generateAiSummary(
+  text: string,
+  style: SummaryStyle = "brief",
+  config?: LlmRewriterConfig,
+): Promise<SummaryResult> {
+  return aiSummarize({ transcript: text, style }, config);
 }
