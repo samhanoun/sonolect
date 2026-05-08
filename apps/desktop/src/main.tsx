@@ -73,6 +73,11 @@ import {
   type OnboardingChecklist,
   type Snippet,
 } from "./wisprWorkflow";
+import {
+  insertTextIntoActiveApp,
+  isTauriRuntime,
+  registerNativeDictationShortcuts,
+} from "./desktopNative";
 import "./styles.css";
 
 type PrivacyLevel = "local" | "cloud";
@@ -707,14 +712,34 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
   },
   insertPolishedDictation: async () => {
     const { polishedPreview, transcript, addToast } = get();
+    const clipboardAvailable = Boolean(navigator.clipboard?.writeText);
     const plan = buildInsertionPlan(
       polishedPreview || transcript,
-      Boolean(navigator.clipboard?.writeText),
+      clipboardAvailable,
+      isTauriRuntime(),
     );
-    if (plan.method === "clipboard-fallback") {
+    if (plan.method === "native-insert") {
+      const result = await insertTextIntoActiveApp(plan.text);
+      if (result.ok) {
+        set({ insertionStatus: result.status });
+        addToast("toast.insertionReady");
+        return;
+      }
+      set({ insertionStatus: result.status });
+      if (!clipboardAvailable) return;
+    }
+    if (
+      clipboardAvailable &&
+      (plan.method === "clipboard-fallback" || isTauriRuntime())
+    ) {
       try {
         await navigator.clipboard.writeText(plan.text);
-        set({ insertionStatus: plan.status });
+        set({
+          insertionStatus:
+            plan.method === "native-insert"
+              ? "Direct insertion failed; copied polished dictation to clipboard instead."
+              : plan.status,
+        });
         addToast("toast.insertionReady");
       } catch {
         set({
@@ -1027,6 +1052,40 @@ function App() {
       window.removeEventListener("keyup", handleKeyUp);
     };
   }, [setCommandOpen, toggleRecording, undoTranscriptEdit, redoTranscriptEdit]);
+
+  useEffect(() => {
+    let unregister: (() => Promise<void>) | undefined;
+    const startPushToTalk = () => {
+      const { recordingState: rs } = useDesktopStore.getState();
+      if (rs === "idle" || rs === "completed" || rs === "error") {
+        if (rs === "completed" || rs === "error") {
+          useDesktopStore.getState().resetVoiceCapture();
+        }
+        void useDesktopStore.getState().startVoiceCapture();
+      }
+    };
+    const stopPushToTalk = () => {
+      const { recordingState: rs } = useDesktopStore.getState();
+      if (rs === "recording") {
+        useDesktopStore.getState().stopVoiceCapture();
+      }
+    };
+
+    void registerNativeDictationShortcuts({
+      onToggle: () => useDesktopStore.getState().toggleRecording(),
+      onPushToTalkStart: startPushToTalk,
+      onPushToTalkStop: stopPushToTalk,
+    }).then((registration) => {
+      unregister = registration.unregister;
+      if (!registration.enabled && isTauriRuntime()) {
+        useDesktopStore.getState().addToast("toast.error");
+      }
+    });
+
+    return () => {
+      if (unregister) void unregister();
+    };
+  }, []);
 
   useEffect(() => {
     if (!transcript.trim() && transcriptSegments.length === 0) {

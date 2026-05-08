@@ -61,10 +61,18 @@ describe("Wispr-style dictation workflow helpers", () => {
     });
   });
 
+  it("chooses native insertion before clipboard fallback when active app automation is available", () => {
+    assert.deepEqual(buildInsertionPlan(" hello world ", true, true), {
+      method: "native-insert",
+      text: "hello world",
+      status: "Inserted polished dictation into the active app.",
+    });
+  });
+
   it("chooses clipboard fallback insertion when active app automation is unavailable", () => {
-    assert.deepEqual(buildInsertionPlan(" hello ", true), {
+    assert.deepEqual(buildInsertionPlan(" hello world ", true), {
       method: "clipboard-fallback",
-      text: "hello",
+      text: "hello world",
       status:
         "Copied polished dictation to clipboard. Paste into the app you were using.",
     });
