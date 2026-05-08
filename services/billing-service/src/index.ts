@@ -5,7 +5,7 @@ import Fastify, {
 } from "fastify";
 import helmet from "@fastify/helmet";
 import cors from "@fastify/cors";
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type {
@@ -16,6 +16,12 @@ import type {
   UsageQuotaSummary,
 } from "@sonolect/types";
 import { trackUsageSchema, type TrackUsageInput } from "@sonolect/validation";
+import {
+  verifyWebhookSignature,
+  buildSubscriptionFromEvent,
+  shouldResetUsage,
+  type SubscriptionState,
+} from "./stripe-helpers.js";
 
 const serviceName = "sonolect-billing-service";
 
@@ -63,14 +69,27 @@ export const billingPlans: Record<SonolectPlan, BillingPlanDefinition> = {
   },
 };
 
-interface BillingStores {
+export interface WebhookLogEntry {
+  id: string;
+  eventId: string;
+  eventType: string;
+  receivedAt: string;
+  processed: boolean;
+  error?: string;
+}
+
+export interface BillingStores {
   userPlans: Map<string, SonolectPlan>;
   usageEvents: Map<string, UsageEvent>;
+  subscriptions: Map<string, SubscriptionState>;
+  webhookLog: WebhookLogEntry[];
 }
 
 const createStores = (): BillingStores => ({
   userPlans: new Map([["local-user", "pro"]]),
   usageEvents: new Map(),
+  subscriptions: new Map(),
+  webhookLog: [],
 });
 
 const parseBody = <T>(
@@ -190,6 +209,10 @@ const toQuotaSummary = (
   };
 };
 
+/**
+ * Thin wrapper that keeps backward-compat: when no secret is configured
+ * we skip verification (local dev), otherwise delegate to stripe-helpers.
+ */
 export const verifyStripeSignature = (
   payload: string,
   signatureHeader: string | undefined,
@@ -197,24 +220,7 @@ export const verifyStripeSignature = (
 ): boolean => {
   if (!secret) return true;
   if (!signatureHeader) return false;
-  const parts = Object.fromEntries(
-    signatureHeader.split(",").map((part) => {
-      const [key, value] = part.split("=", 2);
-      return [key, value];
-    }),
-  );
-  const timestamp = parts.t;
-  const signature = parts.v1;
-  if (!timestamp || !signature) return false;
-  const expected = createHmac("sha256", secret)
-    .update(`${timestamp}.${payload}`)
-    .digest("hex");
-  const actualBuffer = Buffer.from(signature, "hex");
-  const expectedBuffer = Buffer.from(expected, "hex");
-  return (
-    actualBuffer.length === expectedBuffer.length &&
-    timingSafeEqual(actualBuffer, expectedBuffer)
-  );
+  return verifyWebhookSignature(payload, signatureHeader, secret);
 };
 
 export interface CreateAppOptions {
@@ -264,22 +270,203 @@ export async function createApp(
     },
   );
 
+  /* ── Stripe webhook handler ──────────────────────────────────────── */
+
   app.post("/webhooks/stripe", async (request, reply) => {
     const payload = JSON.stringify(request.body ?? {});
     const signature = request.headers["stripe-signature"];
     const signatureHeader = Array.isArray(signature) ? signature[0] : signature;
     const secret =
       options.stripeWebhookSecret ?? process.env.STRIPE_WEBHOOK_SECRET;
+
     if (!verifyStripeSignature(payload, signatureHeader, secret)) {
       return reply.status(400).send({
         error: "invalid_signature",
         message: "Stripe webhook signature verification failed",
       });
     }
-    return reply.status(202).send({
-      received: true,
+
+    const event = request.body as Record<string, unknown>;
+    const eventId = String(event.id ?? randomUUID());
+    const eventType = String(event.type ?? "unknown");
+
+    const logEntry: WebhookLogEntry = {
+      id: randomUUID(),
+      eventId,
+      eventType,
+      receivedAt: new Date().toISOString(),
       processed: false,
-      message: "Stripe webhook accepted; event handling is scaffolded.",
+    };
+
+    // Return 200 quickly, then process asynchronously
+    // (In production this would be a background job; here we process inline
+    //  but still reply fast so Stripe doesn't retry.)
+    try {
+      const subState = buildSubscriptionFromEvent(event);
+      const obj = (event.data as Record<string, unknown> | undefined)
+        ?.object as Record<string, unknown> | undefined;
+
+      // Resolve userId: from metadata, client_reference_id, or customer
+      const metadata = (obj?.metadata ?? {}) as Record<string, unknown>;
+      const userId = String(
+        metadata.userId ??
+          metadata.user_id ??
+          obj?.client_reference_id ??
+          subState.stripeCustomerId ??
+          "unknown",
+      );
+
+      switch (eventType) {
+        /* ── Checkout completed ─────────────────────────────────────── */
+        case "checkout.session.completed": {
+          const planId = subState.planId ?? "pro";
+          stores.userPlans.set(userId, planId);
+          const now = new Date();
+          const periodEnd = new Date(now);
+          periodEnd.setMonth(periodEnd.getMonth() + 1);
+          const fullState: SubscriptionState = {
+            userId,
+            planId,
+            status: "active",
+            stripeCustomerId: subState.stripeCustomerId,
+            stripeSubscriptionId: subState.stripeSubscriptionId,
+            currentPeriodStart:
+              subState.currentPeriodStart ?? now.toISOString(),
+            currentPeriodEnd:
+              subState.currentPeriodEnd ?? periodEnd.toISOString(),
+            cancelAtPeriodEnd: false,
+          };
+          stores.subscriptions.set(userId, fullState);
+          break;
+        }
+
+        /* ── Subscription created ───────────────────────────────────── */
+        case "customer.subscription.created": {
+          const planId = subState.planId ?? "pro";
+          stores.userPlans.set(userId, planId);
+          const now = new Date();
+          const periodEnd = new Date(now);
+          periodEnd.setMonth(periodEnd.getMonth() + 1);
+          stores.subscriptions.set(userId, {
+            userId,
+            planId,
+            status: subState.status ?? "active",
+            stripeCustomerId: subState.stripeCustomerId,
+            stripeSubscriptionId: subState.stripeSubscriptionId,
+            currentPeriodStart:
+              subState.currentPeriodStart ?? now.toISOString(),
+            currentPeriodEnd:
+              subState.currentPeriodEnd ?? periodEnd.toISOString(),
+            cancelAtPeriodEnd: subState.cancelAtPeriodEnd ?? false,
+          });
+          break;
+        }
+
+        /* ── Subscription updated (upgrade/downgrade) ───────────────── */
+        case "customer.subscription.updated": {
+          const existing = stores.subscriptions.get(userId);
+          const planId = subState.planId ?? existing?.planId ?? "pro";
+          stores.userPlans.set(userId, planId);
+          const now = new Date();
+          const periodEnd = new Date(now);
+          periodEnd.setMonth(periodEnd.getMonth() + 1);
+          stores.subscriptions.set(userId, {
+            userId,
+            planId,
+            status: subState.status ?? existing?.status ?? "active",
+            stripeCustomerId:
+              subState.stripeCustomerId ?? existing?.stripeCustomerId,
+            stripeSubscriptionId:
+              subState.stripeSubscriptionId ?? existing?.stripeSubscriptionId,
+            currentPeriodStart:
+              subState.currentPeriodStart ??
+              existing?.currentPeriodStart ??
+              now.toISOString(),
+            currentPeriodEnd:
+              subState.currentPeriodEnd ??
+              existing?.currentPeriodEnd ??
+              periodEnd.toISOString(),
+            cancelAtPeriodEnd:
+              subState.cancelAtPeriodEnd ??
+              existing?.cancelAtPeriodEnd ??
+              false,
+          });
+          break;
+        }
+
+        /* ── Subscription deleted → downgrade to Free ───────────────── */
+        case "customer.subscription.deleted": {
+          stores.userPlans.set(userId, "free");
+          const existing = stores.subscriptions.get(userId);
+          if (existing) {
+            stores.subscriptions.set(userId, {
+              ...existing,
+              planId: "free",
+              status: "canceled",
+              cancelAtPeriodEnd: false,
+            });
+          }
+          break;
+        }
+
+        /* ── Invoice paid → reset usage counters ────────────────────── */
+        case "invoice.paid": {
+          if (shouldResetUsage(event)) {
+            // Remove usage events for this user in the current period
+            for (const [id, evt] of stores.usageEvents.entries()) {
+              if (evt.userId === userId) {
+                stores.usageEvents.delete(id);
+              }
+            }
+          }
+          // Update period dates if available
+          const existing = stores.subscriptions.get(userId);
+          if (existing && subState.currentPeriodStart) {
+            stores.subscriptions.set(userId, {
+              ...existing,
+              currentPeriodStart: subState.currentPeriodStart,
+              currentPeriodEnd:
+                subState.currentPeriodEnd ?? existing.currentPeriodEnd,
+            });
+          }
+          break;
+        }
+
+        /* ── Invoice payment failed → mark past_due ─────────────────── */
+        case "invoice.payment_failed": {
+          const existing = stores.subscriptions.get(userId);
+          if (existing) {
+            stores.subscriptions.set(userId, {
+              ...existing,
+              status: "past_due",
+            });
+          }
+          break;
+        }
+
+        /* ── Payment intent succeeded → confirm payment ─────────────── */
+        case "payment_intent.succeeded": {
+          // Payment confirmed — no subscription state change needed.
+          // Log entry below captures the audit trail.
+          break;
+        }
+
+        default:
+          // Unhandled event type — log and acknowledge.
+          break;
+      }
+
+      logEntry.processed = true;
+    } catch (err) {
+      logEntry.error = err instanceof Error ? err.message : String(err);
+    }
+
+    stores.webhookLog.push(logEntry);
+
+    return reply.status(200).send({
+      received: true,
+      processed: logEntry.processed,
+      eventType,
     });
   });
 

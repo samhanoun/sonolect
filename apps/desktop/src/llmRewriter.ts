@@ -1,5 +1,6 @@
 import { polishDictation } from "./wisprWorkflow";
 import { applyStylePreset } from "./stylePresets";
+import { createAuthHeaders } from "./localDevAuth";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,7 +30,6 @@ export type RewriteResult = {
 
 export type LlmRewriterConfig = {
   provider: "local" | "openai" | "anthropic";
-  apiKey?: string;
   model?: string;
   maxTokens?: number;
   temperature?: number;
@@ -124,110 +124,58 @@ export function buildRewritePrompt(request: RewriteRequest): string {
 }
 
 // ---------------------------------------------------------------------------
-// Cloud LLM rewriting
+// Cloud LLM rewriting (via backend proxy)
 // ---------------------------------------------------------------------------
 
-async function callOpenAi(
-  prompt: string,
-  config: LlmRewriterConfig,
-): Promise<string> {
-  const model = config.model ?? "gpt-4o-mini";
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: config.maxTokens ?? 1024,
-      temperature: config.temperature ?? 0.3,
-    }),
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`OpenAI API error ${response.status}: ${body}`);
-  }
-
-  const json = (await response.json()) as {
-    choices?: { message?: { content?: string } }[];
-  };
-  const content = json.choices?.[0]?.message?.content;
-  if (!content) {
-    throw new Error("OpenAI returned empty response");
-  }
-  return content.trim();
-}
-
-async function callAnthropic(
-  prompt: string,
-  config: LlmRewriterConfig,
-): Promise<string> {
-  const model = config.model ?? "claude-sonnet-4-20250514";
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": config.apiKey!,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: config.maxTokens ?? 1024,
-      messages: [{ role: "user", content: prompt }],
-      temperature: config.temperature ?? 0.3,
-    }),
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Anthropic API error ${response.status}: ${body}`);
-  }
-
-  const json = (await response.json()) as {
-    content?: { type?: string; text?: string }[];
-  };
-  const textBlock = json.content?.find((b) => b.type === "text");
-  if (!textBlock?.text) {
-    throw new Error("Anthropic returned empty response");
-  }
-  return textBlock.text.trim();
-}
+const API_URL = (
+  typeof import.meta !== "undefined"
+    ? import.meta.env?.VITE_SONOLECT_API_URL?.trim()
+    : undefined
+) as string | undefined;
 
 export async function rewriteWithLlm(
   request: RewriteRequest,
   config: LlmRewriterConfig,
 ): Promise<RewriteResult> {
-  const prompt = buildRewritePrompt(request);
+  if (config.provider === "local") {
+    return rewriteWithLocalRules(request);
+  }
+
+  const apiUrl = API_URL;
+  if (!apiUrl) {
+    // No backend URL configured — fall back to local
+    return rewriteWithLocalRules(request);
+  }
+
   const start = Date.now();
 
   try {
-    let rewritten: string;
-    if (config.provider === "openai") {
-      rewritten = await callOpenAi(prompt, config);
-    } else if (config.provider === "anthropic") {
-      rewritten = await callAnthropic(prompt, config);
-    } else {
-      // provider === "local" — delegate immediately
-      return rewriteWithLocalRules(request);
+    const endpoint = new URL("/llm/rewrite", apiUrl).toString();
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...createAuthHeaders(),
+      },
+      body: JSON.stringify({
+        text: request.text,
+        ...(request.style ? { style: request.style } : {}),
+        ...(request.instruction ? { instruction: request.instruction } : {}),
+        ...(request.context ? { context: request.context } : {}),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Backend LLM proxy error ${response.status}`);
     }
 
-    const changes: string[] = ["LLM-powered rewrite"];
-    if (request.style) {
-      changes.push(`Applied ${request.style} style`);
-    }
-
+    const result = (await response.json()) as RewriteResult;
     return {
-      original: request.text,
-      rewritten,
-      method: "cloud",
+      ...result,
       latencyMs: Date.now() - start,
-      changes,
     };
   } catch {
-    // Fallback to local rules on any cloud error
+    // Fallback to local rules on any backend/network error
     return rewriteWithLocalRules(request);
   }
 }
@@ -245,11 +193,6 @@ export async function rewrite(
     return rewriteWithLocalRules(request);
   }
 
-  // If config is provided but missing API key, fall back to local
-  if (!config.apiKey) {
-    return rewriteWithLocalRules(request);
-  }
-
-  // Try cloud, falls back to local on error internally
+  // Try backend proxy, falls back to local on error internally
   return rewriteWithLlm(request, config);
 }

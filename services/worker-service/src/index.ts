@@ -13,6 +13,23 @@ import {
   enqueueWorkerTaskSchema,
   type EnqueueWorkerTaskInput,
 } from "@sonolect/validation";
+import {
+  processAudioTask,
+  type AudioTask,
+  type AudioHandlerDeps,
+} from "./handlers/audio-handler.js";
+import {
+  processAgentTask,
+  type AgentTask,
+  type AgentTaskType,
+  type AgentHandlerDeps,
+} from "./handlers/agent-handler.js";
+import {
+  processBillingTask,
+  type BillingTask,
+  type BillingTaskType,
+  type BillingHandlerDeps,
+} from "./handlers/billing-handler.js";
 
 const serviceName = "sonolect-worker-service";
 
@@ -40,28 +57,65 @@ const sendValidationError = (reply: FastifyReply, error: unknown) => {
   throw error;
 };
 
-const createDispatcher = (): Record<
-  EnqueueWorkerTaskRequest["kind"],
-  TaskHandler
-> => ({
-  audio: async (task) => ({
-    accepted: true,
-    action: "audio_task_dispatched",
-    taskType: task.type,
-    note: "Placeholder for transcription, normalization, and audio lifecycle jobs.",
-  }),
-  agent: async (task) => ({
-    accepted: true,
-    action: "agent_task_dispatched",
-    taskType: task.type,
-    note: "Placeholder for rewrite, command, and custom agent jobs.",
-  }),
-  billing: async (task) => ({
-    accepted: true,
-    action: "billing_task_dispatched",
-    taskType: task.type,
-    note: "Placeholder for usage rollups, quota checks, and Stripe reconciliation jobs.",
-  }),
+export interface CreateDispatcherOptions {
+  audioDeps?: AudioHandlerDeps;
+  agentDeps?: AgentHandlerDeps;
+  billingDeps?: BillingHandlerDeps;
+}
+
+const createDispatcher = (
+  options: CreateDispatcherOptions = {},
+): Record<EnqueueWorkerTaskRequest["kind"], TaskHandler> => ({
+  audio: async (task) => {
+    const payload = task.payload as Record<string, unknown>;
+    const audioTask: AudioTask = {
+      jobId: task.id,
+      audioPath: (payload?.audioPath as string) ?? "",
+      language: (payload?.language as string) ?? undefined,
+      userId: (payload?.userId as string) ?? "",
+    };
+    const result = await processAudioTask(audioTask, options.audioDeps);
+    return {
+      accepted: true,
+      action: "audio_task_completed",
+      taskType: task.type,
+      ...result,
+    };
+  },
+  agent: async (task) => {
+    const payload = task.payload as Record<string, unknown>;
+    const agentTask: AgentTask = {
+      taskType: ((payload?.taskType as string) ?? "rewrite") as AgentTaskType,
+      text: (payload?.text as string) ?? "",
+      style: (payload?.style as string) ?? undefined,
+      userId: (payload?.userId as string) ?? "",
+    };
+    const result = await processAgentTask(agentTask, options.agentDeps);
+    const { taskType: _agentTaskType, ...agentResult } = result;
+    return {
+      accepted: true,
+      action: "agent_task_completed",
+      taskType: task.type,
+      ...agentResult,
+    };
+  },
+  billing: async (task) => {
+    const payload = task.payload as Record<string, unknown>;
+    const billingTask: BillingTask = {
+      taskType: ((payload?.taskType as string) ??
+        "usage-rollup") as BillingTaskType,
+      userId: (payload?.userId as string) ?? "",
+      period: (payload?.period as string) ?? undefined,
+    };
+    const result = await processBillingTask(billingTask, options.billingDeps);
+    const { taskType: _billingTaskType, ...billingResult } = result;
+    return {
+      accepted: true,
+      action: "billing_task_completed",
+      taskType: task.type,
+      ...billingResult,
+    };
+  },
 });
 
 const enqueueTask = (
@@ -90,6 +144,7 @@ const dispatchTask = async (
 ): Promise<WorkerTask | undefined> => {
   const task = stores.tasks.get(taskId);
   if (!task) return undefined;
+  const processingStartedAt = Date.now();
   const processing: WorkerTask = {
     ...task,
     status: "processing",
@@ -99,19 +154,25 @@ const dispatchTask = async (
   stores.tasks.set(taskId, processing);
   try {
     const result = await dispatcher[processing.kind](processing);
+    const processingDurationMs = Date.now() - processingStartedAt;
     const completed: WorkerTask = {
       ...processing,
       status: "completed",
-      payload: { input: processing.payload, result },
+      payload: { input: processing.payload, result, processingDurationMs },
       updatedAt: new Date().toISOString(),
       completedAt: new Date().toISOString(),
     };
     stores.tasks.set(taskId, completed);
     return completed;
   } catch (error) {
+    const processingDurationMs = Date.now() - processingStartedAt;
     const failed: WorkerTask = {
       ...processing,
       status: "failed",
+      payload: {
+        input: processing.payload,
+        processingDurationMs,
+      },
       error: error instanceof Error ? error.message : "Unknown worker error",
       updatedAt: new Date().toISOString(),
     };
@@ -123,13 +184,14 @@ const dispatchTask = async (
 export interface CreateAppOptions {
   stores?: WorkerStores;
   logger?: boolean;
+  dispatcherOptions?: CreateDispatcherOptions;
 }
 
 export async function createApp(
   options: CreateAppOptions = {},
 ): Promise<FastifyInstance> {
   const stores = options.stores ?? createStores();
-  const dispatcher = createDispatcher();
+  const dispatcher = createDispatcher(options.dispatcherOptions);
   const app = Fastify({ logger: options.logger ?? true });
 
   await app.register(helmet);

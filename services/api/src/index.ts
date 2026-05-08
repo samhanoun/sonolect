@@ -41,6 +41,10 @@ import type {
   ListResponse,
   SyncManifest,
   SyncManifestItem,
+  Team,
+  TeamInvite,
+  TeamMember,
+  TeamMemberRole,
   Transcript,
   UsageQuotaSummary,
   User,
@@ -67,11 +71,20 @@ const defaultAudioMaxBytes = 100 * 1024 * 1024;
 
 type RouteContext = { userId: string; actor: AuthenticatedActor };
 
+export interface TeamStores {
+  teams: Map<string, Team>;
+  teamMembers: Map<string, TeamMember[]>;
+  teamInvites: Map<string, TeamInvite[]>;
+  sharedDictionary: Map<string, unknown[]>;
+  sharedSnippets: Map<string, unknown[]>;
+}
+
 export interface InMemoryStores {
   users: Map<string, User>;
   transcripts: Map<string, Transcript>;
   commands: Map<string, CommandExecutionResult>;
   audioJobs: Map<string, AudioUploadJob>;
+  team: TeamStores;
 }
 
 const sanitizeLocalUserId = (value: string | undefined): string => {
@@ -85,6 +98,14 @@ const getLocalUserId = (options: Pick<CreateAppOptions, "localUserId">) =>
   sanitizeLocalUserId(
     options.localUserId ?? process.env.SONOLECT_LOCAL_USER_ID,
   );
+
+const createTeamStores = (): TeamStores => ({
+  teams: new Map<string, Team>(),
+  teamMembers: new Map<string, TeamMember[]>(),
+  teamInvites: new Map<string, TeamInvite[]>(),
+  sharedDictionary: new Map<string, unknown[]>(),
+  sharedSnippets: new Map<string, unknown[]>(),
+});
 
 const createStores = (localUserId = defaultLocalUserId): InMemoryStores => ({
   users: new Map<string, User>([
@@ -109,6 +130,7 @@ const createStores = (localUserId = defaultLocalUserId): InMemoryStores => ({
   transcripts: new Map<string, Transcript>(),
   commands: new Map<string, CommandExecutionResult>(),
   audioJobs: new Map<string, AudioUploadJob>(),
+  team: createTeamStores(),
 });
 
 const getRouteContext = (request: FastifyRequest): RouteContext => {
@@ -770,6 +792,334 @@ export async function createApp(
       } catch (error) {
         return sendValidationError(reply, error);
       }
+    },
+  );
+
+  /* ─── Team Collaboration Routes ─── */
+
+  const ROLE_PERMISSIONS: Record<TeamMemberRole, Set<string>> = {
+    owner: new Set(["read", "write", "admin", "invite"]),
+    admin: new Set(["read", "write", "invite"]),
+    member: new Set(["read", "write"]),
+  };
+
+  const hasTeamPermission = (
+    member: TeamMember | undefined,
+    action: string,
+  ): boolean => {
+    if (!member) return false;
+    const allowed = ROLE_PERMISSIONS[member.role];
+    return allowed !== undefined && allowed.has(action);
+  };
+
+  const findMember = (
+    teamId: string,
+    userId: string,
+  ): TeamMember | undefined => {
+    const members = stores.team.teamMembers.get(teamId) ?? [];
+    return members.find((m) => m.userId === userId);
+  };
+
+  app.post("/teams", async (request, reply) => {
+    const { userId } = getRouteContext(request);
+    const body = request.body as Record<string, unknown> | undefined;
+    const name = typeof body?.name === "string" ? body.name.trim() : undefined;
+    if (!name) {
+      return reply.status(400).send({
+        error: "validation_error",
+        message: "Team name is required",
+      });
+    }
+    const now = new Date().toISOString();
+    const team: Team = {
+      id: randomUUID(),
+      name,
+      slug: name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, ""),
+      ownerId: userId,
+      createdAt: now,
+    };
+    stores.team.teams.set(team.id, team);
+    const ownerMember: TeamMember = {
+      userId,
+      teamId: team.id,
+      role: "owner",
+      joinedAt: now,
+    };
+    stores.team.teamMembers.set(team.id, [ownerMember]);
+    stores.team.teamInvites.set(team.id, []);
+    stores.team.sharedDictionary.set(team.id, []);
+    stores.team.sharedSnippets.set(team.id, []);
+    return reply.status(201).send(team);
+  });
+
+  app.get("/teams", async (request) => {
+    const { userId } = getRouteContext(request);
+    const userTeams: Team[] = [];
+    for (const [teamId, members] of stores.team.teamMembers.entries()) {
+      if (members.some((m) => m.userId === userId)) {
+        const team = stores.team.teams.get(teamId);
+        if (team) userTeams.push(team);
+      }
+    }
+    return userTeams;
+  });
+
+  app.get<{ Params: { id: string } }>("/teams/:id", async (request, reply) => {
+    const { userId } = getRouteContext(request);
+    const team = stores.team.teams.get(request.params.id);
+    if (!team) {
+      return reply
+        .status(404)
+        .send({ error: "not_found", message: "Team not found" });
+    }
+    const member = findMember(team.id, userId);
+    if (!hasTeamPermission(member, "read")) {
+      return reply
+        .status(403)
+        .send({ error: "forbidden", message: "Not a team member" });
+    }
+    const members = stores.team.teamMembers.get(team.id) ?? [];
+    const invites = stores.team.teamInvites.get(team.id) ?? [];
+    return { team, members, invites };
+  });
+
+  app.post<{ Params: { id: string } }>(
+    "/teams/:id/invite",
+    async (request, reply) => {
+      const { userId } = getRouteContext(request);
+      const team = stores.team.teams.get(request.params.id);
+      if (!team) {
+        return reply
+          .status(404)
+          .send({ error: "not_found", message: "Team not found" });
+      }
+      const member = findMember(team.id, userId);
+      if (!hasTeamPermission(member, "invite")) {
+        return reply
+          .status(403)
+          .send({ error: "forbidden", message: "No invite permission" });
+      }
+      const body = request.body as Record<string, unknown> | undefined;
+      const email =
+        typeof body?.email === "string"
+          ? body.email.trim().toLowerCase()
+          : undefined;
+      const role =
+        typeof body?.role === "string" &&
+        (body.role === "admin" || body.role === "member")
+          ? (body.role as "admin" | "member")
+          : undefined;
+      if (!email || !role) {
+        return reply.status(400).send({
+          error: "validation_error",
+          message: "email and role (admin|member) are required",
+        });
+      }
+      const now = new Date();
+      const invite: TeamInvite = {
+        id: randomUUID(),
+        teamId: team.id,
+        email,
+        role,
+        invitedBy: userId,
+        createdAt: now.toISOString(),
+        expiresAt: new Date(
+          now.getTime() + 7 * 24 * 60 * 60 * 1000,
+        ).toISOString(),
+        status: "pending",
+      };
+      const invites = stores.team.teamInvites.get(team.id) ?? [];
+      invites.push(invite);
+      stores.team.teamInvites.set(team.id, invites);
+      return reply.status(201).send(invite);
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/teams/:id/join",
+    async (request, reply) => {
+      const { userId } = getRouteContext(request);
+      const team = stores.team.teams.get(request.params.id);
+      if (!team) {
+        return reply
+          .status(404)
+          .send({ error: "not_found", message: "Team not found" });
+      }
+      const body = request.body as Record<string, unknown> | undefined;
+      const inviteId =
+        typeof body?.inviteId === "string" ? body.inviteId : undefined;
+      if (!inviteId) {
+        return reply.status(400).send({
+          error: "validation_error",
+          message: "inviteId is required",
+        });
+      }
+      const invites = stores.team.teamInvites.get(team.id) ?? [];
+      const invite = invites.find(
+        (i) => i.id === inviteId && i.status === "pending",
+      );
+      if (!invite) {
+        return reply.status(404).send({
+          error: "not_found",
+          message: "Invite not found or already used",
+        });
+      }
+      if (Date.now() > Date.parse(invite.expiresAt)) {
+        invite.status = "expired";
+        return reply
+          .status(400)
+          .send({ error: "expired", message: "Invite has expired" });
+      }
+      invite.status = "accepted";
+      const members = stores.team.teamMembers.get(team.id) ?? [];
+      if (members.some((m) => m.userId === userId)) {
+        return reply.status(400).send({
+          error: "already_member",
+          message: "Already a team member",
+        });
+      }
+      const newMember: TeamMember = {
+        userId,
+        teamId: team.id,
+        role: invite.role,
+        joinedAt: new Date().toISOString(),
+      };
+      members.push(newMember);
+      stores.team.teamMembers.set(team.id, members);
+      return reply.status(201).send(newMember);
+    },
+  );
+
+  app.delete<{ Params: { id: string; userId: string } }>(
+    "/teams/:id/members/:userId",
+    async (request, reply) => {
+      const { userId: actorId } = getRouteContext(request);
+      const team = stores.team.teams.get(request.params.id);
+      if (!team) {
+        return reply
+          .status(404)
+          .send({ error: "not_found", message: "Team not found" });
+      }
+      const actorMember = findMember(team.id, actorId);
+      if (!hasTeamPermission(actorMember, "admin")) {
+        return reply
+          .status(403)
+          .send({ error: "forbidden", message: "Admin permission required" });
+      }
+      const targetUserId = request.params.userId;
+      if (targetUserId === team.ownerId) {
+        return reply
+          .status(400)
+          .send({ error: "invalid", message: "Cannot remove team owner" });
+      }
+      const members = stores.team.teamMembers.get(team.id) ?? [];
+      const filtered = members.filter((m) => m.userId !== targetUserId);
+      if (filtered.length === members.length) {
+        return reply
+          .status(404)
+          .send({ error: "not_found", message: "Member not found" });
+      }
+      stores.team.teamMembers.set(team.id, filtered);
+      return reply.status(204).send();
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/teams/:id/shared/dictionary",
+    async (request, reply) => {
+      const { userId } = getRouteContext(request);
+      const team = stores.team.teams.get(request.params.id);
+      if (!team) {
+        return reply
+          .status(404)
+          .send({ error: "not_found", message: "Team not found" });
+      }
+      const member = findMember(team.id, userId);
+      if (!hasTeamPermission(member, "read")) {
+        return reply
+          .status(403)
+          .send({ error: "forbidden", message: "Not a team member" });
+      }
+      return stores.team.sharedDictionary.get(team.id) ?? [];
+    },
+  );
+
+  app.put<{ Params: { id: string } }>(
+    "/teams/:id/shared/dictionary",
+    async (request, reply) => {
+      const { userId } = getRouteContext(request);
+      const team = stores.team.teams.get(request.params.id);
+      if (!team) {
+        return reply
+          .status(404)
+          .send({ error: "not_found", message: "Team not found" });
+      }
+      const member = findMember(team.id, userId);
+      if (!hasTeamPermission(member, "write")) {
+        return reply
+          .status(403)
+          .send({ error: "forbidden", message: "Write permission required" });
+      }
+      const body = request.body;
+      if (!Array.isArray(body)) {
+        return reply.status(400).send({
+          error: "validation_error",
+          message: "Body must be an array of dictionary entries",
+        });
+      }
+      stores.team.sharedDictionary.set(team.id, body);
+      return reply.status(204).send();
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    "/teams/:id/shared/snippets",
+    async (request, reply) => {
+      const { userId } = getRouteContext(request);
+      const team = stores.team.teams.get(request.params.id);
+      if (!team) {
+        return reply
+          .status(404)
+          .send({ error: "not_found", message: "Team not found" });
+      }
+      const member = findMember(team.id, userId);
+      if (!hasTeamPermission(member, "read")) {
+        return reply
+          .status(403)
+          .send({ error: "forbidden", message: "Not a team member" });
+      }
+      return stores.team.sharedSnippets.get(team.id) ?? [];
+    },
+  );
+
+  app.put<{ Params: { id: string } }>(
+    "/teams/:id/shared/snippets",
+    async (request, reply) => {
+      const { userId } = getRouteContext(request);
+      const team = stores.team.teams.get(request.params.id);
+      if (!team) {
+        return reply
+          .status(404)
+          .send({ error: "not_found", message: "Team not found" });
+      }
+      const member = findMember(team.id, userId);
+      if (!hasTeamPermission(member, "write")) {
+        return reply
+          .status(403)
+          .send({ error: "forbidden", message: "Write permission required" });
+      }
+      const body = request.body;
+      if (!Array.isArray(body)) {
+        return reply.status(400).send({
+          error: "validation_error",
+          message: "Body must be an array of snippets",
+        });
+      }
+      stores.team.sharedSnippets.set(team.id, body);
+      return reply.status(204).send();
     },
   );
 

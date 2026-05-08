@@ -53,7 +53,7 @@ try {
     },
     payload,
   });
-  assert.equal(webhook.statusCode, 202, webhook.body);
+  assert.equal(webhook.statusCode, 200, webhook.body);
 } finally {
   await app.close();
 }

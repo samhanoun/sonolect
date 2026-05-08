@@ -24,7 +24,7 @@ jobs:
   # ── SAST: Semgrep static analysis ──────────────────────────────────
   sast:
     name: SAST (Semgrep)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     container:
       image: semgrep/semgrep
     steps:
@@ -55,7 +55,7 @@ jobs:
   # ── Dependency scanning ────────────────────────────────────────────
   dependency-scan:
     name: Dependency scanning
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -85,7 +85,7 @@ jobs:
   # ── Secret scanning ────────────────────────────────────────────────
   secret-scan:
     name: Secret scanning (gitleaks)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -101,7 +101,7 @@ jobs:
   # ── License compliance ─────────────────────────────────────────────
   license-check:
     name: License compliance
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -130,7 +130,7 @@ jobs:
   # ── Container scanning ─────────────────────────────────────────────
   container-scan:
     name: Container scan (${{ matrix.service }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     strategy:
       fail-fast: false
       matrix:
@@ -157,7 +157,7 @@ jobs:
   # ── SBOM generation ────────────────────────────────────────────────
   sbom:
     name: SBOM generation
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -202,7 +202,7 @@ jobs:
       - license-check
       - container-scan
       - sbom
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Evaluate results
         run: |

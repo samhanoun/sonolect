@@ -3,8 +3,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+static CAPTURE_PROCESS: Mutex<Option<u32>> = Mutex::new(None);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -316,12 +318,235 @@ fn insert_text_into_active_app(text: String) -> InsertionResult {
     }
 }
 
+// ---------------------------------------------------------------------------
+// System audio capture
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SystemAudioStatus {
+    available: bool,
+    method: String,
+    setup_instructions: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CaptureHandle {
+    id: String,
+    started_at: String,
+    output_path: String,
+    status: String,
+}
+
+#[cfg(target_os = "linux")]
+fn detect_system_audio() -> SystemAudioStatus {
+    let has_parecord = command_exists("parecord");
+    let has_pactl = command_exists("pactl");
+    if has_parecord && has_pactl {
+        SystemAudioStatus {
+            available: true,
+            method: "pulseaudio-monitor".to_owned(),
+            setup_instructions: "PulseAudio monitor source detected. Ready to capture system audio.".to_owned(),
+        }
+    } else {
+        SystemAudioStatus {
+            available: false,
+            method: "none".to_owned(),
+            setup_instructions: "Install PulseAudio (pulseaudio, parecord, pactl) to enable system audio capture. On Ubuntu/Debian: sudo apt install pulseaudio-utils".to_owned(),
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn detect_system_audio() -> SystemAudioStatus {
+    // Check for BlackHole or similar virtual audio device via ffmpeg
+    let has_ffmpeg = command_exists("ffmpeg");
+    let has_sox = command_exists("sox");
+    if has_ffmpeg {
+        SystemAudioStatus {
+            available: true,
+            method: "avfoundation-blackhole".to_owned(),
+            setup_instructions: "ffmpeg detected. Install BlackHole (https://github.com/ExistentialAudio/BlackHole) for virtual audio loopback, then select 'BlackHole 2ch' as the capture device.".to_owned(),
+        }
+    } else if has_sox {
+        SystemAudioStatus {
+            available: true,
+            method: "sox-fallback".to_owned(),
+            setup_instructions: "sox detected as fallback. For best results, install ffmpeg and BlackHole for virtual audio loopback.".to_owned(),
+        }
+    } else {
+        SystemAudioStatus {
+            available: false,
+            method: "none".to_owned(),
+            setup_instructions: "Install ffmpeg (brew install ffmpeg) and BlackHole (https://github.com/ExistentialAudio/BlackHole) for system audio capture on macOS.".to_owned(),
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn detect_system_audio() -> SystemAudioStatus {
+    let has_ffmpeg = command_exists("ffmpeg");
+    if has_ffmpeg {
+        SystemAudioStatus {
+            available: true,
+            method: "dshow-stereo-mix".to_owned(),
+            setup_instructions: "ffmpeg detected. Enable 'Stereo Mix' in Windows Sound settings: right-click the speaker icon > Sounds > Recording tab > right-click > Show Disabled Devices > enable Stereo Mix.".to_owned(),
+        }
+    } else {
+        SystemAudioStatus {
+            available: false,
+            method: "none".to_owned(),
+            setup_instructions: "Install ffmpeg (https://ffmpeg.org/download.html) and enable Stereo Mix in Windows Sound settings to capture system audio.".to_owned(),
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn detect_system_audio() -> SystemAudioStatus {
+    SystemAudioStatus {
+        available: false,
+        method: "none".to_owned(),
+        setup_instructions: "System audio capture is not supported on this operating system.".to_owned(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn spawn_capture_process(output_path: &str) -> Result<std::process::Child, String> {
+    // Get default sink monitor source
+    let sink_output = Command::new("pactl")
+        .arg("get-default-sink")
+        .output()
+        .map_err(|e| format!("Failed to query default sink: {e}"))?;
+    let sink_name = String::from_utf8_lossy(&sink_output.stdout).trim().to_owned();
+    if sink_name.is_empty() {
+        return Err("No default PulseAudio sink found".to_owned());
+    }
+    let monitor = format!("{sink_name}.monitor");
+    Command::new("parecord")
+        .arg(format!("--device={monitor}"))
+        .arg("--file-format=wav")
+        .arg(output_path)
+        .spawn()
+        .map_err(|e| format!("Failed to start parecord: {e}"))
+}
+
+#[cfg(target_os = "macos")]
+fn spawn_capture_process(output_path: &str) -> Result<std::process::Child, String> {
+    if command_exists("ffmpeg") {
+        Command::new("ffmpeg")
+            .args(["-f", "avfoundation", "-i", ":BlackHole 2ch", "-acodec", "pcm_s16le", "-y", output_path])
+            .spawn()
+            .map_err(|e| format!("Failed to start ffmpeg: {e}"))
+    } else if command_exists("sox") {
+        Command::new("sox")
+            .args(["-d", output_path])
+            .spawn()
+            .map_err(|e| format!("Failed to start sox: {e}"))
+    } else {
+        Err("No audio capture tool found (ffmpeg or sox required)".to_owned())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn spawn_capture_process(output_path: &str) -> Result<std::process::Child, String> {
+    Command::new("ffmpeg")
+        .args(["-f", "dshow", "-i", "audio=Stereo Mix", "-acodec", "pcm_s16le", "-y", output_path])
+        .spawn()
+        .map_err(|e| format!("Failed to start ffmpeg: {e}"))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn spawn_capture_process(_output_path: &str) -> Result<std::process::Child, String> {
+    Err("System audio capture is not supported on this platform".to_owned())
+}
+
+fn generate_capture_id() -> String {
+    let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("capture-{}-{}", std::process::id(), counter)
+}
+
+fn now_iso() -> String {
+    // Simple ISO-ish timestamp without chrono dependency
+    let duration = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("{}Z", duration.as_secs())
+}
+
+#[tauri::command]
+fn check_system_audio_available() -> SystemAudioStatus {
+    detect_system_audio()
+}
+
+#[tauri::command]
+fn start_system_audio_capture(output_path: String) -> Result<CaptureHandle, String> {
+    // Check if already capturing
+    {
+        let guard = CAPTURE_PROCESS.lock().map_err(|e| format!("Lock error: {e}"))?;
+        if guard.is_some() {
+            return Err("A system audio capture is already in progress".to_owned());
+        }
+    }
+
+    let status = detect_system_audio();
+    if !status.available {
+        return Err(format!("System audio not available: {}", status.setup_instructions));
+    }
+
+    let child = spawn_capture_process(&output_path)?;
+    let pid = child.id();
+
+    {
+        let mut guard = CAPTURE_PROCESS.lock().map_err(|e| format!("Lock error: {e}"))?;
+        *guard = Some(pid);
+    }
+
+    Ok(CaptureHandle {
+        id: generate_capture_id(),
+        started_at: now_iso(),
+        output_path,
+        status: "recording".to_owned(),
+    })
+}
+
+#[tauri::command]
+fn stop_system_audio_capture() -> Result<(), String> {
+    let pid = {
+        let mut guard = CAPTURE_PROCESS.lock().map_err(|e| format!("Lock error: {e}"))?;
+        guard.take()
+    };
+
+    match pid {
+        Some(pid) => {
+            // Send SIGTERM on Unix, taskkill on Windows
+            #[cfg(unix)]
+            {
+                unsafe {
+                    libc::kill(pid as i32, libc::SIGTERM);
+                }
+            }
+            #[cfg(windows)]
+            {
+                let _ = Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/F"])
+                    .output();
+            }
+            Ok(())
+        }
+        None => Err("No active system audio capture to stop".to_owned()),
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             transcribe_audio,
-            insert_text_into_active_app
+            insert_text_into_active_app,
+            check_system_audio_available,
+            start_system_audio_capture,
+            stop_system_audio_capture
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sonolect desktop app");
@@ -404,5 +629,40 @@ mod tests {
         } else {
             env::remove_var("SONOLECT_DESKTOP_WHISPER_COMMAND_ARGS");
         }
+    }
+
+    #[test]
+    fn detect_system_audio_returns_valid_status() {
+        let status = detect_system_audio();
+        // On any platform the struct should be well-formed
+        assert!(!status.method.is_empty());
+        assert!(!status.setup_instructions.is_empty());
+    }
+
+    #[test]
+    fn generate_capture_id_is_unique() {
+        let a = generate_capture_id();
+        let b = generate_capture_id();
+        assert_ne!(a, b);
+        assert!(a.starts_with("capture-"));
+    }
+
+    #[test]
+    fn now_iso_returns_nonempty_timestamp() {
+        let ts = now_iso();
+        assert!(!ts.is_empty());
+        assert!(ts.ends_with('Z'));
+    }
+
+    #[test]
+    fn stop_capture_without_active_returns_error() {
+        // Ensure no capture is running
+        {
+            let mut guard = CAPTURE_PROCESS.lock().unwrap();
+            *guard = None;
+        }
+        let result = stop_system_audio_capture();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No active"));
     }
 }

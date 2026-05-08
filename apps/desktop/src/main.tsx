@@ -118,6 +118,29 @@ import { OnboardingView } from "./OnboardingView";
 import { SearchPanel } from "./SearchPanel";
 import { StylePresetSelector } from "./StylePresetSelector";
 import { RetentionSettings } from "./RetentionSettings";
+import { TeamView } from "./TeamView";
+import { MeetingView } from "./MeetingView";
+import type { MeetingSession } from "./meetingMode";
+import {
+  createMeetingSession,
+  pauseMeeting as pauseMeetingSession,
+  resumeMeeting as resumeMeetingSession,
+  endMeeting as endMeetingSession,
+} from "./meetingMode";
+import type { MeetingExportFormat } from "./meetingExport";
+import type { SystemAudioStatus } from "./systemAudioCapture";
+import {
+  fetchTeams,
+  fetchTeamDetail,
+  createTeam as apiCreateTeam,
+  inviteToTeam as apiInviteToTeam,
+  removeMember as apiRemoveMember,
+  fetchSharedDictionary,
+  updateSharedDictionary,
+  fetchSharedSnippets,
+  updateSharedSnippets,
+} from "./teamApi";
+import type { Team, TeamMember, TeamInvite } from "@sonolect/types";
 import "./styles.css";
 
 type PrivacyLevel = "local" | "cloud";
@@ -134,7 +157,9 @@ type ViewId =
   | "dictionary"
   | "snippets"
   | "onboarding"
-  | "search";
+  | "search"
+  | "team"
+  | "meeting";
 
 type VoiceCaptureResult = VoiceCaptureMetadata & {
   objectUrl: string;
@@ -180,6 +205,26 @@ type DesktopState = {
   showFloatingRecorder: boolean;
   dictionarySearch: string;
   snippetSearch: string;
+  currentTeam: Team | null;
+  teamMembers: TeamMember[];
+  teamInvites: TeamInvite[];
+  sharedDictionary: DictionaryEntry[];
+  sharedSnippets: Snippet[];
+  loadTeam: () => Promise<void>;
+  createTeam: (name: string) => Promise<void>;
+  inviteToTeam: (email: string, role: "admin" | "member") => Promise<void>;
+  removeTeamMember: (userId: string) => Promise<void>;
+  syncSharedDictionary: () => Promise<void>;
+  syncSharedSnippets: () => Promise<void>;
+  activeMeeting: MeetingSession | null;
+  meetingHistory: MeetingSession[];
+  systemAudioStatus: SystemAudioStatus | null;
+  startMeeting: (title: string) => void;
+  pauseActiveMeeting: () => void;
+  resumeActiveMeeting: () => void;
+  endActiveMeeting: () => void;
+  selectMeeting: (id: string) => void;
+  exportMeeting: (format: MeetingExportFormat, content: string) => void;
   setActiveStylePreset: (id: string) => void;
   setSearchQuery: (query: string) => void;
   setHistoryFilter: (filter: HistoryFilter) => void;
@@ -458,6 +503,162 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
   showFloatingRecorder: false,
   dictionarySearch: "",
   snippetSearch: "",
+  currentTeam: null,
+  teamMembers: [],
+  teamInvites: [],
+  sharedDictionary: [],
+  sharedSnippets: [],
+  activeMeeting: null,
+  meetingHistory: [],
+  systemAudioStatus: null,
+  startMeeting: (title: string) => {
+    const session = createMeetingSession({
+      title,
+      participants: [],
+      autoDetectSpeakers: true,
+      language: "auto",
+      maxDurationMs: 4 * 60 * 60 * 1000,
+    });
+    set({ activeMeeting: session });
+  },
+  pauseActiveMeeting: () => {
+    set((state) => {
+      if (!state.activeMeeting) return {};
+      return { activeMeeting: pauseMeetingSession(state.activeMeeting) };
+    });
+  },
+  resumeActiveMeeting: () => {
+    set((state) => {
+      if (!state.activeMeeting) return {};
+      return { activeMeeting: resumeMeetingSession(state.activeMeeting) };
+    });
+  },
+  endActiveMeeting: () => {
+    set((state) => {
+      if (!state.activeMeeting) return {};
+      const ended = endMeetingSession(state.activeMeeting);
+      return {
+        activeMeeting: ended,
+        meetingHistory: [ended, ...state.meetingHistory],
+      };
+    });
+  },
+  selectMeeting: (id: string) => {
+    set((state) => {
+      const found = state.meetingHistory.find((m) => m.id === id);
+      if (found) return { activeMeeting: found };
+      return {};
+    });
+  },
+  exportMeeting: (_format: MeetingExportFormat, content: string) => {
+    // Copy exported content to clipboard
+    if (navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(content);
+      get().addToast("toast.copySuccess");
+    }
+  },
+  loadTeam: async () => {
+    try {
+      const teams = await fetchTeams(API_URL, API_TOKEN);
+      if (teams.length === 0) {
+        set({ currentTeam: null, teamMembers: [], teamInvites: [] });
+        return;
+      }
+      const detail = await fetchTeamDetail(API_URL, API_TOKEN, teams[0]!.id);
+      const dict = await fetchSharedDictionary(
+        API_URL,
+        API_TOKEN,
+        teams[0]!.id,
+      );
+      const snips = await fetchSharedSnippets(API_URL, API_TOKEN, teams[0]!.id);
+      set({
+        currentTeam: detail.team,
+        teamMembers: detail.members,
+        teamInvites: detail.invites,
+        sharedDictionary: dict,
+        sharedSnippets: snips,
+      });
+    } catch {
+      /* offline or no teams */
+    }
+  },
+  createTeam: async (name: string) => {
+    try {
+      const team = await apiCreateTeam(API_URL, API_TOKEN, name);
+      const detail = await fetchTeamDetail(API_URL, API_TOKEN, team.id);
+      set({
+        currentTeam: detail.team,
+        teamMembers: detail.members,
+        teamInvites: detail.invites,
+        sharedDictionary: [],
+        sharedSnippets: [],
+      });
+    } catch {
+      /* offline */
+    }
+  },
+  inviteToTeam: async (email: string, role: "admin" | "member") => {
+    const { currentTeam } = get();
+    if (!currentTeam) return;
+    try {
+      await apiInviteToTeam(API_URL, API_TOKEN, currentTeam.id, email, role);
+      const detail = await fetchTeamDetail(API_URL, API_TOKEN, currentTeam.id);
+      set({ teamInvites: detail.invites });
+    } catch {
+      /* offline */
+    }
+  },
+  removeTeamMember: async (userId: string) => {
+    const { currentTeam } = get();
+    if (!currentTeam) return;
+    try {
+      await apiRemoveMember(API_URL, API_TOKEN, currentTeam.id, userId);
+      const detail = await fetchTeamDetail(API_URL, API_TOKEN, currentTeam.id);
+      set({ teamMembers: detail.members });
+    } catch {
+      /* offline */
+    }
+  },
+  syncSharedDictionary: async () => {
+    const { currentTeam, dictionaryEntries } = get();
+    if (!currentTeam) return;
+    try {
+      await updateSharedDictionary(
+        API_URL,
+        API_TOKEN,
+        currentTeam.id,
+        dictionaryEntries,
+      );
+      const dict = await fetchSharedDictionary(
+        API_URL,
+        API_TOKEN,
+        currentTeam.id,
+      );
+      set({ sharedDictionary: dict });
+    } catch {
+      /* offline */
+    }
+  },
+  syncSharedSnippets: async () => {
+    const { currentTeam, snippets: localSnippets } = get();
+    if (!currentTeam) return;
+    try {
+      await updateSharedSnippets(
+        API_URL,
+        API_TOKEN,
+        currentTeam.id,
+        localSnippets,
+      );
+      const snips = await fetchSharedSnippets(
+        API_URL,
+        API_TOKEN,
+        currentTeam.id,
+      );
+      set({ sharedSnippets: snips });
+    } catch {
+      /* offline */
+    }
+  },
   locale:
     (loadSettings(SETTINGS_KEYS.locale) as SupportedLocale) ||
     useI18nStore.getState().locale,
@@ -1290,6 +1491,11 @@ function WorkspaceRouter() {
   const transcriptHistory = useDesktopStore((state) => state.transcriptHistory);
   const dictionarySearch = useDesktopStore((state) => state.dictionarySearch);
   const snippetSearch = useDesktopStore((state) => state.snippetSearch);
+  const currentTeam = useDesktopStore((state) => state.currentTeam);
+  const teamMembers = useDesktopStore((state) => state.teamMembers);
+  const teamInvites = useDesktopStore((state) => state.teamInvites);
+  const sharedDictionary = useDesktopStore((state) => state.sharedDictionary);
+  const sharedSnippets = useDesktopStore((state) => state.sharedSnippets);
 
   return (
     <section className="workspace" aria-label={t("workspace.ariaLabel")}>
@@ -1346,6 +1552,34 @@ function WorkspaceRouter() {
             }
           />
         </div>
+      ) : activeView === "team" ? (
+        <div className="workspace-grid">
+          <TeamView
+            currentTeam={currentTeam}
+            members={teamMembers}
+            invites={teamInvites}
+            sharedDictionary={sharedDictionary}
+            sharedSnippets={sharedSnippets}
+            personalDictionary={dictionaryEntries}
+            personalSnippets={snippets}
+            userId={AUTH_CONFIG.localUserId}
+            onCreateTeam={(name) =>
+              void useDesktopStore.getState().createTeam(name)
+            }
+            onInvite={(email, role) =>
+              void useDesktopStore.getState().inviteToTeam(email, role)
+            }
+            onRemoveMember={(userId) =>
+              void useDesktopStore.getState().removeTeamMember(userId)
+            }
+            onSyncDictionary={() =>
+              void useDesktopStore.getState().syncSharedDictionary()
+            }
+            onSyncSnippets={() =>
+              void useDesktopStore.getState().syncSharedSnippets()
+            }
+          />
+        </div>
       ) : activeView === "search" ? (
         <div className="workspace-grid">
           <SearchPanel
@@ -1354,6 +1588,30 @@ function WorkspaceRouter() {
               useDesktopStore.getState().setActiveView("home");
               void useDesktopStore.getState().selectTranscriptSession(id);
             }}
+          />
+        </div>
+      ) : activeView === "meeting" ? (
+        <div className="workspace-grid">
+          <MeetingView
+            activeMeeting={useDesktopStore.getState().activeMeeting}
+            meetingHistory={useDesktopStore.getState().meetingHistory}
+            systemAudioStatus={useDesktopStore.getState().systemAudioStatus}
+            onStartMeeting={(title) =>
+              useDesktopStore.getState().startMeeting(title)
+            }
+            onPauseMeeting={() =>
+              useDesktopStore.getState().pauseActiveMeeting()
+            }
+            onResumeMeeting={() =>
+              useDesktopStore.getState().resumeActiveMeeting()
+            }
+            onEndMeeting={() => useDesktopStore.getState().endActiveMeeting()}
+            onSelectMeeting={(id) =>
+              useDesktopStore.getState().selectMeeting(id)
+            }
+            onExport={(format, content) =>
+              useDesktopStore.getState().exportMeeting(format, content)
+            }
           />
         </div>
       ) : activeSessionId ? (
@@ -1383,6 +1641,8 @@ function Sidebar() {
     { id: "onboarding", labelKey: "nav.onboarding" },
     { id: "dictionary", labelKey: "nav.dictionary" },
     { id: "snippets", labelKey: "nav.snippets" },
+    { id: "meeting", labelKey: "nav.meeting" },
+    { id: "team", labelKey: "nav.team" },
     { id: "settings", labelKey: "nav.settings" },
   ];
 
