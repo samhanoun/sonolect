@@ -6,8 +6,7 @@ export type StylePreset = {
 };
 
 function conciseTransform(text: string): string {
-  const fillerWords =
-    /\b(very|really|just|actually|basically)\b\s*/gi;
+  const fillerWords = /\b(very|really|just|actually|basically)\b\s*/gi;
   const redundantPhrases: [RegExp, string][] = [
     [/\bin order to\b/gi, "to"],
     [/\bdue to the fact that\b/gi, "because"],
@@ -76,8 +75,10 @@ function professionalTransform(text: string): string {
   }
 
   // Capitalize first letter of each sentence
-  result = result.replace(/(^|[.!?]\s+)([a-z])/g, (_match, prefix: string, letter: string) =>
-    `${prefix}${letter.toUpperCase()}`,
+  result = result.replace(
+    /(^|[.!?]\s+)([a-z])/g,
+    (_match, prefix: string, letter: string) =>
+      `${prefix}${letter.toUpperCase()}`,
   );
 
   // Ensure period endings for sentences
@@ -135,10 +136,13 @@ function casualTransform(text: string): string {
   }
 
   // Lowercase first letter of each sentence (except "I")
-  result = result.replace(/(^|[.!?]\s+)([A-Z])/g, (_match, prefix: string, letter: string) => {
-    if (letter === "I") return `${prefix}${letter}`;
-    return `${prefix}${letter.toLowerCase()}`;
-  });
+  result = result.replace(
+    /(^|[.!?]\s+)([A-Z])/g,
+    (_match, prefix: string, letter: string) => {
+      if (letter === "I") return `${prefix}${letter}`;
+      return `${prefix}${letter.toLowerCase()}`;
+    },
+  );
 
   return result;
 }
@@ -151,8 +155,10 @@ function technicalTransform(text: string): string {
   const stepPattern =
     /\b(?:first|step one)[,:]?\s+(.+?)(?:\.\s*|\s+)(?:then|next|step two)[,:]?\s+(.+?)(?:\.\s*|\s+)(?:then|finally|lastly|step three)[,:]?\s+(.+?)(?:\.|$)/gi;
 
-  result = result.replace(stepPattern, (_match, s1: string, s2: string, s3: string) =>
-    `1. ${s1.trim()}; 2. ${s2.trim()}; 3. ${s3.trim()}.`,
+  result = result.replace(
+    stepPattern,
+    (_match, s1: string, s2: string, s3: string) =>
+      `1. ${s1.trim()}; 2. ${s2.trim()}; 3. ${s3.trim()}.`,
   );
 
   // Replace "and" joining independent clauses with semicolons

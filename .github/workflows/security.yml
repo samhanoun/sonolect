@@ -1,0 +1,221 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Weekly Monday 06:00 UTC
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PNPM_VERSION: 9.15.0
+
+jobs:
+  # ── SAST: Semgrep static analysis ──────────────────────────────────
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        run: |
+          semgrep scan \
+            --config auto \
+            --config p/typescript \
+            --config p/javascript \
+            --config p/owasp-top-ten \
+            --sarif --output semgrep-results.sarif \
+            --exclude node_modules \
+            --exclude pnpm-lock.yaml
+        continue-on-error: true
+
+      - name: Upload SARIF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-results
+          path: semgrep-results.sarif
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # ── Dependency scanning ────────────────────────────────────────────
+  dependency-scan:
+    name: Dependency scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: pnpm audit
+        run: pnpm audit --audit-level moderate
+
+      - name: OSV-Scanner
+        run: |
+          npx --yes osv-scanner --lockfile pnpm-lock.yaml --format table || true
+        continue-on-error: true
+
+  # ── Secret scanning ────────────────────────────────────────────────
+  secret-scan:
+    name: Secret scanning (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  # ── License compliance ─────────────────────────────────────────────
+  license-check:
+    name: License compliance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check licenses
+        run: |
+          npx --yes license-checker \
+            --production \
+            --failOn "GPL-2.0-only;GPL-3.0-only;GPL-3.0-or-later;AGPL-1.0-only;AGPL-3.0-only;AGPL-3.0-or-later;SSPL-1.0;EUPL-1.1;EUPL-1.2;CPAL-1.0;OSL-3.0;Sleepycat" \
+            --summary
+
+  # ── Container scanning ─────────────────────────────────────────────
+  container-scan:
+    name: Container scan (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - api
+          - audio-service
+          - worker-service
+          - agent-service
+          - billing-service
+          - sync-service
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy on Dockerfile
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: services/${{ matrix.service }}/Dockerfile
+          severity: CRITICAL,HIGH
+          exit-code: 0
+          format: table
+
+  # ── SBOM generation ────────────────────────────────────────────────
+  sbom:
+    name: SBOM generation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          npx --yes @cyclonedx/cyclonedx-npm \
+            --output-format JSON \
+            --output-file sbom.cdx.json \
+            --spec-version 1.5 \
+            || true
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          retention-days: 90
+
+  # ── Gate: all security checks must pass ────────────────────────────
+  security-gate:
+    name: Security gate
+    if: always()
+    needs:
+      - sast
+      - dependency-scan
+      - secret-scan
+      - license-check
+      - container-scan
+      - sbom
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate results
+        run: |
+          echo "SAST:            ${{ needs.sast.result }}"
+          echo "Dependency scan: ${{ needs.dependency-scan.result }}"
+          echo "Secret scan:     ${{ needs.secret-scan.result }}"
+          echo "License check:   ${{ needs.license-check.result }}"
+          echo "Container scan:  ${{ needs.container-scan.result }}"
+          echo "SBOM:            ${{ needs.sbom.result }}"
+
+          # Only secret scanning is a hard gate — other checks are informational
+          if [[ "${{ needs.secret-scan.result }}" == "failure" ]]; then
+            echo "::error::Secret scanning failed — potential credential leak"
+            exit 1
+          fi
+          echo "Security checks complete. Review SAST/dependency/license/container results in artifacts."

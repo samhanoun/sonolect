@@ -13,7 +13,10 @@ export type PolishDiff = {
  * Simple word-level diff: split both strings into words, find longest common
  * subsequence, then mark words as added/removed/unchanged.
  */
-export function computePolishDiff(original: string, polished: string): PolishDiff {
+export function computePolishDiff(
+  original: string,
+  polished: string,
+): PolishDiff {
   const origWords = original.split(/\s+/).filter(Boolean);
   const polWords = polished.split(/\s+/).filter(Boolean);
 
@@ -37,17 +40,20 @@ export function computePolishDiff(original: string, polished: string): PolishDif
       oi++;
       pi++;
       li++;
-    } else if (li >= lcs.length || oi >= origWords.length || origWords[oi] !== lcs[li]) {
+    } else if (
+      li >= lcs.length ||
+      oi >= origWords.length ||
+      origWords[oi] !== lcs[li]
+    ) {
       // Check if current polished word is in LCS
-      if (
-        li < lcs.length &&
-        pi < polWords.length &&
-        polWords[pi] !== lcs[li]
-      ) {
+      if (li < lcs.length && pi < polWords.length && polWords[pi] !== lcs[li]) {
         // Both sides differ from LCS — remove from original, add from polished
         pushChange(changes, "removed", origWords[oi]!);
         oi++;
-      } else if (pi < polWords.length && (li >= lcs.length || polWords[pi] !== lcs[li])) {
+      } else if (
+        pi < polWords.length &&
+        (li >= lcs.length || polWords[pi] !== lcs[li])
+      ) {
         pushChange(changes, "added", polWords[pi]!);
         pi++;
       } else if (oi < origWords.length) {
@@ -67,7 +73,11 @@ export function computePolishDiff(original: string, polished: string): PolishDif
   return { original, polished, changes };
 }
 
-function pushChange(changes: DiffChange[], type: DiffChange["type"], word: string): void {
+function pushChange(
+  changes: DiffChange[],
+  type: DiffChange["type"],
+  word: string,
+): void {
   const last = changes[changes.length - 1];
   if (last && last.type === type) {
     last.text += ` ${word}`;

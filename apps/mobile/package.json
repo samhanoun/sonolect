@@ -8,7 +8,7 @@
     "build": "echo \"Use EAS build for mobile\"",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm dlx tsx@4.19.2 --test src/localApi.test.ts src/audioCapture.test.ts src/stylePresets.test.ts src/polishPreview.test.ts src/dictionaryCrud.test.ts src/snippetCrud.test.ts src/searchAndFilter.test.ts src/retentionControls.test.ts"
+    "test": "pnpm dlx tsx@4.19.2 --test src/localApi.test.ts src/audioCapture.test.ts src/stylePresets.test.ts src/polishPreview.test.ts src/dictionaryCrud.test.ts src/snippetCrud.test.ts src/searchAndFilter.test.ts src/retentionControls.test.ts src/store.test.ts"
   },
   "dependencies": {
     "@sonolect/types": "workspace:*",

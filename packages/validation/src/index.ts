@@ -1,5 +1,17 @@
 import { z } from "zod";
 
+export {
+  sanitizeHtml,
+  sanitizeFilePath,
+  sanitizeTranscriptText,
+  validateApiInput,
+} from "./sanitize";
+export type {
+  ValidationResult,
+  ValidationSuccess,
+  ValidationFailure,
+} from "./sanitize";
+
 export const sonolectModeSchema = z.enum([
   "dictate",
   "rewrite",

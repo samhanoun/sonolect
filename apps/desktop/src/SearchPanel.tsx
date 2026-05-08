@@ -52,19 +52,24 @@ export function SearchPanel({ history, onSelectResult }: SearchPanelProps) {
   const hasQuery = query.trim().length > 0;
 
   return (
-    <section className="glass-card management-panel">
+    <section
+      className="glass-card management-panel"
+      aria-labelledby="search-heading"
+    >
       <p className="section-title">{t("search.sectionTitle")}</p>
-      <h3>{t("search.subtitle")}</h3>
+      <h3 id="search-heading">{t("search.subtitle")}</h3>
 
-      <input
-        className="search-input"
-        type="text"
-        placeholder={t("search.placeholder")}
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        aria-label={t("search.ariaLabel")}
-        autoFocus
-      />
+      <div role="search" aria-label={t("search.ariaLabel")}>
+        <input
+          className="search-input"
+          type="text"
+          placeholder={t("search.placeholder")}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label={t("search.ariaLabel")}
+          autoFocus
+        />
+      </div>
 
       <div className="form-grid two" style={{ marginTop: "0.75rem" }}>
         <label>
@@ -111,13 +116,19 @@ export function SearchPanel({ history, onSelectResult }: SearchPanelProps) {
         </label>
       </div>
 
-      <div className="preference-list" style={{ marginTop: "1rem" }}>
+      <div
+        className="preference-list"
+        role="list"
+        aria-label={t("search.sectionTitle")}
+        aria-live="polite"
+        style={{ marginTop: "1rem" }}
+      >
         {hasQuery && searchResults.length === 0 ? (
-          <p className="editor-meta">{t("search.noResults", { query })}</p>
+          <p className="editor-meta" role="status">
+            {t("search.noResults", { query })}
+          </p>
         ) : null}
-        {!hasQuery ? (
-          <p className="editor-meta">{t("search.prompt")}</p>
-        ) : null}
+        {!hasQuery ? <p className="editor-meta">{t("search.prompt")}</p> : null}
         {searchResults.map((result: SearchResult) => (
           <article
             className="preference-row"
@@ -129,24 +140,32 @@ export function SearchPanel({ history, onSelectResult }: SearchPanelProps) {
             role="button"
             tabIndex={0}
             style={{ cursor: "pointer" }}
+            aria-label={`${result.title} — ${result.matchCount} ${result.matchCount === 1 ? t("search.matchCountSingular") : t("search.matchCountPlural")}`}
           >
             <div>
               <strong
                 dangerouslySetInnerHTML={{
-                  __html: highlightMatches(result.title, query)
-                    .replace(/\*\*(.+?)\*\*/g, "<mark>$1</mark>"),
+                  __html: highlightMatches(result.title, query).replace(
+                    /\*\*(.+?)\*\*/g,
+                    "<mark>$1</mark>",
+                  ),
                 }}
               />
               <p
                 className="editor-meta"
                 dangerouslySetInnerHTML={{
-                  __html: highlightMatches(result.snippet, query)
-                    .replace(/\*\*(.+?)\*\*/g, "<mark>$1</mark>"),
+                  __html: highlightMatches(result.snippet, query).replace(
+                    /\*\*(.+?)\*\*/g,
+                    "<mark>$1</mark>",
+                  ),
                 }}
               />
             </div>
             <span className="editor-meta">
-              {result.matchCount} {result.matchCount === 1 ? t("search.matchCountSingular") : t("search.matchCountPlural")}
+              {result.matchCount}{" "}
+              {result.matchCount === 1
+                ? t("search.matchCountSingular")
+                : t("search.matchCountPlural")}
             </span>
           </article>
         ))}

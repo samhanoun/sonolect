@@ -103,6 +103,7 @@ describe("desktop voice API client", () => {
     assert.deepEqual(result, {
       status: "completed",
       transcript: "Bonjour Sonolect",
+      language: "fr",
       message: "Capture transcrite localement avec Whisper desktop.",
       segments: [
         {

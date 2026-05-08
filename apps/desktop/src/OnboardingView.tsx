@@ -52,14 +52,29 @@ export function OnboardingView({
 
   if (finished) {
     return (
-      <section className="glass-card management-panel">
+      <section
+        className="glass-card management-panel"
+        aria-labelledby="onboarding-heading-done"
+      >
         <p className="section-title">{t("onboarding.sectionTitle")}</p>
-        <h3>{t("onboarding.readyTitle")}</h3>
+        <h3 id="onboarding-heading-done">{t("onboarding.readyTitle")}</h3>
         <p>{t("onboarding.readyDescription")}</p>
-        <div className="setup-progress">
+        <div
+          className="setup-progress"
+          role="progressbar"
+          aria-valuenow={100}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={t("onboarding.sectionTitle")}
+        >
           <span style={{ width: "100%" }} />
         </div>
-        <p className="editor-meta" style={{ marginTop: "1rem" }}>
+        <p
+          className="editor-meta"
+          role="status"
+          aria-live="polite"
+          style={{ marginTop: "1rem" }}
+        >
           {progress.completed}/{progress.total} {t("onboarding.stepsCompleted")}
         </p>
       </section>
@@ -67,16 +82,32 @@ export function OnboardingView({
   }
 
   return (
-    <section className="glass-card management-panel">
+    <section
+      className="glass-card management-panel"
+      aria-labelledby="onboarding-heading"
+    >
       <p className="section-title">{t("onboarding.sectionTitle")}</p>
-      <h3>{t("onboarding.setupTitle")}</h3>
+      <h3 id="onboarding-heading">{t("onboarding.setupTitle")}</h3>
 
-      <div className="setup-progress">
+      <div
+        className="setup-progress"
+        role="progressbar"
+        aria-valuenow={progress.percentage}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={t("onboarding.sectionTitle")}
+      >
         <span style={{ width: `${progress.percentage}%` }} />
       </div>
-      <p className="editor-meta" style={{ marginBottom: "1rem" }}>
-        Step {wizard.currentStepIndex + 1} {t("onboarding.stepOf")} {wizard.steps.length} ·{" "}
-        {progress.percentage}% {t("onboarding.percentComplete")}
+      <p
+        className="editor-meta"
+        role="status"
+        aria-live="polite"
+        style={{ marginBottom: "1rem" }}
+      >
+        Step {wizard.currentStepIndex + 1} {t("onboarding.stepOf")}{" "}
+        {wizard.steps.length} · {progress.percentage}%{" "}
+        {t("onboarding.percentComplete")}
       </p>
 
       {currentStep ? (
@@ -116,7 +147,12 @@ export function OnboardingView({
         </div>
       ) : null}
 
-      <div className="preference-list" style={{ marginTop: "1rem" }}>
+      <div
+        className="preference-list"
+        role="list"
+        aria-label={t("onboarding.sectionTitle")}
+        style={{ marginTop: "1rem" }}
+      >
         {wizard.steps.map((step, i) => {
           const done = wizard.completed.has(step.id);
           const skipped = wizard.skipped.has(step.id);
@@ -125,10 +161,16 @@ export function OnboardingView({
             <div
               className={`preference-row${active ? " check-row" : ""}`}
               key={step.id}
+              role="listitem"
+              aria-current={active ? "step" : undefined}
             >
               <div>
                 <strong>
-                  {done ? `${t("onboarding.donePrefix")} ` : skipped ? `${t("onboarding.skippedPrefix")} ` : ""}
+                  {done
+                    ? `${t("onboarding.donePrefix")} `
+                    : skipped
+                      ? `${t("onboarding.skippedPrefix")} `
+                      : ""}
                   {step.title}
                 </strong>
                 <p className="editor-meta">{step.description}</p>

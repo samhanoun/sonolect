@@ -92,9 +92,17 @@ export function FloatingRecorderOverlay({
         className="floating-recorder floating-recorder--pill"
         role="status"
         aria-label="Floating recorder (minimized)"
+        aria-live="polite"
         onClick={onMinimize}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onMinimize();
+          }
+        }}
+        tabIndex={0}
       >
-        <span className="floating-recorder__status-dot" />
+        <span className="floating-recorder__status-dot" aria-hidden="true" />
         <span className="floating-recorder__timer">{timer}</span>
       </div>
     );
@@ -107,8 +115,12 @@ export function FloatingRecorderOverlay({
       aria-label="Floating recorder"
     >
       <div className="floating-recorder__header">
-        <span className="floating-recorder__label">{label}</span>
-        <span className="floating-recorder__timer">{timer}</span>
+        <span className="floating-recorder__label" aria-live="polite">
+          {label}
+        </span>
+        <span className="floating-recorder__timer" aria-live="off">
+          {timer}
+        </span>
         <button
           className="floating-recorder__btn floating-recorder__btn--minimize"
           aria-label="Minimize recorder"
@@ -121,6 +133,7 @@ export function FloatingRecorderOverlay({
       {recordingState === "recording" && (
         <div
           className="floating-recorder__waveform"
+          role="img"
           aria-label="Waveform visualization"
         >
           {barHeights.map((height, index) => (
@@ -134,7 +147,10 @@ export function FloatingRecorderOverlay({
       )}
 
       {recordingState === "previewing" && polishedPreview !== null && (
-        <div className="floating-recorder__preview" aria-label="Polished preview">
+        <div
+          className="floating-recorder__preview"
+          aria-label="Polished preview"
+        >
           {polishedPreview}
         </div>
       )}

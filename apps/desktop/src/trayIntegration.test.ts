@@ -16,8 +16,9 @@ describe("tray integration", () => {
   it("builds a tray menu with the expected items in order", () => {
     const menu = buildTrayMenu();
     const ids = menu
-      .filter((item): item is Extract<TrayMenuItem, { kind: "action" }> =>
-        item.kind === "action",
+      .filter(
+        (item): item is Extract<TrayMenuItem, { kind: "action" }> =>
+          item.kind === "action",
       )
       .map((item) => item.id);
     assert.deepEqual(ids, [

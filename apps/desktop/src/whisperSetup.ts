@@ -16,6 +16,20 @@ export type WhisperModelCatalogEntry = {
 
 export type WhisperInstallPlatform = "darwin" | "linux" | "win32";
 
+export type WhisperInstallGuide = {
+  platform: WhisperInstallPlatform;
+  whisperCppUrl: string;
+  modelDownloadUrl: string;
+  installCommands: string[];
+  verifyCommand: string;
+};
+
+export type WhisperModelValidation = {
+  exists: boolean;
+  sizeOk: boolean;
+  formatOk: boolean;
+};
+
 export type WhisperInstallPlanInput = {
   platform: WhisperInstallPlatform;
   homeDir: string;
@@ -320,6 +334,94 @@ export function getWhisperAssetStatus(
   };
 }
 
+export function getDefaultModelPath(
+  platform: WhisperInstallPlatform,
+  homeDir: string,
+): string {
+  const home = homeDir.replace(/\\/g, "/").replace(/\/+$/g, "");
+  switch (platform) {
+    case "darwin":
+      return joinPath(
+        home,
+        "Library",
+        "Application Support",
+        "sonolect",
+        "models",
+      );
+    case "win32":
+      return joinPath(home, "AppData", "Roaming", "sonolect", "models");
+    case "linux":
+    default:
+      return joinPath(home, ".local", "share", "sonolect", "models");
+  }
+}
+
+const WHISPER_CPP_URL = "https://github.com/ggerganov/whisper.cpp";
+const MODEL_DOWNLOAD_BASE =
+  "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin";
+
+export function getWhisperInstallInstructions(
+  platform: WhisperInstallPlatform,
+): WhisperInstallGuide {
+  const installCommands: string[] = [];
+  let verifyCommand: string;
+
+  switch (platform) {
+    case "darwin":
+      installCommands.push(
+        "brew install whisper-cpp",
+        "# Or build from source:",
+        `git clone ${WHISPER_CPP_URL}`,
+        "cd whisper.cpp && make",
+      );
+      verifyCommand = "whisper-cli --help";
+      break;
+    case "win32":
+      installCommands.push(
+        "winget install ggerganov.whisper-cpp",
+        "# Or with scoop:",
+        "scoop install whisper-cpp",
+        "# Or build from source:",
+        `git clone ${WHISPER_CPP_URL}`,
+        "cd whisper.cpp && cmake -B build && cmake --build build --config Release",
+      );
+      verifyCommand = "whisper-cli.exe --help";
+      break;
+    case "linux":
+    default:
+      installCommands.push(
+        "sudo apt install -y build-essential",
+        `git clone ${WHISPER_CPP_URL}`,
+        "cd whisper.cpp && make",
+        "sudo cp main /usr/local/bin/whisper-cli",
+      );
+      verifyCommand = "whisper-cli --help";
+      break;
+  }
+
+  return {
+    platform,
+    whisperCppUrl: WHISPER_CPP_URL,
+    modelDownloadUrl: MODEL_DOWNLOAD_BASE,
+    installCommands,
+    verifyCommand,
+  };
+}
+
+/** Minimum expected model file size in bytes (1 MB). */
+const MIN_MODEL_SIZE = 1_000_000;
+
+export function validateModelFile(
+  fileStats: { exists: boolean; sizeBytes: number; path: string } | null,
+): WhisperModelValidation {
+  if (!fileStats || !fileStats.exists) {
+    return { exists: false, sizeOk: false, formatOk: false };
+  }
+  const sizeOk = fileStats.sizeBytes >= MIN_MODEL_SIZE;
+  const formatOk = /\.bin$/i.test(fileStats.path);
+  return { exists: true, sizeOk, formatOk };
+}
+
 export function buildWhisperInstallerGuidance(
   plan: WhisperInstallPlan,
 ): WhisperInstallerGuidance {
@@ -348,7 +450,7 @@ export function buildWhisperCommandPreview(
   input: Partial<WhisperConfig>,
 ): string {
   const config = normalizeWhisperConfig(input);
-  const model = config.modelPath || config.modelName || "/path/to/model.bin";
+  const model = config.modelPath || config.modelName || "<model-path>";
   return config.command
     .map((arg) =>
       replaceToken(

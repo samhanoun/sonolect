@@ -25,6 +25,7 @@ export type TranscriptJobResult = {
   jobId?: string;
   transcript?: string;
   segments?: TranscriptSegment[];
+  language?: string;
   status: "submitted" | "completed" | "offline";
   message?: string;
 };
@@ -79,6 +80,7 @@ export async function submitCapturedAudio(
       status: "completed",
       transcript: desktopResult.text.trim(),
       segments: desktopResult.segments,
+      ...(desktopResult.language ? { language: desktopResult.language } : {}),
       message: "Capture transcrite localement avec Whisper desktop.",
     };
   }
