@@ -239,6 +239,104 @@ export const en = {
   "audio.recentCapture": "Recent capture",
   "audio.playPause": "Play or pause audio",
   "audio.waveform": "Audio waveform",
+
+  // Dictionary view
+  "dictionary.sectionTitle": "Personal dictionary",
+  "dictionary.subtitle": "Teach Sonolect names, products, and spellings",
+  "dictionary.description":
+    "These replacements are applied during the Wispr-style polished preview before you copy text into another app.",
+  "dictionary.searchPlaceholder": "Search dictionary entries…",
+  "dictionary.searchAriaLabel": "Search dictionary",
+  "dictionary.whenISay": "When I say",
+  "dictionary.write": "Write",
+  "dictionary.addEntry": "Add dictionary entry",
+  "dictionary.importCsv": "Import CSV",
+  "dictionary.exportCsv": "Export CSV",
+  "dictionary.entryCountSingular": "entry",
+  "dictionary.entryCountPlural": "entries",
+  "dictionary.emptyState": "No dictionary entries yet.",
+  "dictionary.noMatch": "No entries match your search.",
+  "dictionary.editSpokenAriaLabel": "Edit spoken form",
+  "dictionary.editReplacementAriaLabel": "Edit replacement",
+  "dictionary.save": "Save",
+  "dictionary.cancel": "Cancel",
+  "dictionary.remove": "Remove",
+
+  // Snippet view
+  "snippets.sectionTitle": "Snippet library",
+  "snippets.subtitle": "Expand voice shortcuts while dictating",
+  "snippets.description":
+    "Say or type a trigger like /sig and Sonolect expands it in the polished preview.",
+  "snippets.searchPlaceholder": "Search snippets…",
+  "snippets.searchAriaLabel": "Search snippets",
+  "snippets.trigger": "Trigger",
+  "snippets.expansion": "Expansion",
+  "snippets.addSnippet": "Add snippet",
+  "snippets.importCsv": "Import CSV",
+  "snippets.exportCsv": "Export CSV",
+  "snippets.snippetCountSingular": "snippet",
+  "snippets.snippetCountPlural": "snippets",
+  "snippets.emptyState": "No snippets yet.",
+  "snippets.noMatch": "No snippets match your search.",
+  "snippets.editTriggerAriaLabel": "Edit trigger",
+  "snippets.editBodyAriaLabel": "Edit body",
+  "snippets.save": "Save",
+  "snippets.cancel": "Cancel",
+  "snippets.remove": "Remove",
+
+  // Onboarding view
+  "onboarding.sectionTitle": "First-run setup",
+  "onboarding.readyTitle": "Sonolect is ready for dictation",
+  "onboarding.readyDescription":
+    "All onboarding steps are complete. You can re-run setup anytime from the sidebar.",
+  "onboarding.stepsCompleted": "steps completed",
+  "onboarding.setupTitle": "Complete setup before relying on dictation",
+  "onboarding.stepOf": "of",
+  "onboarding.percentComplete": "complete",
+  "onboarding.back": "Back",
+  "onboarding.skip": "Skip",
+  "onboarding.complete": "Complete",
+  "onboarding.donePrefix": "[done]",
+  "onboarding.skippedPrefix": "[skipped]",
+
+  // Search panel
+  "search.sectionTitle": "Search transcripts",
+  "search.subtitle": "Find past dictations by content",
+  "search.placeholder": "Search transcripts…",
+  "search.ariaLabel": "Search transcripts",
+  "search.fromDate": "From date",
+  "search.toDate": "To date",
+  "search.minDuration": "Min duration (minutes)",
+  "search.sortBy": "Sort by",
+  "search.sortRelevance": "Relevance",
+  "search.sortDate": "Date",
+  "search.sortDuration": "Duration",
+  "search.noResults": "No results for \"{query}\".",
+  "search.prompt": "Type a search query to find matching transcripts.",
+  "search.matchCountSingular": "match",
+  "search.matchCountPlural": "matches",
+
+  // Style preset selector
+  "stylePreset.label": "Style:",
+
+  // Retention settings
+  "retention.title": "Data Retention",
+  "retention.description":
+    "Control how long transcript history is kept and how many items are stored.",
+  "retention.totalItems": "Total items",
+  "retention.withinPolicy": "Within policy",
+  "retention.expiringSoon": "Expiring soon",
+  "retention.expired": "Expired",
+  "retention.maxAgeDays": "Max age (days)",
+  "retention.maxItems": "Max items",
+  "retention.autoDelete": "Auto-delete",
+  "retention.autoDeleteDescription":
+    "Automatically remove expired transcripts when the app starts.",
+  "retention.confirmPurge": "Confirm purge",
+  "retention.purgeNow": "Purge now",
+  "retention.cancel": "Cancel",
+  "retention.expiredItemsSingular": "expired item can be purged",
+  "retention.expiredItemsPlural": "expired items can be purged",
 } as const;
 
 export type LocaleKeys = keyof typeof en;

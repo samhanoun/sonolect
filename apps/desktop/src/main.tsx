@@ -78,6 +78,42 @@ import {
   isTauriRuntime,
   registerNativeDictationShortcuts,
 } from "./desktopNative";
+import { DEFAULT_COMMANDS, searchCommands } from "./commandRegistry";
+import type { Command } from "./commandRegistry";
+import { getStylePresets, applyStylePreset } from "./stylePresets";
+import { computePolishDiff, formatDiffSummary } from "./polishPreview";
+import {
+  addEntry as dictAddEntry,
+  removeEntry as dictRemoveEntry,
+  updateEntry as dictUpdateEntry,
+  saveDictionary,
+} from "./dictionaryCrud";
+import {
+  addSnippet as snippetAddSnippet,
+  removeSnippet as snippetRemoveSnippet,
+  updateSnippet as snippetUpdateSnippet,
+  saveSnippets as snippetSaveSnippets,
+} from "./snippetCrud";
+import {
+  searchTranscripts,
+  filterHistory,
+  type SearchResult,
+  type HistoryFilter,
+} from "./searchAndFilter";
+import {
+  loadRetentionPolicy,
+  saveRetentionPolicy,
+  applyRetentionPolicy,
+  type RetentionPolicy,
+  DEFAULT_RETENTION_POLICY,
+} from "./retentionControls";
+import { FloatingRecorderOverlay } from "./FloatingRecorder";
+import { DictionaryView } from "./DictionaryView";
+import { SnippetView } from "./SnippetView";
+import { OnboardingView } from "./OnboardingView";
+import { SearchPanel } from "./SearchPanel";
+import { StylePresetSelector } from "./StylePresetSelector";
+import { RetentionSettings } from "./RetentionSettings";
 import "./styles.css";
 
 type PrivacyLevel = "local" | "cloud";
@@ -88,7 +124,7 @@ type RecordingState =
   | "uploading"
   | "completed"
   | "error";
-type ViewId = "home" | "settings" | "dictionary" | "snippets" | "onboarding";
+type ViewId = "home" | "settings" | "dictionary" | "snippets" | "onboarding" | "search";
 
 type VoiceCaptureResult = VoiceCaptureMetadata & {
   objectUrl: string;
@@ -125,6 +161,29 @@ type DesktopState = {
   dictionaryEntries: DictionaryEntry[];
   snippets: Snippet[];
   onboardingChecklist: OnboardingChecklist;
+  activeStylePreset: string;
+  searchQuery: string;
+  searchResults: SearchResult[];
+  historyFilter: HistoryFilter;
+  retentionPolicy: RetentionPolicy;
+  showFloatingRecorder: boolean;
+  dictionarySearch: string;
+  snippetSearch: string;
+  setActiveStylePreset: (id: string) => void;
+  setSearchQuery: (query: string) => void;
+  setHistoryFilter: (filter: HistoryFilter) => void;
+  setRetentionPolicy: (policy: RetentionPolicy) => void;
+  purgeExpiredTranscripts: () => void;
+  setDictionarySearch: (q: string) => void;
+  setSnippetSearch: (q: string) => void;
+  updateDictionaryEntry: (
+    id: string,
+    updates: Partial<Omit<DictionaryEntry, "id">>,
+  ) => void;
+  updateSnippetEntry: (
+    id: string,
+    updates: Partial<Omit<Snippet, "id">>,
+  ) => void;
   locale: SupportedLocale;
   setLocale: (locale: SupportedLocale) => void;
   sttLanguage: string;
@@ -379,6 +438,14 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
   onboardingChecklist: loadOnboardingChecklist(),
   transforming: false,
   toasts: [],
+  activeStylePreset: "custom",
+  searchQuery: "",
+  searchResults: [],
+  historyFilter: {},
+  retentionPolicy: loadRetentionPolicy(),
+  showFloatingRecorder: false,
+  dictionarySearch: "",
+  snippetSearch: "",
   locale:
     (loadSettings(SETTINGS_KEYS.locale) as SupportedLocale) ||
     useI18nStore.getState().locale,
@@ -397,6 +464,65 @@ const useDesktopStore = create<DesktopState>((set, get) => ({
     saveSettings(SETTINGS_KEYS.whisperConfig, serializeWhisperConfig(config));
     set({ whisperConfig: config });
   },
+  setActiveStylePreset: (id) =>
+    set((state) => {
+      const styled = applyStylePreset(state.transcript, id);
+      return {
+        activeStylePreset: id,
+        polishedPreview: styled,
+      };
+    }),
+  setSearchQuery: (query) =>
+    set((state) => ({
+      searchQuery: query,
+      searchResults: searchTranscripts(state.transcriptHistory, query),
+    })),
+  setHistoryFilter: (filter) => set({ historyFilter: filter }),
+  setRetentionPolicy: (policy) => {
+    saveRetentionPolicy(policy);
+    set({ retentionPolicy: policy });
+  },
+  purgeExpiredTranscripts: () =>
+    set((state) => {
+      const result = applyRetentionPolicy(
+        state.transcriptHistory,
+        state.retentionPolicy,
+      );
+      const remaining = state.transcriptHistory.filter(
+        (row) => !result.freedItems.includes(row.id),
+      );
+      return { transcriptHistory: remaining };
+    }),
+  setDictionarySearch: (q) => set({ dictionarySearch: q }),
+  setSnippetSearch: (q) => set({ snippetSearch: q }),
+  updateDictionaryEntry: (id, updates) =>
+    set((state) => {
+      const dictionaryEntries = dictUpdateEntry(
+        state.dictionaryEntries,
+        id,
+        updates,
+      );
+      saveDictionary(dictionaryEntries);
+      return {
+        dictionaryEntries,
+        polishedPreview: polishDictation(state.transcript, {
+          dictionary: dictionaryEntries,
+          snippets: state.snippets,
+        }),
+      };
+    }),
+  updateSnippetEntry: (id, updates) =>
+    set((state) => {
+      const snippets = snippetUpdateSnippet(state.snippets, id, updates);
+      snippetSaveSnippets(snippets);
+      return {
+        snippets,
+        polishedPreview: polishDictation(state.transcript, {
+          dictionary: state.dictionaryEntries,
+          snippets,
+        }),
+      };
+    }),
   setCommandOpen: (open) => set({ commandOpen: open }),
   toggleRecording: () => {
     const {
@@ -1101,6 +1227,10 @@ function App() {
     });
   }, [activeSessionId, transcript, transcriptSegments, selectedSegmentIds]);
 
+  const recordingState = useDesktopStore((state) => state.recordingState);
+  const polishedPreview = useDesktopStore((state) => state.polishedPreview);
+  const showFloatingRecorder = recordingState === "recording";
+
   return (
     <main className="desktop-shell">
       <div className="ambient-grid" aria-hidden="true" />
@@ -1108,6 +1238,21 @@ function App() {
       <Sidebar />
       <WorkspaceRouter />
       <VoiceRecorderPill />
+      {showFloatingRecorder ? (
+        <FloatingRecorderOverlay
+          recordingState="recording"
+          durationMs={0}
+          waveformPeaks={Array.from({ length: 24 }, () => 0.4)}
+          polishedPreview={polishedPreview || null}
+          minimized={false}
+          onCancel={() => useDesktopStore.getState().stopVoiceCapture()}
+          onFinish={() => useDesktopStore.getState().stopVoiceCapture()}
+          onInsert={() =>
+            void useDesktopStore.getState().insertPolishedDictation()
+          }
+          onMinimize={() => {}}
+        />
+      ) : null}
       {commandOpen ? <CommandPalette /> : null}
       <ToastContainer />
     </main>
@@ -1121,6 +1266,17 @@ function WorkspaceRouter() {
   const activeSessionId = useDesktopStore((state) => state.activeSessionId);
   const t = useT();
 
+  const dictionaryEntries = useDesktopStore(
+    (state) => state.dictionaryEntries,
+  );
+  const snippets = useDesktopStore((state) => state.snippets);
+  const checklist = useDesktopStore((state) => state.onboardingChecklist);
+  const transcriptHistory = useDesktopStore(
+    (state) => state.transcriptHistory,
+  );
+  const dictionarySearch = useDesktopStore((state) => state.dictionarySearch);
+  const snippetSearch = useDesktopStore((state) => state.snippetSearch);
+
   return (
     <section className="workspace" aria-label={t("workspace.ariaLabel")}>
       <TopBar />
@@ -1130,15 +1286,61 @@ function WorkspaceRouter() {
         </div>
       ) : activeView === "dictionary" ? (
         <div className="workspace-grid">
-          <DictionaryPanel />
+          <DictionaryView
+            entries={dictionaryEntries}
+            onAdd={(spoken, replacement) =>
+              useDesktopStore.getState().addDictionaryEntry(spoken, replacement)
+            }
+            onRemove={(id) =>
+              useDesktopStore.getState().removeDictionaryEntry(id)
+            }
+            onUpdate={(id, updates) =>
+              useDesktopStore.getState().updateDictionaryEntry(id, updates)
+            }
+            searchQuery={dictionarySearch}
+            onSearchChange={(q) =>
+              useDesktopStore.getState().setDictionarySearch(q)
+            }
+          />
         </div>
       ) : activeView === "snippets" ? (
         <div className="workspace-grid">
-          <SnippetsPanel />
+          <SnippetView
+            snippets={snippets}
+            onAdd={(trigger, body) =>
+              useDesktopStore.getState().addSnippet(trigger, body)
+            }
+            onRemove={(id) => useDesktopStore.getState().removeSnippet(id)}
+            onUpdate={(id, updates) =>
+              useDesktopStore.getState().updateSnippetEntry(id, updates)
+            }
+            searchQuery={snippetSearch}
+            onSearchChange={(q) =>
+              useDesktopStore.getState().setSnippetSearch(q)
+            }
+          />
         </div>
       ) : activeView === "onboarding" ? (
         <div className="workspace-grid">
-          <OnboardingPanel />
+          <OnboardingView
+            checklist={checklist}
+            onComplete={(step) =>
+              useDesktopStore.getState().setOnboardingStep(step, true)
+            }
+            onSkip={(step) =>
+              useDesktopStore.getState().setOnboardingStep(step, true)
+            }
+          />
+        </div>
+      ) : activeView === "search" ? (
+        <div className="workspace-grid">
+          <SearchPanel
+            history={transcriptHistory}
+            onSelectResult={(id) => {
+              useDesktopStore.getState().setActiveView("home");
+              void useDesktopStore.getState().selectTranscriptSession(id);
+            }}
+          />
         </div>
       ) : activeSessionId ? (
         <div className="workspace-grid">
@@ -1163,6 +1365,7 @@ function Sidebar() {
 
   const navItems: Array<{ id: ViewId; labelKey: LocaleKeys }> = [
     { id: "home", labelKey: "nav.home" },
+    { id: "search", labelKey: "nav.history" },
     { id: "onboarding", labelKey: "nav.onboarding" },
     { id: "dictionary", labelKey: "nav.dictionary" },
     { id: "snippets", labelKey: "nav.snippets" },
@@ -1806,6 +2009,11 @@ function TranscriptDetail() {
         </div>
       </section>
 
+      <StylePresetSelector
+        currentPresetId={useDesktopStore.getState().activeStylePreset}
+        onSelect={(id) => useDesktopStore.getState().setActiveStylePreset(id)}
+      />
+
       <section
         className="polish-preview-card"
         aria-label="Wispr-style polished preview"
@@ -2405,6 +2613,14 @@ function SettingsPrivacy() {
         </>
       ) : null}
       {diagnostic ? <p role="status">{diagnostic}</p> : null}
+      <RetentionSettings
+        history={useDesktopStore.getState().transcriptHistory}
+        policy={useDesktopStore.getState().retentionPolicy}
+        onPolicyChange={(policy) =>
+          useDesktopStore.getState().setRetentionPolicy(policy)
+        }
+        onPurge={() => useDesktopStore.getState().purgeExpiredTranscripts()}
+      />
     </section>
   );
 }
@@ -2566,67 +2782,49 @@ function CommandPalette() {
   const t = useT();
   const [search, setSearch] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
-  const commands: Array<{
-    label: string;
-    hint: string;
-    action: () => void;
-  }> = [
-    {
-      label: t("palette.newCapture"),
-      hint: t("palette.newCaptureHint"),
-      action: () => useDesktopStore.getState().toggleRecording(),
+
+  const commandActionMap: Record<string, () => void> = {
+    "recording:start": () => useDesktopStore.getState().toggleRecording(),
+    "recording:stop": () => useDesktopStore.getState().stopVoiceCapture(),
+    "recording:ptt": () => useDesktopStore.getState().toggleRecording(),
+    "editing:undo": () => useDesktopStore.getState().undoTranscriptEdit(),
+    "editing:redo": () => useDesktopStore.getState().redoTranscriptEdit(),
+    "editing:transform": () =>
+      useDesktopStore.getState().transformTranscript(),
+    "editing:style": () => setActiveView("settings"),
+    "editing:copy": () =>
+      void navigator.clipboard.writeText(
+        useDesktopStore.getState().transcript,
+      ),
+    "editing:insert": () =>
+      void useDesktopStore.getState().insertPolishedDictation(),
+    "navigation:history": () => {
+      setActiveView("home");
+      clearActiveSession();
     },
-    {
-      label: "Copy polished dictation",
-      hint: "Clipboard fallback for the app you were using",
-      action: () => void useDesktopStore.getState().insertPolishedDictation(),
-    },
-    {
-      label: "Apply polished preview",
-      hint: "Replace raw transcript with cleaned text",
-      action: () => useDesktopStore.getState().applyPolishedPreview(),
-    },
-    {
-      label: "Open first-run setup",
-      hint: "Mic, shortcuts, Whisper, privacy",
-      action: () => setActiveView("onboarding"),
-    },
-    {
-      label: "Open dictionary",
-      hint: "Names, products, custom spelling",
-      action: () => setActiveView("dictionary"),
-    },
-    {
-      label: "Open snippets",
-      hint: "Voice shortcuts and expansions",
-      action: () => setActiveView("snippets"),
-    },
-    {
-      label: t("palette.openHistory"),
-      hint: t("palette.openHistoryHint"),
-      action: () => {
-        setActiveView("home");
-        clearActiveSession();
-      },
-    },
-    {
-      label: t("palette.privacySettings"),
-      hint: t("palette.privacySettingsHint"),
-      action: () => setActiveView("settings"),
-    },
-  ];
+    "navigation:dictionary": () => setActiveView("dictionary"),
+    "navigation:snippets": () => setActiveView("snippets"),
+    "navigation:settings": () => setActiveView("settings"),
+    "navigation:onboarding": () => setActiveView("onboarding"),
+    "export:markdown": () => {},
+    "export:srt": () => {},
+    "export:vtt": () => {},
+    "export:json": () => {},
+    "export:text": () => {},
+    "data:clearHistory": () => {},
+    "data:privacy": () => setActiveView("settings"),
+    "data:importDictionary": () => setActiveView("dictionary"),
+    "data:exportDictionary": () => setActiveView("dictionary"),
+  };
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  const filtered = commands.filter((cmd) => {
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    return (
-      cmd.label.toLowerCase().includes(q) || cmd.hint.toLowerCase().includes(q)
-    );
-  });
+  const filtered = useMemo(
+    () => searchCommands(DEFAULT_COMMANDS, search),
+    [search],
+  );
 
   return (
     <div
@@ -2657,14 +2855,22 @@ function CommandPalette() {
           ) : (
             filtered.map((command) => (
               <button
-                key={command.label}
+                key={command.id}
                 onClick={() => {
-                  command.action();
+                  const handler = commandActionMap[command.action];
+                  if (handler) handler();
                   setCommandOpen(false);
                 }}
                 type="button"
               >
-                <span>{command.label}</span>
+                <span>
+                  {command.label}
+                  {command.shortcut ? (
+                    <kbd style={{ marginLeft: "0.5rem", opacity: 0.5 }}>
+                      {command.shortcut}
+                    </kbd>
+                  ) : null}
+                </span>
                 <small>{command.hint}</small>
               </button>
             ))

@@ -245,4 +245,105 @@ export const fr: Record<LocaleKeys, string> = {
   "audio.recentCapture": "Capture récente",
   "audio.playPause": "Lire ou mettre en pause l'audio",
   "audio.waveform": "Forme d'onde audio",
+
+  // Dictionary view
+  "dictionary.sectionTitle": "Dictionnaire personnel",
+  "dictionary.subtitle":
+    "Apprenez à Sonolect vos noms, produits et orthographes",
+  "dictionary.description":
+    "Ces remplacements sont appliqués lors de l'aperçu poli style Wispr avant de copier le texte dans une autre application.",
+  "dictionary.searchPlaceholder": "Rechercher dans le dictionnaire…",
+  "dictionary.searchAriaLabel": "Rechercher dans le dictionnaire",
+  "dictionary.whenISay": "Quand je dis",
+  "dictionary.write": "Écrire",
+  "dictionary.addEntry": "Ajouter une entrée",
+  "dictionary.importCsv": "Importer CSV",
+  "dictionary.exportCsv": "Exporter CSV",
+  "dictionary.entryCountSingular": "entrée",
+  "dictionary.entryCountPlural": "entrées",
+  "dictionary.emptyState": "Aucune entrée dans le dictionnaire.",
+  "dictionary.noMatch": "Aucune entrée ne correspond à votre recherche.",
+  "dictionary.editSpokenAriaLabel": "Modifier la forme orale",
+  "dictionary.editReplacementAriaLabel": "Modifier le remplacement",
+  "dictionary.save": "Enregistrer",
+  "dictionary.cancel": "Annuler",
+  "dictionary.remove": "Supprimer",
+
+  // Snippet view
+  "snippets.sectionTitle": "Bibliothèque d'extraits",
+  "snippets.subtitle": "Développez vos raccourcis vocaux pendant la dictée",
+  "snippets.description":
+    "Dites ou tapez un déclencheur comme /sig et Sonolect le développe dans l'aperçu poli.",
+  "snippets.searchPlaceholder": "Rechercher des extraits…",
+  "snippets.searchAriaLabel": "Rechercher des extraits",
+  "snippets.trigger": "Déclencheur",
+  "snippets.expansion": "Expansion",
+  "snippets.addSnippet": "Ajouter un extrait",
+  "snippets.importCsv": "Importer CSV",
+  "snippets.exportCsv": "Exporter CSV",
+  "snippets.snippetCountSingular": "extrait",
+  "snippets.snippetCountPlural": "extraits",
+  "snippets.emptyState": "Aucun extrait pour le moment.",
+  "snippets.noMatch": "Aucun extrait ne correspond à votre recherche.",
+  "snippets.editTriggerAriaLabel": "Modifier le déclencheur",
+  "snippets.editBodyAriaLabel": "Modifier le contenu",
+  "snippets.save": "Enregistrer",
+  "snippets.cancel": "Annuler",
+  "snippets.remove": "Supprimer",
+
+  // Onboarding view
+  "onboarding.sectionTitle": "Configuration initiale",
+  "onboarding.readyTitle": "Sonolect est prêt pour la dictée",
+  "onboarding.readyDescription":
+    "Toutes les étapes de configuration sont terminées. Vous pouvez relancer la configuration à tout moment depuis la barre latérale.",
+  "onboarding.stepsCompleted": "étapes terminées",
+  "onboarding.setupTitle":
+    "Terminez la configuration avant d'utiliser la dictée",
+  "onboarding.stepOf": "sur",
+  "onboarding.percentComplete": "terminé",
+  "onboarding.back": "Retour",
+  "onboarding.skip": "Passer",
+  "onboarding.complete": "Terminer",
+  "onboarding.donePrefix": "[fait]",
+  "onboarding.skippedPrefix": "[ignoré]",
+
+  // Search panel
+  "search.sectionTitle": "Rechercher des transcriptions",
+  "search.subtitle": "Retrouvez vos dictées passées par contenu",
+  "search.placeholder": "Rechercher des transcriptions…",
+  "search.ariaLabel": "Rechercher des transcriptions",
+  "search.fromDate": "Date de début",
+  "search.toDate": "Date de fin",
+  "search.minDuration": "Durée minimale (minutes)",
+  "search.sortBy": "Trier par",
+  "search.sortRelevance": "Pertinence",
+  "search.sortDate": "Date",
+  "search.sortDuration": "Durée",
+  "search.noResults": "Aucun résultat pour « {query} ».",
+  "search.prompt":
+    "Saisissez une requête pour rechercher des transcriptions correspondantes.",
+  "search.matchCountSingular": "correspondance",
+  "search.matchCountPlural": "correspondances",
+
+  // Style preset selector
+  "stylePreset.label": "Style :",
+
+  // Retention settings
+  "retention.title": "Conservation des données",
+  "retention.description":
+    "Contrôlez la durée de conservation de l'historique des transcriptions et le nombre d'éléments stockés.",
+  "retention.totalItems": "Éléments au total",
+  "retention.withinPolicy": "Conformes à la politique",
+  "retention.expiringSoon": "Expiration prochaine",
+  "retention.expired": "Expirés",
+  "retention.maxAgeDays": "Âge max. (jours)",
+  "retention.maxItems": "Éléments max.",
+  "retention.autoDelete": "Suppression automatique",
+  "retention.autoDeleteDescription":
+    "Supprimer automatiquement les transcriptions expirées au démarrage de l'application.",
+  "retention.confirmPurge": "Confirmer la purge",
+  "retention.purgeNow": "Purger maintenant",
+  "retention.cancel": "Annuler",
+  "retention.expiredItemsSingular": "élément expiré peut être purgé",
+  "retention.expiredItemsPlural": "éléments expirés peuvent être purgés",
 };
