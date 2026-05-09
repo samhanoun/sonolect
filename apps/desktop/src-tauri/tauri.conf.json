@@ -10,7 +10,21 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "Sonolect", "width": 1200, "height": 800 }]
+    "windows": [
+      { "title": "Sonolect", "width": 1200, "height": 800 },
+      {
+        "label": "recorder",
+        "title": "Sonolect Recorder",
+        "width": 320,
+        "height": 80,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "transparent": true,
+        "resizable": false,
+        "visible": false,
+        "center": false
+      }
+    ]
   },
   "bundle": {
     "active": true,
