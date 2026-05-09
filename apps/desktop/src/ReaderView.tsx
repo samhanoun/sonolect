@@ -1,55 +1,19 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { useReaderStore } from "./readerStore";
-import type { ParsedDocument } from "./readerStore";
-
-type VoiceEntry = {
-  id: string;
-  name: string;
-  lang: string;
-  gender: "male" | "female" | "neutral";
-  provider: string;
-};
-
-let parseDocument: ((text: string, type: string) => ParsedDocument) | undefined;
-let detectDocumentType: ((fileName: string) => string) | undefined;
-let splitIntoSentences: ((text: string) => string[]) | undefined;
-let speakWithBrowserTts:
-  | ((
-      text: string,
-      opts: { voice?: string; rate?: number; onEnd?: () => void },
-    ) => void)
-  | undefined;
-let stopTts: (() => void) | undefined;
-let pauseTts: (() => void) | undefined;
-let resumeTts: (() => void) | undefined;
-let getAllVoices: (() => VoiceEntry[]) | undefined;
-let getVoicesForLanguage: ((lang: string) => VoiceEntry[]) | undefined;
-let findVoiceById: ((id: string) => VoiceEntry | undefined) | undefined;
-
-try {
-  const dp = require("./documentParser");
-  parseDocument = dp.parseDocument;
-  detectDocumentType = dp.detectDocumentType;
-  splitIntoSentences = dp.splitIntoSentences;
-} catch {}
-
-try {
-  const tts = require("./ttsEngine");
-  speakWithBrowserTts = tts.speakWithBrowserTts;
-  stopTts = tts.stopTts;
-  pauseTts = tts.pauseTts;
-  resumeTts = tts.resumeTts;
-} catch {}
-
-try {
-  const vc = require("./voiceCatalog");
-  getAllVoices = vc.getAllVoices;
-  getVoicesForLanguage = vc.getVoicesForLanguage;
-  findVoiceById = vc.findVoiceById;
-} catch {}
+import {
+  parseDocument,
+  detectDocumentType,
+  splitIntoSentences,
+} from "./documentParser";
+import { speakWithBrowserTts, stopTts, pauseTts, resumeTts } from "./ttsEngine";
+import {
+  getAllVoices,
+  getVoicesForLanguage,
+  findVoiceById,
+  type VoiceEntry,
+} from "./voiceCatalog";
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
-
 const ACCEPTED_TYPES = ".pdf,.docx,.doc,.md,.markdown,.txt";
 
 const COLORS = {
@@ -64,100 +28,6 @@ const COLORS = {
   border: "rgba(108, 92, 231, 0.3)",
   borderMuted: "rgba(136, 136, 136, 0.2)",
 };
-
-function fallbackParseDocument(text: string, _type: string): ParsedDocument {
-  const lines = text.split("\n").filter((l) => l.trim().length > 0);
-  const title = lines[0]?.slice(0, 80) || "Untitled";
-  const wordCount = text.split(/\s+/).filter(Boolean).length;
-  return {
-    title,
-    type: "text" as const,
-    content: text,
-    sections: [
-      {
-        id: "s0",
-        title: "",
-        content: text,
-        level: 0,
-        startIndex: 0,
-        endIndex: text.length,
-      },
-    ],
-    metadata: {
-      wordCount,
-      estimatedReadTimeMinutes: Math.ceil(wordCount / 200),
-    },
-    rawText: text,
-  };
-}
-
-function fallbackDetectType(fileName: string): string {
-  const ext = fileName.split(".").pop()?.toLowerCase() || "";
-  const map: Record<string, string> = {
-    pdf: "pdf",
-    docx: "docx",
-    doc: "doc",
-    md: "markdown",
-    markdown: "markdown",
-    txt: "text",
-  };
-  return map[ext] || "text";
-}
-
-function fallbackGetAllVoices(): VoiceEntry[] {
-  if (typeof window === "undefined" || !window.speechSynthesis) return [];
-  return window.speechSynthesis.getVoices().map((v, i) => ({
-    id: v.voiceURI || `voice-${i}`,
-    name: v.name,
-    lang: v.lang,
-    gender: "neutral" as const,
-    provider: v.localService ? "local" : "remote",
-  }));
-}
-
-function fallbackSpeakWithBrowserTts(
-  text: string,
-  opts: { voice?: string; rate?: number; onEnd?: () => void },
-) {
-  if (typeof window === "undefined" || !window.speechSynthesis) return;
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  if (opts.voice) {
-    const found = window.speechSynthesis
-      .getVoices()
-      .find((v) => v.voiceURI === opts.voice || v.name === opts.voice);
-    if (found) utterance.voice = found;
-  }
-  utterance.rate = opts.rate || 1;
-  utterance.onend = () => opts.onEnd?.();
-  window.speechSynthesis.speak(utterance);
-}
-
-function fallbackStopTts() {
-  if (typeof window !== "undefined" && window.speechSynthesis) {
-    window.speechSynthesis.cancel();
-  }
-}
-
-function fallbackPauseTts() {
-  if (typeof window !== "undefined" && window.speechSynthesis) {
-    window.speechSynthesis.pause();
-  }
-}
-
-function fallbackResumeTts() {
-  if (typeof window !== "undefined" && window.speechSynthesis) {
-    window.speechSynthesis.resume();
-  }
-}
-
-const _parseDocument = parseDocument || fallbackParseDocument;
-const _detectDocumentType = detectDocumentType || fallbackDetectType;
-const _speakWithBrowserTts = speakWithBrowserTts || fallbackSpeakWithBrowserTts;
-const _stopTts = stopTts || fallbackStopTts;
-const _pauseTts = pauseTts || fallbackPauseTts;
-const _resumeTts = resumeTts || fallbackResumeTts;
-const _getAllVoices = getAllVoices || fallbackGetAllVoices;
 
 function estimateRemainingTime(
   currentIndex: number,
@@ -176,7 +46,6 @@ export function ReaderView() {
   const store = useReaderStore();
   const sentenceRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const dropZoneRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [voiceSearch, setVoiceSearch] = useState("");
   const [voiceLangFilter, setVoiceLangFilter] = useState("all");
@@ -184,11 +53,7 @@ export function ReaderView() {
   const playingRef = useRef(false);
 
   useEffect(() => {
-    const load = () => setAvailableVoices(_getAllVoices());
-    load();
-    if (typeof window !== "undefined" && window.speechSynthesis) {
-      window.speechSynthesis.onvoiceschanged = load;
-    }
+    setAvailableVoices(getAllVoices());
   }, []);
 
   useEffect(() => {
@@ -200,9 +65,9 @@ export function ReaderView() {
 
   const handleFileRead = useCallback(
     async (file: File) => {
-      const text = await file.text();
-      const docType = _detectDocumentType(file.name);
-      const parsed = _parseDocument(text, docType);
+      const isText = /\.(txt|text|md|markdown)$/i.test(file.name);
+      const data = isText ? await file.text() : await file.arrayBuffer();
+      const parsed = await parseDocument(file.name, data);
       store.addDocument(file.name, parsed);
     },
     [store],
@@ -236,16 +101,30 @@ export function ReaderView() {
     setIsDragging(false);
   }, []);
 
+  const speakFrom = useCallback((index: number) => {
+    const s = useReaderStore.getState();
+    if (!playingRef.current || index >= s.sentences.length) {
+      useReaderStore.getState().updatePlaybackStatus("idle");
+      playingRef.current = false;
+      return;
+    }
+    s.setCurrentSentence(index);
+    const voice = findVoiceById(s.selectedVoiceId);
+    speakWithBrowserTts(s.sentences[index]!, voice?.name ?? "", s.speed, () =>
+      speakFrom(index + 1),
+    );
+  }, []);
+
   const handlePlay = useCallback(() => {
     if (store.playback.status === "speaking") {
-      _pauseTts();
+      pauseTts();
       store.updatePlaybackStatus("paused");
       playingRef.current = false;
       return;
     }
 
     if (store.playback.status === "paused") {
-      _resumeTts();
+      resumeTts();
       store.updatePlaybackStatus("speaking");
       playingRef.current = true;
       return;
@@ -255,27 +134,11 @@ export function ReaderView() {
 
     playingRef.current = true;
     store.updatePlaybackStatus("speaking");
-
-    const speakSentence = (index: number) => {
-      if (!playingRef.current || index >= store.sentences.length) {
-        store.updatePlaybackStatus("idle");
-        playingRef.current = false;
-        return;
-      }
-      const currentStore = useReaderStore.getState();
-      currentStore.setCurrentSentence(index);
-      _speakWithBrowserTts(currentStore.sentences[index]!, {
-        voice: currentStore.selectedVoiceId,
-        rate: currentStore.speed,
-        onEnd: () => speakSentence(index + 1),
-      });
-    };
-
-    speakSentence(store.currentSentenceIndex);
-  }, [store]);
+    speakFrom(store.currentSentenceIndex);
+  }, [store, speakFrom]);
 
   const handleStop = useCallback(() => {
-    _stopTts();
+    stopTts();
     playingRef.current = false;
     store.updatePlaybackStatus("idle");
     store.setCurrentSentence(0);
@@ -285,25 +148,12 @@ export function ReaderView() {
     const newIndex = Math.max(0, store.currentSentenceIndex - 5);
     store.setCurrentSentence(newIndex);
     if (store.playback.status === "speaking") {
-      _stopTts();
+      stopTts();
       playingRef.current = true;
       store.updatePlaybackStatus("speaking");
-      const speakFrom = (idx: number) => {
-        if (!playingRef.current || idx >= store.sentences.length) {
-          store.updatePlaybackStatus("idle");
-          playingRef.current = false;
-          return;
-        }
-        useReaderStore.getState().setCurrentSentence(idx);
-        _speakWithBrowserTts(useReaderStore.getState().sentences[idx]!, {
-          voice: useReaderStore.getState().selectedVoiceId,
-          rate: useReaderStore.getState().speed,
-          onEnd: () => speakFrom(idx + 1),
-        });
-      };
       speakFrom(newIndex);
     }
-  }, [store]);
+  }, [store, speakFrom]);
 
   const handleSkipForward = useCallback(() => {
     const newIndex = Math.min(
@@ -312,59 +162,32 @@ export function ReaderView() {
     );
     store.setCurrentSentence(newIndex);
     if (store.playback.status === "speaking") {
-      _stopTts();
+      stopTts();
       playingRef.current = true;
       store.updatePlaybackStatus("speaking");
-      const speakFrom = (idx: number) => {
-        if (!playingRef.current || idx >= store.sentences.length) {
-          store.updatePlaybackStatus("idle");
-          playingRef.current = false;
-          return;
-        }
-        useReaderStore.getState().setCurrentSentence(idx);
-        _speakWithBrowserTts(useReaderStore.getState().sentences[idx]!, {
-          voice: useReaderStore.getState().selectedVoiceId,
-          rate: useReaderStore.getState().speed,
-          onEnd: () => speakFrom(idx + 1),
-        });
-      };
       speakFrom(newIndex);
     }
-  }, [store]);
+  }, [store, speakFrom]);
 
   const handleSentenceClick = useCallback(
     (index: number) => {
       store.setCurrentSentence(index);
       if (store.playback.status === "speaking") {
-        _stopTts();
+        stopTts();
         playingRef.current = true;
-        const speakFrom = (idx: number) => {
-          if (
-            !playingRef.current ||
-            idx >= useReaderStore.getState().sentences.length
-          ) {
-            useReaderStore.getState().updatePlaybackStatus("idle");
-            playingRef.current = false;
-            return;
-          }
-          useReaderStore.getState().setCurrentSentence(idx);
-          _speakWithBrowserTts(useReaderStore.getState().sentences[idx]!, {
-            voice: useReaderStore.getState().selectedVoiceId,
-            rate: useReaderStore.getState().speed,
-            onEnd: () => speakFrom(idx + 1),
-          });
-        };
         speakFrom(index);
       }
     },
-    [store],
+    [store, speakFrom],
   );
 
   const handleVoicePreview = useCallback((voice: VoiceEntry) => {
-    _speakWithBrowserTts("Hello, this is a preview of this voice.", {
-      voice: voice.id,
-      rate: 1,
-    });
+    speakWithBrowserTts(
+      "Hello, this is a preview of this voice.",
+      voice.name,
+      1,
+      () => {},
+    );
   }, []);
 
   const handleBookmark = useCallback(() => {
@@ -382,15 +205,17 @@ export function ReaderView() {
   );
 
   const languages = Array.from(
-    new Set(availableVoices.map((v) => v.lang)),
+    new Set(availableVoices.map((v) => v.languageCode)),
   ).sort();
 
   const filteredVoices = availableVoices.filter((v) => {
     const matchSearch =
       voiceSearch === "" ||
-      v.name.toLowerCase().includes(voiceSearch.toLowerCase()) ||
-      v.lang.toLowerCase().includes(voiceSearch.toLowerCase());
-    const matchLang = voiceLangFilter === "all" || v.lang === voiceLangFilter;
+      v.displayName.toLowerCase().includes(voiceSearch.toLowerCase()) ||
+      v.language.toLowerCase().includes(voiceSearch.toLowerCase()) ||
+      v.name.toLowerCase().includes(voiceSearch.toLowerCase());
+    const matchLang =
+      voiceLangFilter === "all" || v.languageCode === voiceLangFilter;
     return matchSearch && matchLang;
   });
 
@@ -430,7 +255,6 @@ export function ReaderView() {
             cursor: "pointer",
             padding: "8px 12px",
             borderRadius: 8,
-            transition: "background 0.15s",
           }}
           title="Skip back 5 sentences"
         >
@@ -452,7 +276,6 @@ export function ReaderView() {
             alignItems: "center",
             justifyContent: "center",
             boxShadow: `0 0 20px ${COLORS.accentDim}`,
-            transition: "transform 0.15s",
           }}
         >
           {store.playback.status === "speaking" ? "⏸" : "▶"}
@@ -489,13 +312,7 @@ export function ReaderView() {
           &#9632; Stop
         </button>
 
-        <div
-          style={{
-            display: "flex",
-            gap: 4,
-            marginLeft: 16,
-          }}
-        >
+        <div style={{ display: "flex", gap: 4, marginLeft: 16 }}>
           {SPEEDS.map((s) => (
             <button
               key={s}
@@ -509,7 +326,6 @@ export function ReaderView() {
                 fontSize: 12,
                 cursor: "pointer",
                 fontWeight: store.speed === s ? 700 : 400,
-                transition: "background 0.15s",
               }}
             >
               {s}x
@@ -557,13 +373,7 @@ export function ReaderView() {
         </div>
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          flex: 1,
-          overflow: "hidden",
-        }}
-      >
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <div
           style={{
             width: 260,
@@ -603,7 +413,6 @@ export function ReaderView() {
           </div>
 
           <div
-            ref={dropZoneRef}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -615,20 +424,14 @@ export function ReaderView() {
               textAlign: "center",
               color: isDragging ? COLORS.accent : COLORS.muted,
               fontSize: 12,
-              transition: "border-color 0.2s, color 0.2s",
               background: isDragging ? COLORS.accentDim : "transparent",
+              transition: "border-color 0.2s, color 0.2s",
             }}
           >
             Drop files here
           </div>
 
-          <div
-            style={{
-              flex: 1,
-              overflowY: "auto",
-              padding: "0 12px",
-            }}
-          >
+          <div style={{ flex: 1, overflowY: "auto", padding: "0 12px" }}>
             {store.documents.map((doc) => (
               <div
                 key={doc.id}
@@ -645,8 +448,7 @@ export function ReaderView() {
                   border:
                     doc.id === store.activeDocumentId
                       ? `1px solid ${COLORS.accent}`
-                      : `1px solid transparent`,
-                  transition: "background 0.15s",
+                      : "1px solid transparent",
                 }}
               >
                 <div
@@ -835,13 +637,7 @@ export function ReaderView() {
             </select>
           </div>
 
-          <div
-            style={{
-              flex: 1,
-              overflowY: "auto",
-              padding: "8px 12px",
-            }}
-          >
+          <div style={{ flex: 1, overflowY: "auto", padding: "8px 12px" }}>
             {filteredVoices.map((voice) => {
               const isSelected = store.selectedVoiceId === voice.id;
               return (
@@ -855,9 +651,8 @@ export function ReaderView() {
                     background: isSelected ? COLORS.accentDim : COLORS.card,
                     border: isSelected
                       ? `1px solid ${COLORS.accent}`
-                      : `1px solid transparent`,
+                      : "1px solid transparent",
                     cursor: "pointer",
-                    transition: "background 0.15s",
                   }}
                 >
                   <div
@@ -878,7 +673,7 @@ export function ReaderView() {
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {voice.name}
+                        {voice.displayName}
                       </div>
                       <div
                         style={{
@@ -890,7 +685,7 @@ export function ReaderView() {
                           gap: 6,
                         }}
                       >
-                        <span>{voice.lang}</span>
+                        <span>{voice.language}</span>
                         <span>
                           {voice.gender === "male"
                             ? "♂"

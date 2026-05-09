@@ -86,6 +86,15 @@ import {
 import { FloatingRecorderOverlay } from "./FloatingRecorder";
 import type { RecordingState as FloatingRecordingState } from "./recordingStateMachine";
 import { ReaderView } from "./ReaderView";
+import { TeamView } from "./TeamView";
+import { processTranscriptWithCommands } from "./voiceCommandIntegration";
+import { generateSummary, type SummaryStyle } from "./aiSummary";
+import {
+  buildWhisperPrompt,
+  extractProperNouns,
+  extractTechnicalTerms,
+} from "./contextSpelling";
+import { preprocessAudio, AUDIO_PRESETS } from "./audioPreprocessing";
 import "./styles.css";
 
 type PrivacyLevel = "local" | "cloud";
@@ -102,6 +111,8 @@ type ViewId =
   | "dictionary"
   | "snippets"
   | "onboarding"
+  | "team"
+  | "meeting"
   | "reader";
 
 type VoiceCaptureResult = VoiceCaptureMetadata & {
@@ -1154,6 +1165,10 @@ function WorkspaceRouter() {
         <div className="workspace-grid">
           <OnboardingPanel />
         </div>
+      ) : activeView === "team" ? (
+        <div className="workspace-grid">
+          <TeamView currentUserId="local-user" />
+        </div>
       ) : activeView === "reader" ? (
         <div className="workspace-grid">
           <ReaderView />
@@ -1185,6 +1200,7 @@ function Sidebar() {
     { id: "dictionary", labelKey: "nav.dictionary" },
     { id: "snippets", labelKey: "nav.snippets" },
     { id: "reader", labelKey: "nav.reader" },
+    { id: "team", labelKey: "nav.team" },
     { id: "settings", labelKey: "nav.settings" },
   ];
 

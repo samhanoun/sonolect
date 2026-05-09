@@ -10,6 +10,8 @@ export const en = {
   "nav.snippets": "Snippets",
   "nav.transforms": "Transforms",
   "nav.reader": "Reader",
+  "nav.team": "Team",
+  "nav.meeting": "Meeting",
 
   // Sidebar
   "sidebar.recordNow": "Record now",
