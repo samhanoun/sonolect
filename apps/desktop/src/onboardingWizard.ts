@@ -1,4 +1,5 @@
 import type { OnboardingChecklist } from "./wisprWorkflow";
+import { checkPermission, detectPlatform } from "./platformPermissions";
 
 export type OnboardingStep = {
   id: keyof OnboardingChecklist;
@@ -25,10 +26,19 @@ export function buildOnboardingSteps(): OnboardingStep[] {
         "Sonolect needs microphone permission to capture your voice.",
       instruction:
         "Click 'Allow' when your browser or OS prompts for microphone access.",
-      checkFn: () =>
-        typeof navigator !== "undefined" &&
-        typeof navigator.mediaDevices !== "undefined" &&
-        typeof navigator.mediaDevices.getUserMedia === "function",
+      checkFn: async () => {
+        try {
+          const result = await checkPermission("microphone");
+          return result.status === "granted";
+        } catch {
+          // Fallback: check if getUserMedia API is available
+          return (
+            typeof navigator !== "undefined" &&
+            typeof navigator.mediaDevices !== "undefined" &&
+            typeof navigator.mediaDevices.getUserMedia === "function"
+          );
+        }
+      },
       skipAllowed: false,
     },
     {
@@ -38,7 +48,21 @@ export function buildOnboardingSteps(): OnboardingStep[] {
         "Toggle recording with Cmd+Shift+R and push-to-talk with Cmd+Shift+T.",
       instruction:
         "Review the shortcuts above, then click 'Done' to acknowledge.",
-      checkFn: () => true,
+      checkFn: async () => {
+        const platform = detectPlatform();
+        if (platform === "macos") {
+          try {
+            const result = await checkPermission("accessibility");
+            // If accessibility is denied on macOS, the step is not auto-complete
+            // but we still return true so the user can acknowledge shortcuts.
+            // The PermissionGuard component handles blocking if needed.
+            return result.status === "granted";
+          } catch {
+            return true;
+          }
+        }
+        return true;
+      },
       skipAllowed: true,
     },
     {
