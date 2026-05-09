@@ -5,7 +5,12 @@ import Fastify, {
 } from "fastify";
 import helmet from "@fastify/helmet";
 import cors from "@fastify/cors";
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import {
+  verifyStripeSignature,
+  parseStripeEvent,
+  handleSubscriptionEvent,
+} from "./stripe-helpers.js";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type {
@@ -190,32 +195,7 @@ const toQuotaSummary = (
   };
 };
 
-export const verifyStripeSignature = (
-  payload: string,
-  signatureHeader: string | undefined,
-  secret: string | undefined,
-): boolean => {
-  if (!secret) return true;
-  if (!signatureHeader) return false;
-  const parts = Object.fromEntries(
-    signatureHeader.split(",").map((part) => {
-      const [key, value] = part.split("=", 2);
-      return [key, value];
-    }),
-  );
-  const timestamp = parts.t;
-  const signature = parts.v1;
-  if (!timestamp || !signature) return false;
-  const expected = createHmac("sha256", secret)
-    .update(`${timestamp}.${payload}`)
-    .digest("hex");
-  const actualBuffer = Buffer.from(signature, "hex");
-  const expectedBuffer = Buffer.from(expected, "hex");
-  return (
-    actualBuffer.length === expectedBuffer.length &&
-    timingSafeEqual(actualBuffer, expectedBuffer)
-  );
-};
+export { verifyStripeSignature } from "./stripe-helpers.js";
 
 export interface CreateAppOptions {
   stores?: BillingStores;
@@ -265,21 +245,34 @@ export async function createApp(
   );
 
   app.post("/webhooks/stripe", async (request, reply) => {
-    const payload = JSON.stringify(request.body ?? {});
+    const payload =
+      typeof request.body === "string"
+        ? request.body
+        : JSON.stringify(request.body ?? {});
     const signature = request.headers["stripe-signature"];
     const signatureHeader = Array.isArray(signature) ? signature[0] : signature;
     const secret =
       options.stripeWebhookSecret ?? process.env.STRIPE_WEBHOOK_SECRET;
-    if (!verifyStripeSignature(payload, signatureHeader, secret)) {
+    if (!signatureHeader || !secret) {
       return reply.status(400).send({
         error: "invalid_signature",
         message: "Stripe webhook signature verification failed",
       });
     }
+    const event = parseStripeEvent(payload, signatureHeader, secret);
+    if (!event) {
+      return reply.status(400).send({
+        error: "invalid_signature",
+        message: "Stripe webhook signature verification failed",
+      });
+    }
+    const result = handleSubscriptionEvent(event);
     return reply.status(202).send({
       received: true,
-      processed: false,
-      message: "Stripe webhook accepted; event handling is scaffolded.",
+      processed: true,
+      action: result.action,
+      customerId: result.customerId,
+      status: result.status,
     });
   });
 
