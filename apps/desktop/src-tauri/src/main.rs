@@ -292,6 +292,77 @@ fn run_native_insert(_text: &str) -> Result<(), String> {
     Err("Direct insertion is unsupported on this operating system".to_owned())
 }
 
+// ── Permission types and commands ─────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PermissionResult {
+    status: String,
+    platform: String,
+}
+
+#[cfg(target_os = "macos")]
+fn check_accessibility() -> PermissionResult {
+    // On macOS, try a benign AppleScript "System Events" call to detect
+    // whether accessibility access has been granted.  The command
+    // `tell application "System Events" to get name of first process`
+    // requires Accessibility privileges.
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg("tell application \"System Events\" to get name of first process")
+        .output();
+    let status = match output {
+        Ok(ref o) if o.status.success() => "granted",
+        _ => "not-determined",
+    };
+    PermissionResult {
+        status: status.to_owned(),
+        platform: "macos".to_owned(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn check_accessibility() -> PermissionResult {
+    PermissionResult {
+        status: "granted".to_owned(),
+        platform: "linux".to_owned(),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn check_accessibility() -> PermissionResult {
+    PermissionResult {
+        status: "granted".to_owned(),
+        platform: "windows".to_owned(),
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn check_accessibility() -> PermissionResult {
+    PermissionResult {
+        status: "unsupported".to_owned(),
+        platform: "unknown".to_owned(),
+    }
+}
+
+#[tauri::command]
+fn check_accessibility_permission() -> PermissionResult {
+    check_accessibility()
+}
+
+#[tauri::command]
+fn open_accessibility_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .output()
+            .map_err(|error| format!("Failed to open Accessibility settings: {error}"))?;
+    }
+    // Linux and Windows: no-op — no special settings page needed.
+    Ok(())
+}
+
 #[tauri::command]
 fn insert_text_into_active_app(text: String) -> InsertionResult {
     let trimmed = text.trim();
@@ -321,7 +392,9 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             transcribe_audio,
-            insert_text_into_active_app
+            insert_text_into_active_app,
+            check_accessibility_permission,
+            open_accessibility_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sonolect desktop app");
