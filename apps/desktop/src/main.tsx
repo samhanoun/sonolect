@@ -78,6 +78,13 @@ import {
   isTauriRuntime,
   registerNativeDictationShortcuts,
 } from "./desktopNative";
+import {
+  showRecorderWindow,
+  hideRecorderWindow,
+  resizeRecorderWindow,
+} from "./tauriWindowManager";
+import { FloatingRecorderOverlay } from "./FloatingRecorder";
+import type { RecordingState as FloatingRecordingState } from "./recordingStateMachine";
 import "./styles.css";
 
 type PrivacyLevel = "local" | "cloud";
@@ -2692,10 +2699,120 @@ function ToastContainer() {
   );
 }
 
+/* ── Recorder window shell (rendered when ?window=recorder) ──── */
+
+function RecorderWindowShell() {
+  const [state, setState] = useState<FloatingRecordingState>("idle");
+  const [durationMs, setDurationMs] = useState(0);
+  const [peaks, setPeaks] = useState<number[]>([]);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [minimized, setMinimized] = useState(true);
+
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      const data = event.data as Record<string, unknown> | undefined;
+      if (!data || data.type !== "sonolect-recorder-sync") return;
+      if (typeof data.state === "string")
+        setState(data.state as FloatingRecordingState);
+      if (typeof data.durationMs === "number") setDurationMs(data.durationMs);
+      if (Array.isArray(data.peaks)) setPeaks(data.peaks as number[]);
+      if (typeof data.preview === "string" || data.preview === null)
+        setPreview(data.preview as string | null);
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, []);
+
+  const handleMinimize = useCallback(() => {
+    const next = !minimized;
+    setMinimized(next);
+    void resizeRecorderWindow(!next);
+  }, [minimized]);
+
+  return (
+    <FloatingRecorderOverlay
+      recordingState={state}
+      durationMs={durationMs}
+      waveformPeaks={peaks}
+      polishedPreview={preview}
+      minimized={minimized}
+      onCancel={() =>
+        window.postMessage({
+          type: "sonolect-recorder-action",
+          action: "cancel",
+        })
+      }
+      onFinish={() =>
+        window.postMessage({
+          type: "sonolect-recorder-action",
+          action: "finish",
+        })
+      }
+      onInsert={() =>
+        window.postMessage({
+          type: "sonolect-recorder-action",
+          action: "insert",
+        })
+      }
+      onMinimize={handleMinimize}
+    />
+  );
+}
+
+/* ── Recording window lifecycle hook ───────────────────────────── */
+
+function useRecorderWindowLifecycle() {
+  const recordingState = useDesktopStore((s) => s.recordingState);
+  const prevStateRef = useRef<RecordingState>("idle");
+
+  useEffect(() => {
+    const prev = prevStateRef.current;
+    prevStateRef.current = recordingState;
+
+    // Show the recorder window when recording starts
+    if (
+      prev === "idle" &&
+      (recordingState === "requesting-permission" ||
+        recordingState === "recording")
+    ) {
+      void showRecorderWindow();
+    }
+
+    // Hide the recorder window after a brief delay when recording completes or resets
+    if (
+      (recordingState === "idle" || recordingState === "completed") &&
+      prev !== "idle" &&
+      prev !== "completed"
+    ) {
+      const timer = setTimeout(() => void hideRecorderWindow(), 600);
+      return () => clearTimeout(timer);
+    }
+
+    return undefined;
+  }, [recordingState]);
+}
+
 /* ── Mount ───────────────────────────────────────────────────── */
 
-createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+const isRecorderWindow =
+  new URLSearchParams(window.location.search).get("window") === "recorder";
+
+if (isRecorderWindow) {
+  createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <RecorderWindowShell />
+    </React.StrictMode>,
+  );
+} else {
+  // Wrap App to include the recorder window lifecycle hook
+  function AppWithRecorderWindow() {
+    useRecorderWindowLifecycle();
+    return <App />;
+  }
+
+  createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <AppWithRecorderWindow />
+    </React.StrictMode>,
+  );
+}
