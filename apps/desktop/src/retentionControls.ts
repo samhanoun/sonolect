@@ -31,8 +31,7 @@ export function applyRetentionPolicy(
 
   // Sort by date descending (newest first) for maxItems enforcement
   const sorted = [...history].sort(
-    (a, b) =>
-      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
   );
 
   for (let i = 0; i < sorted.length; i++) {
@@ -103,12 +102,16 @@ export function validateRetentionPolicy(
   policy: Partial<RetentionPolicy>,
 ): RetentionPolicy {
   const maxAgeDays = clamp(
-    typeof policy.maxAgeDays === "number" ? policy.maxAgeDays : DEFAULT_RETENTION_POLICY.maxAgeDays,
+    typeof policy.maxAgeDays === "number"
+      ? policy.maxAgeDays
+      : DEFAULT_RETENTION_POLICY.maxAgeDays,
     1,
     3650,
   );
   const maxItems = clamp(
-    typeof policy.maxItems === "number" ? policy.maxItems : DEFAULT_RETENTION_POLICY.maxItems,
+    typeof policy.maxItems === "number"
+      ? policy.maxItems
+      : DEFAULT_RETENTION_POLICY.maxItems,
     1,
     100_000,
   );

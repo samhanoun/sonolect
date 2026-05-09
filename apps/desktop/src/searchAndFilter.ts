@@ -98,7 +98,11 @@ export function filterHistory(
     if (filter.dateFrom) {
       const rowDate = new Date(row.updatedAt).getTime();
       const fromDate = new Date(filter.dateFrom).getTime();
-      if (!Number.isNaN(rowDate) && !Number.isNaN(fromDate) && rowDate < fromDate) {
+      if (
+        !Number.isNaN(rowDate) &&
+        !Number.isNaN(fromDate) &&
+        rowDate < fromDate
+      ) {
         return false;
       }
     }

@@ -85,6 +85,7 @@ import {
 } from "./tauriWindowManager";
 import { FloatingRecorderOverlay } from "./FloatingRecorder";
 import type { RecordingState as FloatingRecordingState } from "./recordingStateMachine";
+import { ReaderView } from "./ReaderView";
 import "./styles.css";
 
 type PrivacyLevel = "local" | "cloud";
@@ -95,7 +96,13 @@ type RecordingState =
   | "uploading"
   | "completed"
   | "error";
-type ViewId = "home" | "settings" | "dictionary" | "snippets" | "onboarding";
+type ViewId =
+  | "home"
+  | "settings"
+  | "dictionary"
+  | "snippets"
+  | "onboarding"
+  | "reader";
 
 type VoiceCaptureResult = VoiceCaptureMetadata & {
   objectUrl: string;
@@ -1147,6 +1154,10 @@ function WorkspaceRouter() {
         <div className="workspace-grid">
           <OnboardingPanel />
         </div>
+      ) : activeView === "reader" ? (
+        <div className="workspace-grid">
+          <ReaderView />
+        </div>
       ) : activeSessionId ? (
         <div className="workspace-grid">
           <TranscriptDetail />
@@ -1173,6 +1184,7 @@ function Sidebar() {
     { id: "onboarding", labelKey: "nav.onboarding" },
     { id: "dictionary", labelKey: "nav.dictionary" },
     { id: "snippets", labelKey: "nav.snippets" },
+    { id: "reader", labelKey: "nav.reader" },
     { id: "settings", labelKey: "nav.settings" },
   ];
 

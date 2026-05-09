@@ -9,6 +9,7 @@ export const en = {
   "nav.home": "Home",
   "nav.snippets": "Snippets",
   "nav.transforms": "Transforms",
+  "nav.reader": "Reader",
 
   // Sidebar
   "sidebar.recordNow": "Record now",

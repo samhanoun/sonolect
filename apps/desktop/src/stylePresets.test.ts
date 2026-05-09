@@ -7,7 +7,13 @@ describe("stylePresets", () => {
     const presets = getStylePresets();
     assert.equal(presets.length, 5);
     const ids = presets.map((p) => p.id);
-    assert.deepEqual(ids, ["concise", "professional", "casual", "technical", "custom"]);
+    assert.deepEqual(ids, [
+      "concise",
+      "professional",
+      "casual",
+      "technical",
+      "custom",
+    ]);
   });
 
   it("throws on unknown preset id", () => {
@@ -18,14 +24,18 @@ describe("stylePresets", () => {
 
   describe("concise preset", () => {
     it("removes filler words: very, really, just, actually, basically", () => {
-      const input = "This is very important and really just actually basically good.";
+      const input =
+        "This is very important and really just actually basically good.";
       const result = applyStylePreset(input, "concise");
       assert.equal(result, "This is important and good.");
     });
 
     it("collapses redundant phrases", () => {
       assert.equal(
-        applyStylePreset("In order to succeed, due to the fact that we tried.", "concise"),
+        applyStylePreset(
+          "In order to succeed, due to the fact that we tried.",
+          "concise",
+        ),
         "to succeed, because we tried.",
       );
       assert.equal(
@@ -52,7 +62,10 @@ describe("stylePresets", () => {
     });
 
     it("capitalizes sentence starts", () => {
-      const result = applyStylePreset("hello world. this is a test.", "professional");
+      const result = applyStylePreset(
+        "hello world. this is a test.",
+        "professional",
+      );
       assert.ok(result.startsWith("Hello"));
       assert.ok(result.includes("This is"));
     });
@@ -128,7 +141,11 @@ describe("stylePresets", () => {
     for (const preset of presets) {
       const result1 = preset.transform(input);
       const result2 = preset.transform(input);
-      assert.equal(result1, result2, `Preset ${preset.id} is not pure/deterministic`);
+      assert.equal(
+        result1,
+        result2,
+        `Preset ${preset.id} is not pure/deterministic`,
+      );
     }
   });
 });
