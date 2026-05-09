@@ -1,10 +1,19 @@
 import { create } from "zustand";
 import { en, type LocaleKeys } from "./locales/en";
 import { fr } from "./locales/fr";
+import { ar } from "./locales/ar";
+import { es } from "./locales/es";
+import { de } from "./locales/de";
 
-export type SupportedLocale = "en" | "fr";
+export type SupportedLocale = "en" | "fr" | "ar" | "es" | "de";
 
-const locales: Record<SupportedLocale, Record<LocaleKeys, string>> = { en, fr };
+const locales: Record<SupportedLocale, Record<LocaleKeys, string>> = {
+  en,
+  fr,
+  ar,
+  es,
+  de,
+};
 
 export type I18nState = {
   locale: SupportedLocale;
@@ -21,6 +30,9 @@ export function detectLocale(): SupportedLocale {
   if (typeof navigator === "undefined") return "en";
   const lang = navigator.language?.toLowerCase() ?? "";
   if (lang.startsWith("fr")) return "fr";
+  if (lang.startsWith("ar")) return "ar";
+  if (lang.startsWith("es")) return "es";
+  if (lang.startsWith("de")) return "de";
   return "en";
 }
 

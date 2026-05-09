@@ -118,13 +118,11 @@ export async function addSharedSnippet(
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const { error } = await supabase
-    .from("shared_snippets")
-    .insert({
-      team_id: teamId,
-      trigger_text: trigger,
-      body,
-      created_by: user?.id,
-    });
+  const { error } = await supabase.from("shared_snippets").insert({
+    team_id: teamId,
+    trigger_text: trigger,
+    body,
+    created_by: user?.id,
+  });
   if (error) throw new Error(error.message);
 }

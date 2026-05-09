@@ -1,0 +1,13 @@
+{
+  "default": {
+    "identifier": "default",
+    "description": "Default desktop permissions for Sonolect.",
+    "local": true,
+    "windows": ["main"],
+    "permissions": [
+      "core:default",
+      "global-shortcut:allow-register",
+      "global-shortcut:allow-unregister"
+    ]
+  }
+}
