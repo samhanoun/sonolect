@@ -387,6 +387,167 @@ fn insert_text_into_active_app(text: String) -> InsertionResult {
     }
 }
 
+// ── Edge TTS command ─────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EdgeTtsPayload {
+    text: String,
+    voice: String,
+    rate: f64,
+}
+
+#[tauri::command]
+fn edge_tts_synthesize(payload: EdgeTtsPayload) -> Result<Vec<u8>, String> {
+    let trimmed = payload.text.trim();
+    if trimmed.is_empty() {
+        return Err("No text to synthesize".to_owned());
+    }
+    let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let out_path = std::env::temp_dir().join(format!(
+        "sonolect-tts-{}-{}.mp3",
+        std::process::id(),
+        counter
+    ));
+    let rate_str = if (payload.rate - 1.0).abs() < 0.01 {
+        "+0%".to_owned()
+    } else if payload.rate > 1.0 {
+        format!("+{}%", ((payload.rate - 1.0) * 100.0).round() as i32)
+    } else {
+        format!("-{}%", ((1.0 - payload.rate) * 100.0).round() as i32)
+    };
+    let output = Command::new("edge-tts")
+        .arg("--voice")
+        .arg(&payload.voice)
+        .arg("--rate")
+        .arg(&rate_str)
+        .arg("--text")
+        .arg(trimmed)
+        .arg("--write-media")
+        .arg(out_path.to_string_lossy().as_ref())
+        .output()
+        .map_err(|e| format!("Failed to run edge-tts: {e}. Install with: pip install edge-tts"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let _ = fs::remove_file(&out_path);
+        return Err(format!("edge-tts failed: {stderr}"));
+    }
+    let audio = fs::read(&out_path)
+        .map_err(|e| format!("Failed to read TTS output: {e}"))?;
+    let _ = fs::remove_file(&out_path);
+    Ok(audio)
+}
+
+// ── System audio capture commands ────────────────────────────────────
+
+#[tauri::command]
+fn check_system_audio_available() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("pactl")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("system_profiler")
+            .arg("SPAudioDataType")
+            .output();
+        output
+            .map(|o| {
+                let text = String::from_utf8_lossy(&o.stdout);
+                text.to_lowercase().contains("blackhole")
+            })
+            .unwrap_or(false)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        true
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        false
+    }
+}
+
+#[tauri::command]
+fn start_system_audio_capture(output_path: String) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let monitor = Command::new("pactl")
+            .args(["list", "short", "sources"])
+            .output()
+            .map_err(|e| format!("pactl failed: {e}"))?;
+        let sources = String::from_utf8_lossy(&monitor.stdout);
+        let monitor_source = sources
+            .lines()
+            .find(|l| l.contains("monitor"))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .ok_or_else(|| "No PulseAudio monitor source found".to_owned())?;
+        Command::new("parec")
+            .args(["--device", monitor_source, "--file-format=wav", &output_path])
+            .spawn()
+            .map_err(|e| format!("Failed to start parec: {e}"))?;
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("ffmpeg")
+            .args([
+                "-f", "avfoundation",
+                "-i", ":BlackHole 2ch",
+                "-acodec", "pcm_s16le",
+                "-ar", "44100",
+                "-ac", "1",
+                &output_path,
+            ])
+            .spawn()
+            .map_err(|e| format!("Failed to start ffmpeg capture: {e}"))?;
+        Ok(())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = output_path;
+        Err("Windows WASAPI capture requires native integration — use Stereo Mix recording device".to_owned())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        let _ = output_path;
+        Err("System audio capture is not supported on this platform".to_owned())
+    }
+}
+
+#[tauri::command]
+fn stop_system_audio_capture() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("pkill")
+            .arg("parec")
+            .output()
+            .map_err(|e| format!("Failed to stop parec: {e}"))?;
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("pkill")
+            .arg("-f")
+            .arg("ffmpeg.*avfoundation.*BlackHole")
+            .output()
+            .map_err(|e| format!("Failed to stop ffmpeg: {e}"))?;
+        Ok(())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        Err("Not supported on this platform".to_owned())
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -394,7 +555,11 @@ fn main() {
             transcribe_audio,
             insert_text_into_active_app,
             check_accessibility_permission,
-            open_accessibility_settings
+            open_accessibility_settings,
+            edge_tts_synthesize,
+            check_system_audio_available,
+            start_system_audio_capture,
+            stop_system_audio_capture
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sonolect desktop app");
