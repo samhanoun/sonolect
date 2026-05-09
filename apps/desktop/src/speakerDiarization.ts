@@ -55,9 +55,7 @@ export function mergeSpeakerSegments(
   return result;
 }
 
-export function getSpeakerStats(
-  segments: SpeakerSegment[],
-): Array<{
+export function getSpeakerStats(segments: SpeakerSegment[]): Array<{
   speaker: string;
   totalMs: number;
   segmentCount: number;
