@@ -24,9 +24,15 @@ const serviceName = "sonolect-agent-service";
 const localUserId = "local-user";
 const localNow = new Date().toISOString();
 
+interface RateLimitEntry {
+  count: number;
+  resetAt: number;
+}
+
 interface InMemoryStores {
   agents: Map<string, AgentDefinition>;
   commands: Map<string, AgentCommandExecutionResult>;
+  rateLimits: Map<string, RateLimitEntry>;
 }
 
 export interface CreateAppOptions {
@@ -35,6 +41,7 @@ export interface CreateAppOptions {
 }
 
 const createStores = (): InMemoryStores => ({
+  rateLimits: new Map<string, RateLimitEntry>(),
   agents: new Map<string, AgentDefinition>([
     [
       "dictation",
@@ -255,6 +262,237 @@ export async function createApp(
           .status(404)
           .send({ error: "not_found", message: "Command execution not found" });
       return command;
+    },
+  );
+
+  /* ------------------------------------------------------------------ */
+  /*  Rate limiter                                                      */
+  /* ------------------------------------------------------------------ */
+
+  const checkRateLimit = (userId: string): boolean => {
+    const now = Date.now();
+    const entry = stores.rateLimits.get(userId);
+    if (!entry || now >= entry.resetAt) {
+      stores.rateLimits.set(userId, { count: 1, resetAt: now + 60_000 });
+      return true;
+    }
+    if (entry.count >= 30) return false;
+    entry.count += 1;
+    return true;
+  };
+
+  /* ------------------------------------------------------------------ */
+  /*  Local fallback helpers                                            */
+  /* ------------------------------------------------------------------ */
+
+  const localRewrite = (text: string): string =>
+    text
+      .replace(/ {2,}/g, " ")
+      .replace(
+        /(^|[.!?]\s+)(\w)/g,
+        (_m, prefix: string, char: string) => `${prefix}${char.toUpperCase()}`,
+      );
+
+  const localSummarize = (
+    text: string,
+    style: "brief" | "detailed" | "bullets" | "action-items",
+  ): string => {
+    const sentences = text.match(/[^.!?]+[.!?]+/g) ?? [text];
+    switch (style) {
+      case "brief":
+        return sentences.slice(0, 3).join(" ").trim();
+      case "detailed":
+        return sentences.slice(0, 6).join(" ").trim();
+      case "bullets":
+        return sentences.map((s) => `- ${s.trim()}`).join("\n");
+      case "action-items":
+        return sentences.map((s) => `[ ] ${s.trim()}`).join("\n");
+    }
+  };
+
+  /* ------------------------------------------------------------------ */
+  /*  LLM fetch helpers                                                 */
+  /* ------------------------------------------------------------------ */
+
+  const callOpenAI = async (
+    systemPrompt: string,
+    userPrompt: string,
+  ): Promise<string> => {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        max_tokens: 2048,
+      }),
+    });
+    if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
+    const data = (await res.json()) as {
+      choices: { message: { content: string } }[];
+    };
+    return data.choices[0]?.message.content ?? "";
+  };
+
+  const callAnthropic = async (
+    systemPrompt: string,
+    userPrompt: string,
+  ): Promise<string> => {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 2048,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userPrompt }],
+      }),
+    });
+    if (!res.ok) throw new Error(`Anthropic API error: ${res.status}`);
+    const data = (await res.json()) as {
+      content: { text: string }[];
+    };
+    return data.content[0]?.text ?? "";
+  };
+
+  const callLLM = async (
+    provider: "openai" | "anthropic",
+    systemPrompt: string,
+    userPrompt: string,
+  ): Promise<string> => {
+    if (provider === "anthropic") {
+      return callAnthropic(systemPrompt, userPrompt);
+    }
+    return callOpenAI(systemPrompt, userPrompt);
+  };
+
+  const resolveProvider = (
+    preferred?: "openai" | "anthropic",
+  ): { provider: "openai" | "anthropic"; hasKey: boolean } => {
+    if (preferred === "anthropic" && process.env.ANTHROPIC_API_KEY) {
+      return { provider: "anthropic", hasKey: true };
+    }
+    if (preferred === "openai" && process.env.OPENAI_API_KEY) {
+      return { provider: "openai", hasKey: true };
+    }
+    if (!preferred) {
+      if (process.env.OPENAI_API_KEY)
+        return { provider: "openai", hasKey: true };
+      if (process.env.ANTHROPIC_API_KEY)
+        return { provider: "anthropic", hasKey: true };
+    }
+    return { provider: preferred ?? "openai", hasKey: false };
+  };
+
+  /* ------------------------------------------------------------------ */
+  /*  POST /llm/rewrite                                                 */
+  /* ------------------------------------------------------------------ */
+
+  const rewriteBodySchema = z.object({
+    text: z.string().min(1),
+    style: z.enum(["formal", "casual", "concise", "expand"]),
+    provider: z.enum(["openai", "anthropic"]).optional(),
+  });
+
+  app.post(
+    "/llm/rewrite",
+    async (
+      request,
+      reply,
+    ): Promise<
+      { original: string; rewritten: string; provider: string } | FastifyReply
+    > => {
+      try {
+        const { userId } = getRouteContext(request);
+        if (!checkRateLimit(userId)) {
+          return reply
+            .status(429)
+            .send({ error: "rate_limit", message: "Too many requests" });
+        }
+        const input = parseBody<z.infer<typeof rewriteBodySchema>>(
+          rewriteBodySchema,
+          request,
+        );
+        const { provider, hasKey } = resolveProvider(input.provider);
+        let rewritten: string;
+        if (hasKey) {
+          rewritten = await callLLM(
+            provider,
+            `You are a text rewriter. Rewrite the following text in a ${input.style} style. Return only the rewritten text.`,
+            input.text,
+          );
+        } else {
+          rewritten = localRewrite(input.text);
+        }
+        return {
+          original: input.text,
+          rewritten,
+          provider: hasKey ? provider : "local",
+        };
+      } catch (error) {
+        return sendValidationError(reply, error);
+      }
+    },
+  );
+
+  /* ------------------------------------------------------------------ */
+  /*  POST /llm/summarize                                               */
+  /* ------------------------------------------------------------------ */
+
+  const summarizeBodySchema = z.object({
+    text: z.string().min(1),
+    style: z.enum(["brief", "detailed", "bullets", "action-items"]),
+    provider: z.enum(["openai", "anthropic"]).optional(),
+  });
+
+  app.post(
+    "/llm/summarize",
+    async (
+      request,
+      reply,
+    ): Promise<
+      { summary: string; style: string; provider: string } | FastifyReply
+    > => {
+      try {
+        const { userId } = getRouteContext(request);
+        if (!checkRateLimit(userId)) {
+          return reply
+            .status(429)
+            .send({ error: "rate_limit", message: "Too many requests" });
+        }
+        const input = parseBody<z.infer<typeof summarizeBodySchema>>(
+          summarizeBodySchema,
+          request,
+        );
+        const { provider, hasKey } = resolveProvider(input.provider);
+        let summary: string;
+        if (hasKey) {
+          summary = await callLLM(
+            provider,
+            `You are a text summarizer. Summarize the following text in "${input.style}" style. Return only the summary.`,
+            input.text,
+          );
+        } else {
+          summary = localSummarize(input.text, input.style);
+        }
+        return {
+          summary,
+          style: input.style,
+          provider: hasKey ? provider : "local",
+        };
+      } catch (error) {
+        return sendValidationError(reply, error);
+      }
     },
   );
 

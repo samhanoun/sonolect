@@ -85,6 +85,15 @@ import {
 } from "./tauriWindowManager";
 import { FloatingRecorderOverlay } from "./FloatingRecorder";
 import type { RecordingState as FloatingRecordingState } from "./recordingStateMachine";
+import { TeamView } from "./TeamView";
+import { processTranscriptWithCommands } from "./voiceCommandIntegration";
+import { generateSummary, type SummaryStyle } from "./aiSummary";
+import {
+  buildWhisperPrompt,
+  extractProperNouns,
+  extractTechnicalTerms,
+} from "./contextSpelling";
+import { preprocessAudio, AUDIO_PRESETS } from "./audioPreprocessing";
 import "./styles.css";
 
 type PrivacyLevel = "local" | "cloud";
@@ -95,7 +104,14 @@ type RecordingState =
   | "uploading"
   | "completed"
   | "error";
-type ViewId = "home" | "settings" | "dictionary" | "snippets" | "onboarding";
+type ViewId =
+  | "home"
+  | "settings"
+  | "dictionary"
+  | "snippets"
+  | "onboarding"
+  | "team"
+  | "meeting";
 
 type VoiceCaptureResult = VoiceCaptureMetadata & {
   objectUrl: string;
@@ -1147,6 +1163,10 @@ function WorkspaceRouter() {
         <div className="workspace-grid">
           <OnboardingPanel />
         </div>
+      ) : activeView === "team" ? (
+        <div className="workspace-grid">
+          <TeamView currentUserId="local-user" />
+        </div>
       ) : activeSessionId ? (
         <div className="workspace-grid">
           <TranscriptDetail />
@@ -1173,6 +1193,7 @@ function Sidebar() {
     { id: "onboarding", labelKey: "nav.onboarding" },
     { id: "dictionary", labelKey: "nav.dictionary" },
     { id: "snippets", labelKey: "nav.snippets" },
+    { id: "team", labelKey: "nav.team" },
     { id: "settings", labelKey: "nav.settings" },
   ];
 

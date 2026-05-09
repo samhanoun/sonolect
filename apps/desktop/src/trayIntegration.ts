@@ -68,8 +68,7 @@ export function trayMenuAction(
     >
   >,
 ): boolean {
-  const handler =
-    callbacks[itemId as keyof typeof callbacks];
+  const handler = callbacks[itemId as keyof typeof callbacks];
   if (handler) {
     handler();
     return true;

@@ -11,6 +11,8 @@ export const fr: Record<LocaleKeys, string> = {
   "nav.home": "Accueil",
   "nav.snippets": "Extraits",
   "nav.transforms": "Transformations",
+  "nav.team": "Équipe",
+  "nav.meeting": "Réunion",
 
   // Sidebar
   "sidebar.recordNow": "Parler maintenant",

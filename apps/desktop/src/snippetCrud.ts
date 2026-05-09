@@ -46,10 +46,7 @@ export function addSnippet(
   return [...snippets, normalized];
 }
 
-export function removeSnippet(
-  snippets: Snippet[],
-  id: string,
-): Snippet[] {
+export function removeSnippet(snippets: Snippet[], id: string): Snippet[] {
   return snippets.filter((s) => s.id !== id);
 }
 
@@ -69,16 +66,12 @@ export function updateSnippet(
   });
 }
 
-export function searchSnippets(
-  snippets: Snippet[],
-  query: string,
-): Snippet[] {
+export function searchSnippets(snippets: Snippet[], query: string): Snippet[] {
   const q = query.toLowerCase().trim();
   if (!q) return snippets;
   return snippets.filter(
     (s) =>
-      s.trigger.toLowerCase().includes(q) ||
-      s.body.toLowerCase().includes(q),
+      s.trigger.toLowerCase().includes(q) || s.body.toLowerCase().includes(q),
   );
 }
 

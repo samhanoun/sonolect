@@ -134,7 +134,10 @@ export function FloatingRecorderOverlay({
       )}
 
       {recordingState === "previewing" && polishedPreview !== null && (
-        <div className="floating-recorder__preview" aria-label="Polished preview">
+        <div
+          className="floating-recorder__preview"
+          aria-label="Polished preview"
+        >
           {polishedPreview}
         </div>
       )}
