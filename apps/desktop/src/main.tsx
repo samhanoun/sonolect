@@ -102,6 +102,9 @@ import SnippetsPanel from "./components/SnippetsPanel";
 import SettingsPanel from "./components/SettingsPanel";
 import HistoryPanel from "./components/HistoryPanel";
 import AppSidebar from "./components/Sidebar";
+import OnboardingView from "./components/OnboardingPanel";
+import CommandPaletteView from "./components/CommandPalette";
+import RecorderPillView from "./components/RecorderPill";
 import { formatDuration, formatTimestamp } from "./lib/format";
 import {
   useDesktopStore,
@@ -255,8 +258,8 @@ function App() {
       <div className="signal-rings" aria-hidden="true" />
       <AppSidebar />
       <WorkspaceRouter />
-      <VoiceRecorderPill />
-      {commandOpen ? <CommandPalette /> : null}
+      <RecorderPillView />
+      {commandOpen ? <CommandPaletteView /> : null}
       <ToastContainer />
     </main>
   );
@@ -286,7 +289,7 @@ function WorkspaceRouter() {
         </div>
       ) : activeView === "onboarding" ? (
         <div className="workspace-grid">
-          <OnboardingPanel />
+          <OnboardingView />
         </div>
       ) : activeView === "team" ? (
         <div className="workspace-grid">
