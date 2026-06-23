@@ -163,8 +163,6 @@ function supportedAudioMimeType() {
   );
 }
 
-
-
 function splitAtReadableMidpoint(text: string) {
   const trimmed = text.trim();
   if (trimmed.length < 2) return 0;
@@ -923,4 +921,3 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     addToast("toast.transformComplete");
   },
 }));
-
