@@ -98,6 +98,7 @@ import { preprocessAudio, AUDIO_PRESETS } from "./audioPreprocessing";
 import "./tailwind.css";
 import "./styles.css";
 import DictionaryPanel from "./components/DictionaryPanel";
+import SnippetsPanel from "./components/SnippetsPanel";
 import { formatDuration, formatTimestamp } from "./lib/format";
 import {
   useDesktopStore,
@@ -1029,75 +1030,6 @@ function TranscriptDetail() {
 }
 
 /* ── Product Setup Panels ────────────────────────────────────── */
-
-function SnippetsPanel() {
-  const snippets = useDesktopStore((state) => state.snippets);
-  const addSnippet = useDesktopStore((state) => state.addSnippet);
-  const removeSnippet = useDesktopStore((state) => state.removeSnippet);
-  const [trigger, setTrigger] = useState("");
-  const [body, setBody] = useState("");
-
-  return (
-    <section className="glass-card management-panel">
-      <p className="section-title">Snippet library</p>
-      <h3>Expand voice shortcuts while dictating</h3>
-      <p>
-        Say or type a trigger like /sig and Sonolect expands it in the polished
-        preview.
-      </p>
-      <div className="form-grid two">
-        <label>
-          <span>Trigger</span>
-          <input
-            value={trigger}
-            onChange={(event) => setTrigger(event.target.value)}
-            placeholder="/sig"
-          />
-        </label>
-        <label>
-          <span>Expansion</span>
-          <input
-            value={body}
-            onChange={(event) => setBody(event.target.value)}
-            placeholder="Best, Ismail"
-          />
-        </label>
-      </div>
-      <button
-        className="primary-button compact"
-        onClick={() => {
-          addSnippet(trigger, body);
-          setTrigger("");
-          setBody("");
-        }}
-        type="button"
-      >
-        Add snippet
-      </button>
-      <div className="preference-list">
-        {snippets.length === 0 ? (
-          <p className="editor-meta">No snippets yet.</p>
-        ) : null}
-        {snippets.map((snippet) => (
-          <article className="preference-row" key={snippet.id}>
-            <div>
-              <strong>{snippet.trigger}</strong>
-              <p>{snippet.body}</p>
-            </div>
-            <button
-              aria-label={`Remove snippet ${snippet.trigger}`}
-              className="ghost-button"
-              onClick={() => removeSnippet(snippet.id)}
-              type="button"
-            >
-              Remove
-            </button>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
 
 function OnboardingPanel() {
   const checklist = useDesktopStore((state) => state.onboardingChecklist);
