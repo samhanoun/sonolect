@@ -100,6 +100,7 @@ import "./styles.css";
 import DictionaryPanel from "./components/DictionaryPanel";
 import SnippetsPanel from "./components/SnippetsPanel";
 import SettingsPanel from "./components/SettingsPanel";
+import HistoryPanel from "./components/HistoryPanel";
 import { formatDuration, formatTimestamp } from "./lib/format";
 import {
   useDesktopStore,
@@ -299,7 +300,7 @@ function WorkspaceRouter() {
           <TranscriptDetail />
         </div>
       ) : (
-        <HomeDashboard />
+        <HistoryPanel />
       )}
     </section>
   );
