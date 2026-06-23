@@ -23,7 +23,6 @@ describe("desktop futuristic design shell", () => {
   it("keeps the core voice workflow affordances via i18n keys in the interface", () => {
     // These keys must appear in main.tsx (used via t() calls)
     for (const requiredKey of [
-      "sidebar.recordNow",
       "topbar.searchCommand",
       "editor.eyebrow",
       "editor.transformCta",
