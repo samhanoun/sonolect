@@ -12,9 +12,14 @@ const stylesSource = await readFile(
   new URL("./styles.css", import.meta.url),
   "utf8",
 );
+const storeSource = await readFile(
+  new URL("./store/appStore.ts", import.meta.url),
+  "utf8",
+);
 
 describe("desktop segment editor UI wiring", () => {
   it("imports and uses the segment editor utilities in the transcript detail flow", () => {
+    // These utilities live in the extracted store module (store/appStore.ts).
     for (const requiredSource of [
       "textToSegments",
       "segmentsToText",
@@ -24,7 +29,7 @@ describe("desktop segment editor UI wiring", () => {
       "syncTranscriptText",
       "syncSegments",
     ]) {
-      assert.match(mainSource, new RegExp(requiredSource));
+      assert.match(storeSource, new RegExp(requiredSource));
     }
   });
 
