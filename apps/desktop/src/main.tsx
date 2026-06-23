@@ -101,6 +101,7 @@ import DictionaryPanel from "./components/DictionaryPanel";
 import SnippetsPanel from "./components/SnippetsPanel";
 import SettingsPanel from "./components/SettingsPanel";
 import HistoryPanel from "./components/HistoryPanel";
+import AppSidebar from "./components/Sidebar";
 import { formatDuration, formatTimestamp } from "./lib/format";
 import {
   useDesktopStore,
@@ -252,7 +253,7 @@ function App() {
     <main className="desktop-shell">
       <div className="ambient-grid" aria-hidden="true" />
       <div className="signal-rings" aria-hidden="true" />
-      <Sidebar />
+      <AppSidebar />
       <WorkspaceRouter />
       <VoiceRecorderPill />
       {commandOpen ? <CommandPalette /> : null}
