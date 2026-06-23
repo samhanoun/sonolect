@@ -95,7 +95,9 @@ import {
   extractTechnicalTerms,
 } from "./contextSpelling";
 import { preprocessAudio, AUDIO_PRESETS } from "./audioPreprocessing";
+import "./tailwind.css";
 import "./styles.css";
+import DictionaryPanel from "./components/DictionaryPanel";
 import { formatDuration, formatTimestamp } from "./lib/format";
 import {
   useDesktopStore,
@@ -1027,79 +1029,6 @@ function TranscriptDetail() {
 }
 
 /* ── Product Setup Panels ────────────────────────────────────── */
-
-function DictionaryPanel() {
-  const entries = useDesktopStore((state) => state.dictionaryEntries);
-  const addDictionaryEntry = useDesktopStore(
-    (state) => state.addDictionaryEntry,
-  );
-  const removeDictionaryEntry = useDesktopStore(
-    (state) => state.removeDictionaryEntry,
-  );
-  const [spoken, setSpoken] = useState("");
-  const [replacement, setReplacement] = useState("");
-
-  return (
-    <section className="glass-card management-panel">
-      <p className="section-title">Personal dictionary</p>
-      <h3>Teach Sonolect names, products, and spellings</h3>
-      <p>
-        These replacements are applied during the Wispr-style polished preview
-        before you copy text into another app.
-      </p>
-      <div className="form-grid two">
-        <label>
-          <span>When I say</span>
-          <input
-            value={spoken}
-            onChange={(event) => setSpoken(event.target.value)}
-            placeholder="open claw"
-          />
-        </label>
-        <label>
-          <span>Write</span>
-          <input
-            value={replacement}
-            onChange={(event) => setReplacement(event.target.value)}
-            placeholder="OpenClaw"
-          />
-        </label>
-      </div>
-      <button
-        className="primary-button compact"
-        onClick={() => {
-          addDictionaryEntry(spoken, replacement);
-          setSpoken("");
-          setReplacement("");
-        }}
-        type="button"
-      >
-        Add dictionary entry
-      </button>
-      <div className="preference-list">
-        {entries.length === 0 ? (
-          <p className="editor-meta">No dictionary entries yet.</p>
-        ) : null}
-        {entries.map((entry) => (
-          <article className="preference-row" key={entry.id}>
-            <div>
-              <strong>{entry.spoken}</strong>
-              <p>{entry.replacement}</p>
-            </div>
-            <button
-              aria-label={`Remove dictionary entry ${entry.spoken}`}
-              className="ghost-button"
-              onClick={() => removeDictionaryEntry(entry.id)}
-              type="button"
-            >
-              Remove
-            </button>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
 
 function SnippetsPanel() {
   const snippets = useDesktopStore((state) => state.snippets);
