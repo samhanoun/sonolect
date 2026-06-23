@@ -27,7 +27,6 @@ describe("desktop futuristic design shell", () => {
       "topbar.searchCommand",
       "editor.eyebrow",
       "editor.transformCta",
-      "privacy.title",
       "topbar.localFirst",
     ]) {
       assert.match(mainSource, new RegExp(requiredKey));

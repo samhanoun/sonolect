@@ -1,0 +1,38 @@
+@import url("https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..700;1,400..700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap");
+
+/*
+ * Tailwind utilities + theme only. Preflight (the global element reset) is
+ * intentionally omitted so the existing styles.css UI is left untouched while
+ * panels are migrated to Tailwind one at a time.
+ */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", "Inter", sans-serif;
+  --font-serif: "Playfair Display", serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+/* Tailwind utilities assume border-box; apply it globally without other resets. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Ambient gradient backdrop used by the migrated panels. */
+.artistic-aura {
+  background:
+    radial-gradient(
+      circle at 80% 20%,
+      rgba(14, 165, 233, 0.05) 0%,
+      rgba(0, 0, 0, 0) 50%
+    ),
+    radial-gradient(
+      circle at 10% 80%,
+      rgba(220, 38, 38, 0.02) 0%,
+      rgba(0, 0, 0, 0) 40%
+    );
+}
