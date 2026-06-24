@@ -8,10 +8,6 @@ const mainSource = await readFile(
   new URL("./main.tsx", import.meta.url),
   "utf8",
 );
-const stylesSource = await readFile(
-  new URL("./styles.css", import.meta.url),
-  "utf8",
-);
 const storeSource = await readFile(
   new URL("./store/appStore.ts", import.meta.url),
   "utf8",
@@ -61,19 +57,10 @@ describe("desktop segment editor UI wiring", () => {
     }
   });
 
-  it("styles the segment editor, selectable segment cards and speaker input", () => {
-    for (const requiredSelector of [
-      ".segment-editor",
-      ".segment-toolbar",
-      ".segment-card",
-      ".segment-card.selected",
-      ".segment-speaker",
-      ".segment-textarea",
-    ]) {
-      assert.match(
-        stylesSource,
-        new RegExp(requiredSelector.replaceAll(".", "\\.")),
-      );
-    }
+  it("renders selectable segment cards and a speaker input (Tailwind)", () => {
+    // segment editor is now Tailwind-styled; assert the selected-state class and
+    // the speaker input are present in the editor markup.
+    assert.match(mainSource, /border-white\/20/);
+    assert.match(mainSource, /segments\.speakerPlaceholder/);
   });
 });
