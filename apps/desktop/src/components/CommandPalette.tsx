@@ -53,7 +53,7 @@ export default function CommandPalette() {
       action: () => setActiveView("onboarding"),
     },
     {
-      label: "Settings",
+      label: "Open settings",
       hint: "Privacy, language, engine",
       action: () => setActiveView("settings"),
     },

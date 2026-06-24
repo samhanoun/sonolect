@@ -237,6 +237,29 @@ export default function SettingsPanel() {
             >
               Validate
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                const command = [
+                  "whisper-cli",
+                  "--model",
+                  "{model}",
+                  "--file",
+                  "{audioPath}",
+                  "--output-json",
+                ];
+                setWhisperConfig({
+                  ...whisperConfig,
+                  command,
+                  modelName: "base.en",
+                });
+                setCommandJson(JSON.stringify(command, null, 2));
+                setDiagnostic("Recommended template applied.");
+              }}
+              className="px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest bg-transparent border border-white/10 text-slate-400 hover:border-white/30 transition-all"
+            >
+              Use recommended command template
+            </button>
           </div>
           <p className="text-[11px] text-slate-400">
             <strong className="text-slate-300">Status:</strong>{" "}
