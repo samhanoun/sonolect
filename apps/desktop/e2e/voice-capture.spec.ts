@@ -95,7 +95,7 @@ async function installMockVoiceCapture(page: Page) {
 }
 
 test.describe("Sonolect voice capture readiness", () => {
-  test.fixme("records with mocked browser media, keeps captured bytes, and updates transcript in offline mode", async ({
+  test("records with mocked browser media, keeps captured bytes, and updates transcript in offline mode", async ({
     page,
   }) => {
     await installMockVoiceCapture(page);
@@ -103,20 +103,20 @@ test.describe("Sonolect voice capture readiness", () => {
 
     await page.getByRole("button", { name: "Settings" }).click();
     await expect(
-      page.getByRole("heading", { name: /Voice control/i }),
+      page.getByRole("heading", { name: /Preferences/i }),
     ).toBeVisible();
     await expect(
       page.getByText(/VITE_SONOLECT_API_URL not set/i),
     ).toBeVisible();
-    await page.getByLabel("STT Language").selectOption("en");
-    await page.getByRole("button", { name: "Cloud" }).click();
+    await page.getByLabel(/Speech-to-text language/i).selectOption("en");
+    await page.getByRole("button", { name: "Cloud-assisted" }).click();
     await expect(page.getByText(/cloud-assisted/i).first()).toBeVisible();
-    await page.getByRole("button", { exact: true, name: "Local" }).click();
+    await page.getByRole("button", { name: "Local-first" }).click();
 
-    await page.getByRole("button", { name: "Home" }).click();
-    await page.getByRole("button", { name: /Record now/i }).click();
+    await page.getByRole("button", { name: "History" }).click();
+    await page.getByRole("button", { name: "Record" }).click();
     await expect(
-      page.getByRole("status", { name: /Sonolect voice recorder/i }),
+      page.getByRole("status", { name: /Dictation recorder/i }),
     ).toContainText(/0s|1s/);
 
     await expect
@@ -135,9 +135,9 @@ test.describe("Sonolect voice capture readiness", () => {
 
     await page.getByRole("button", { name: "Stop" }).click();
     await expect(
-      page.getByRole("status", { name: /Sonolect voice recorder/i }),
+      page.getByRole("status", { name: /Dictation recorder/i }),
     ).toContainText("Done");
-    await expect(page.getByText(/Recent capture/i)).toBeVisible();
+    // "Recent capture" playback card was removed in the new UI.
 
     await expect
       .poll(() =>
@@ -183,7 +183,7 @@ test.describe("Sonolect voice capture readiness", () => {
     expect(readiness.objectUrlBytes).toEqual(readiness.recorderBytes);
   });
 
-  test.fixme("surfaces capture readiness errors when media APIs are unavailable", async ({
+  test("surfaces capture readiness errors when media APIs are unavailable", async ({
     page,
   }) => {
     await page.addInitScript(() => {
@@ -195,14 +195,14 @@ test.describe("Sonolect voice capture readiness", () => {
     });
     await page.goto("/");
 
-    await page.getByRole("button", { name: /Record now/i }).click();
+    await page.getByRole("button", { name: "Record" }).click();
     await expect(
-      page.getByRole("status", { name: /Sonolect voice recorder/i }),
+      page.getByRole("status", { name: /Dictation recorder/i }),
     ).toContainText("Error");
     await expect(page.getByText("error.micUnavailable")).toBeVisible();
   });
 
-  test.fixme("applies Whisper command templates without persisting example home paths", async ({
+  test("applies Whisper command templates without persisting example home paths", async ({
     page,
   }) => {
     await page.addInitScript(() => {

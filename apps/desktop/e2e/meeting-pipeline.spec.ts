@@ -68,14 +68,14 @@ async function installMeetingMocks(page: Page) {
 }
 
 test.describe("Meeting pipeline E2E", () => {
-  test.fixme("records, stops, and shows transcript in history (voice capture flow)", async ({
+  test("records, stops, and shows transcript in history (voice capture flow)", async ({
     page,
   }) => {
     await installMeetingMocks(page);
     await page.goto("/");
 
     // Ensure we're on the home view
-    await expect(page.getByRole("heading", { name: "Voice OS" })).toBeVisible();
+    await expect(page.getByText("Sonolect").first()).toBeVisible();
 
     // Verify offline history items are visible (acts as "meeting history")
     await expect(
@@ -89,9 +89,9 @@ test.describe("Meeting pipeline E2E", () => {
     ).toBeVisible();
 
     // Start a recording session (meeting-like flow)
-    await page.getByRole("button", { name: /Record now/i }).click();
+    await page.getByRole("button", { name: "Record" }).click();
     const recorder = page.getByRole("status", {
-      name: /Sonolect voice recorder/i,
+      name: /Dictation recorder/i,
     });
     await expect(recorder).toContainText(/0s|1s/);
 
@@ -100,7 +100,7 @@ test.describe("Meeting pipeline E2E", () => {
     await expect(recorder).toContainText("Done");
 
     // Verify the capture result is shown
-    await expect(page.getByText(/Recent capture/i)).toBeVisible();
+    // "Recent capture" playback card was removed in the new UI.
   });
 
   test("transcript session can be opened and edited after capture", async ({
@@ -154,7 +154,7 @@ test.describe("Meeting pipeline E2E", () => {
     ).toBeVisible();
   });
 
-  test.fixme("settings page shows voice control and STT configuration", async ({
+  test("settings page shows voice control and STT configuration", async ({
     page,
   }) => {
     await installMeetingMocks(page);
@@ -163,7 +163,7 @@ test.describe("Meeting pipeline E2E", () => {
     // Navigate to settings (system audio / privacy check)
     await page.getByRole("button", { name: "Settings" }).click();
     await expect(
-      page.getByRole("heading", { name: /Voice control/i }),
+      page.getByRole("heading", { name: /Preferences/i }),
     ).toBeVisible();
 
     // Verify API status indicator
@@ -172,12 +172,12 @@ test.describe("Meeting pipeline E2E", () => {
     ).toBeVisible();
 
     // Verify STT language selector
-    await page.getByLabel("STT Language").selectOption("en");
+    await page.getByLabel(/Speech-to-text language/i).selectOption("en");
 
     // Verify privacy mode toggle
-    await page.getByRole("button", { name: "Cloud" }).click();
+    await page.getByRole("button", { name: "Cloud-assisted" }).click();
     await expect(page.getByText(/cloud-assisted/i).first()).toBeVisible();
-    await page.getByRole("button", { exact: true, name: "Local" }).click();
+    await page.getByRole("button", { name: "Local-first" }).click();
   });
 
   test("multiple transcript sessions appear in history list", async ({
