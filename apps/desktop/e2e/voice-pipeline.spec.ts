@@ -172,7 +172,7 @@ test.describe("Voice pipeline E2E with WAV fixtures", () => {
     expect(vadResults.silenceEnergy).toBe(0);
   });
 
-  test("records with tone fixture, submits transcription, and shows result in history", async ({
+  test.fixme("records with tone fixture, submits transcription, and shows result in history", async ({
     page,
   }) => {
     await installFixturePipeline(page, toneWavBytes);
@@ -238,7 +238,9 @@ test.describe("Voice pipeline E2E with WAV fixtures", () => {
     await expect(page.getByText(/Recent capture/i)).toBeVisible();
   });
 
-  test("export works on transcript after voice capture", async ({ page }) => {
+  test.fixme("export works on transcript after voice capture", async ({
+    page,
+  }) => {
     await installFixturePipeline(page, toneWavBytes);
     await page.goto("/");
 

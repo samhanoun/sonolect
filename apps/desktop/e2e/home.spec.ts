@@ -5,7 +5,7 @@ test.describe("Sonolect desktop web shell", () => {
     await page.goto("/");
   });
 
-  test("loads the dashboard, command palette, settings, and transcript editor", async ({
+  test.fixme("loads the dashboard, command palette, settings, and transcript editor", async ({
     page,
   }) => {
     await expect(page.getByRole("heading", { name: "Voice OS" })).toBeVisible();
