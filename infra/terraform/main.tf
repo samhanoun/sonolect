@@ -33,7 +33,9 @@ locals {
     "secretmanager.googleapis.com",
     "iam.googleapis.com",
     "logging.googleapis.com",
-    "monitoring.googleapis.com"
+    "monitoring.googleapis.com",
+    "aiplatform.googleapis.com",
+    "speech.googleapis.com"
   ])
 
   cloud_run_services = {
@@ -274,6 +276,16 @@ resource "google_cloud_run_v2_service" "services" {
         name  = "GCP_PROJECT_ID"
         value = var.project_id
       }
+
+      env {
+        name  = "SONOLECT_VERTEX_LOCATION"
+        value = "us-central1"
+      }
+
+      env {
+        name  = "SONOLECT_GEMINI_MODEL"
+        value = "gemini-2.0-flash"
+      }
     }
   }
 
@@ -318,6 +330,21 @@ resource "google_storage_bucket_iam_member" "cloud_run_storage_object_user" {
   bucket = google_storage_bucket.app.name
   role   = "roles/storage.objectUser"
   member = "serviceAccount:${google_service_account.cloud_run.email}"
+}
+
+resource "google_project_iam_member" "cloud_run_vertex_user" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:${google_service_account.cloud_run.email}"
+}
+
+# Speech-to-Text v2 is callable once the API is enabled and the service account
+# can consume project services. If org policy requires a granular Speech role,
+# add roles/speech.client here as well.
+resource "google_project_iam_member" "cloud_run_service_usage" {
+  project = var.project_id
+  role    = "roles/serviceusage.serviceUsageConsumer"
+  member  = "serviceAccount:${google_service_account.cloud_run.email}"
 }
 
 resource "google_project_iam_member" "cloud_run_pubsub_publisher" {

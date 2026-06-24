@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import {
-  submitCapturedAudio,
+  submitCapturedAudioCloud,
   type TranscriptJobResult,
   type VoiceCaptureMetadata,
 } from "../voiceApi";
@@ -444,7 +444,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
         activeChunks = [];
         set({ recordingState: "uploading" });
 
-        void submitCapturedAudio(blob, metadata)
+        void submitCapturedAudioCloud(blob, metadata)
           .then((api) => {
             const objectUrl = URL.createObjectURL(blob);
             const completedAt = new Date().toISOString();
