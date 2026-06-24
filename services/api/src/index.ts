@@ -5,6 +5,7 @@ import Fastify, {
 } from "fastify";
 import helmet from "@fastify/helmet";
 import cors from "@fastify/cors";
+import { registerAiRoutes } from "./ai.js";
 import { mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -772,6 +773,8 @@ export async function createApp(
       }
     },
   );
+
+  registerAiRoutes(app);
 
   return app;
 }

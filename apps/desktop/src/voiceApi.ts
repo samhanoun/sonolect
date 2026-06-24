@@ -148,6 +148,110 @@ export async function submitCapturedAudio(
 
 export const submitTranscriptJob = submitCapturedAudio;
 
+const TRANSCRIBE_PATH = "/v1/transcribe";
+const POLISH_PATH = "/v1/polish";
+
+async function cloudTranscribe(
+  audio: Blob,
+  metadata: VoiceCaptureMetadata,
+  apiUrl: string,
+  options: SubmitCapturedAudioOptions,
+): Promise<string> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const url = new URL(TRANSCRIBE_PATH, apiUrl);
+  if (options.language && options.language !== "auto") {
+    url.searchParams.set("language", options.language);
+  }
+  const response = await fetchImpl(url.toString(), {
+    method: "POST",
+    headers: {
+      ...createAuthHeaders(),
+      "content-type": metadata.mimeType || audio.type || "audio/webm",
+    },
+    body: audio,
+  });
+  if (!response.ok) {
+    throw new Error(`Cloud transcribe failed (${response.status})`);
+  }
+  const payload = (await response.json().catch(() => ({}))) as {
+    transcript?: string;
+  };
+  return (payload.transcript ?? "").trim();
+}
+
+async function cloudPolish(
+  transcript: string,
+  apiUrl: string,
+  options: SubmitCapturedAudioOptions,
+): Promise<string> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const url = new URL(POLISH_PATH, apiUrl).toString();
+  const response = await fetchImpl(url, {
+    method: "POST",
+    headers: { ...createAuthHeaders(), "content-type": "application/json" },
+    body: JSON.stringify({ transcript, locale: options.language }),
+  });
+  if (!response.ok) {
+    throw new Error(`Cloud polish failed (${response.status})`);
+  }
+  const payload = (await response.json().catch(() => ({}))) as {
+    polished?: string;
+  };
+  return (payload.polished ?? transcript).trim();
+}
+
+/**
+ * Cloud-default dictation loop: desktop Whisper first (local-first), then cloud
+ * STT (/v1/transcribe) + Gemini polish (/v1/polish), then the existing
+ * job-based submission / offline retention as fallback.
+ */
+export async function submitCapturedAudioCloud(
+  audio: Blob,
+  metadata: VoiceCaptureMetadata,
+  options: SubmitCapturedAudioOptions = {},
+): Promise<TranscriptJobResult> {
+  const desktopResult = await (
+    options.desktopTranscriber ?? transcribeWithDesktopWhisper
+  )(audio, metadata, options.language).catch(() => undefined);
+  if (desktopResult) {
+    return {
+      status: "completed",
+      transcript: desktopResult.text.trim(),
+      segments: desktopResult.segments,
+      message: "Capture transcrite localement avec Whisper desktop.",
+    };
+  }
+
+  const apiUrl = options.apiUrl ?? API_URL;
+  if (apiUrl) {
+    try {
+      const transcript = await cloudTranscribe(
+        audio,
+        metadata,
+        apiUrl,
+        options,
+      );
+      if (transcript) {
+        const polished = await cloudPolish(transcript, apiUrl, options).catch(
+          () => transcript,
+        );
+        return {
+          status: "completed",
+          transcript: polished,
+          message: "Cloud STT + Gemini polish.",
+        };
+      }
+    } catch {
+      // fall through to the job-based / offline path
+    }
+  }
+
+  return submitCapturedAudio(audio, metadata, {
+    ...options,
+    desktopTranscriber: async () => undefined,
+  });
+}
+
 async function uploadCapturedAudioBinary(
   fetchImpl: typeof fetch,
   apiUrl: string,
