@@ -6,8 +6,8 @@ const mainSource = await readFile(
   new URL("./main.tsx", import.meta.url),
   "utf8",
 );
-const stylesSource = await readFile(
-  new URL("./styles.css", import.meta.url),
+const tailwindSource = await readFile(
+  new URL("./tailwind.css", import.meta.url),
   "utf8",
 );
 const frSource = await readFile(
@@ -58,28 +58,10 @@ describe("desktop futuristic design shell", () => {
     }
   });
 
-  it("uses a futuristic dark interface language with ambient voice visuals", () => {
-    for (const requiredSelector of [
-      ".ambient-grid",
-      ".neural-orb",
-      ".signal-rings",
-      ".voice-command-strip",
-      ".hologram-frame",
-    ]) {
-      assert.match(
-        stylesSource,
-        new RegExp(requiredSelector.replace(".", "\\.")),
-      );
-    }
-
-    for (const requiredToken of [
-      "--bg-void",
-      "--accent-cyan",
-      "--accent-violet",
-      "backdrop-filter",
-      "radial-gradient",
-    ]) {
-      assert.match(stylesSource, new RegExp(requiredToken));
-    }
+  it("uses Tailwind with the migrated dark design system", () => {
+    // The bespoke styles.css was removed; the UI is now Tailwind-based.
+    assert.match(tailwindSource, /tailwindcss/);
+    assert.match(tailwindSource, /\.artistic-aura/);
+    assert.match(mainSource, /bg-\[#0A0A0A\]/);
   });
 });

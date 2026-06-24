@@ -96,7 +96,6 @@ import {
 } from "./contextSpelling";
 import { preprocessAudio, AUDIO_PRESETS } from "./audioPreprocessing";
 import "./tailwind.css";
-import "./styles.css";
 import DictionaryPanel from "./components/DictionaryPanel";
 import SnippetsPanel from "./components/SnippetsPanel";
 import SettingsPanel from "./components/SettingsPanel";
@@ -253,9 +252,7 @@ function App() {
   }, [activeSessionId, transcript, transcriptSegments, selectedSegmentIds]);
 
   return (
-    <main className="desktop-shell">
-      <div className="ambient-grid" aria-hidden="true" />
-      <div className="signal-rings" aria-hidden="true" />
+    <main className="relative flex h-screen w-screen overflow-hidden bg-[#0A0A0A] text-[#F0F0F0]">
       <AppSidebar />
       <WorkspaceRouter />
       <RecorderPillView />
@@ -273,39 +270,34 @@ function WorkspaceRouter() {
   const t = useT();
 
   return (
-    <section className="workspace" aria-label={t("workspace.ariaLabel")}>
+    <section
+      className="flex flex-1 flex-col h-full min-w-0 overflow-hidden"
+      aria-label={t("workspace.ariaLabel")}
+    >
       <TopBar />
-      {activeView === "settings" ? (
-        <div className="workspace-grid">
+      <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+        {activeView === "settings" ? (
           <SettingsPanel />
-        </div>
-      ) : activeView === "dictionary" ? (
-        <div className="workspace-grid">
+        ) : activeView === "dictionary" ? (
           <DictionaryPanel />
-        </div>
-      ) : activeView === "snippets" ? (
-        <div className="workspace-grid">
+        ) : activeView === "snippets" ? (
           <SnippetsPanel />
-        </div>
-      ) : activeView === "onboarding" ? (
-        <div className="workspace-grid">
+        ) : activeView === "onboarding" ? (
           <OnboardingView />
-        </div>
-      ) : activeView === "team" ? (
-        <div className="workspace-grid">
-          <TeamView currentUserId="local-user" />
-        </div>
-      ) : activeView === "reader" ? (
-        <div className="workspace-grid">
-          <ReaderView />
-        </div>
-      ) : activeSessionId ? (
-        <div className="workspace-grid">
+        ) : activeView === "team" ? (
+          <div className="flex-1 overflow-y-auto p-10">
+            <TeamView currentUserId="local-user" />
+          </div>
+        ) : activeView === "reader" ? (
+          <div className="flex-1 overflow-y-auto p-10">
+            <ReaderView />
+          </div>
+        ) : activeSessionId ? (
           <TranscriptDetail />
-        </div>
-      ) : (
-        <HistoryPanel />
-      )}
+        ) : (
+          <HistoryPanel />
+        )}
+      </div>
     </section>
   );
 }
@@ -318,13 +310,17 @@ function TopBar() {
   const t = useT();
 
   return (
-    <header className="topbar">
+    <header className="flex items-center justify-between gap-4 px-8 py-4 border-b border-white/5 bg-[#0A0A0A] shrink-0">
       <div>
-        <p className="eyebrow">{t("topbar.eyebrow")}</p>
-        <h2>{t("topbar.headline")}</h2>
+        <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+          {t("topbar.eyebrow")}
+        </p>
+        <h2 className="text-sm font-medium text-white mt-0.5">
+          {t("topbar.headline")}
+        </h2>
       </div>
-      <div className="topbar-actions">
-        <span className="status-chip">
+      <div className="flex items-center gap-3">
+        <span className="text-[10px] uppercase tracking-widest text-slate-400 border border-white/10 rounded-full px-3 py-1.5">
           {privacyLevel === "local"
             ? t("topbar.localFirst")
             : t("topbar.cloudAssisted")}{" "}
@@ -332,11 +328,14 @@ function TopBar() {
           {isVoiceApiConfigured() ? t("topbar.apiReady") : t("topbar.offline")}
         </span>
         <button
-          className="ghost-button"
+          className="flex items-center gap-2 text-xs text-slate-300 border border-white/10 rounded-full px-4 py-2 hover:bg-white/5 transition-all"
           onClick={() => setCommandOpen(true)}
           type="button"
         >
-          {t("topbar.searchCommand")} <kbd>⌘K</kbd>
+          {t("topbar.searchCommand")}{" "}
+          <kbd className="text-[10px] font-mono text-slate-500 border border-white/10 rounded px-1">
+            ⌘K
+          </kbd>
         </button>
       </div>
     </header>
@@ -440,38 +439,44 @@ function TranscriptDetail() {
     [activeSession?.title, activeSessionId, transcript, transcriptSegments, t],
   );
 
+  const ghost =
+    "px-3 py-1.5 rounded-lg border border-white/10 text-xs text-slate-300 hover:bg-white/5 disabled:opacity-40 transition-all";
+  const primary =
+    "px-4 py-2 rounded-xl bg-white text-black text-xs font-bold hover:bg-slate-200 disabled:opacity-40 transition-all";
+
   return (
-    <section className="editor-panel">
+    <section className="flex-1 overflow-y-auto p-10 bg-[#0A0A0A] text-[#F0F0F0] space-y-6 artistic-aura">
       <button
-        className="ghost-button back-button"
+        className="text-[11px] uppercase tracking-widest text-slate-400 hover:text-white transition-all"
         onClick={clearActiveSession}
         type="button"
       >
-        {t("home.backToTimeline")}
+        ← {t("home.backToTimeline")}
       </button>
-      <div className="panel-header">
-        <div>
-          <p className="eyebrow">{t("editor.eyebrow")}</p>
-          <h3>{activeSession?.title ?? t("editor.fallbackTitle")}</h3>
-          {activeSession ? (
-            <p className="editor-meta">
-              {activeSession.status} · {activeSession.duration} ·{" "}
-              {activeSession.metadata}
-            </p>
-          ) : null}
-        </div>
+      <div>
+        <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
+          {t("editor.eyebrow")}
+        </p>
+        <h3 className="text-2xl font-light text-white tracking-tight mt-1">
+          {activeSession?.title ?? t("editor.fallbackTitle")}
+        </h3>
+        {activeSession ? (
+          <p className="text-[11px] text-slate-500 mt-1">
+            {activeSession.status} · {activeSession.duration} ·{" "}
+            {activeSession.metadata}
+          </p>
+        ) : null}
       </div>
 
-      <div className="hologram-frame">
+      <div className="bg-[#0C0C0C] border border-white/5 rounded-2xl p-6 space-y-4">
         {draftRestored ? (
-          <p className="draft-recovery-banner">{t("editor.draftRestored")}</p>
+          <p className="text-[11px] text-cyan-400">
+            {t("editor.draftRestored")}
+          </p>
         ) : null}
-        <div
-          className="editor-history-actions"
-          aria-label={t("editor.historyControls")}
-        >
+        <div className="flex gap-2" aria-label={t("editor.historyControls")}>
           <button
-            className="ghost-button"
+            className={ghost}
             disabled={!canUndoTranscript}
             onClick={undoTranscriptEdit}
             type="button"
@@ -479,7 +484,7 @@ function TranscriptDetail() {
             {t("editor.undo")}
           </button>
           <button
-            className="ghost-button"
+            className={ghost}
             disabled={!canRedoTranscript}
             onClick={redoTranscriptEdit}
             type="button"
@@ -489,24 +494,29 @@ function TranscriptDetail() {
         </div>
         <textarea
           aria-label={t("editor.textareaLabel")}
-          className="transcript-input"
+          className="w-full min-h-[200px] bg-[#0E0E0E] border border-white/5 rounded-xl p-4 text-sm text-white leading-relaxed focus:outline-none focus:border-white/20 resize-y"
           onChange={(event) => setTranscript(event.target.value)}
           spellCheck="true"
           value={transcript}
         />
       </div>
 
-      <section className="segment-editor" aria-label={t("segments.ariaLabel")}>
-        <div className="segment-toolbar">
+      <section
+        className="bg-[#0C0C0C] border border-white/5 rounded-2xl p-6 space-y-4"
+        aria-label={t("segments.ariaLabel")}
+      >
+        <div className="flex items-center justify-between gap-4">
           <div>
-            <p className="section-title">{t("segments.title")}</p>
-            <p className="editor-meta">
+            <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-slate-400">
+              {t("segments.title")}
+            </p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
               {transcriptSegments.length} {t("segments.count")}
             </p>
           </div>
-          <div className="segment-actions">
+          <div className="flex gap-2">
             <button
-              className="ghost-button"
+              className={ghost}
               disabled={!canMergeSegments}
               onClick={mergeSelectedSegments}
               type="button"
@@ -514,7 +524,7 @@ function TranscriptDetail() {
               {t("segments.merge")}
             </button>
             <button
-              className="ghost-button"
+              className={ghost}
               disabled={!canSplitSegment}
               onClick={splitSelectedSegment}
               type="button"
@@ -524,20 +534,20 @@ function TranscriptDetail() {
           </div>
         </div>
 
-        <div className="segment-list">
+        <div className="space-y-3">
           {transcriptSegments.length === 0 ? (
-            <p className="editor-meta">{t("segments.empty")}</p>
+            <p className="text-[11px] text-slate-500">{t("segments.empty")}</p>
           ) : (
             transcriptSegments.map((segment, index) => {
               const selected = selectedSegmentIds.includes(segment.id);
               return (
                 <article
-                  className={
-                    selected ? "segment-card selected" : "segment-card"
-                  }
+                  className={`bg-[#0E0E0E] border rounded-xl p-4 space-y-2.5 ${
+                    selected ? "border-white/20" : "border-white/5"
+                  }`}
                   key={segment.id}
                 >
-                  <label className="segment-select">
+                  <label className="flex items-center gap-2 text-[11px] text-slate-400">
                     <input
                       checked={selected}
                       onChange={() => toggleSegmentSelection(segment.id)}
@@ -549,10 +559,11 @@ function TranscriptDetail() {
                       {formatTimestamp(segment.endMs)}
                     </span>
                   </label>
-                  <label className="segment-speaker">
+                  <label className="flex items-center gap-2 text-[11px] text-slate-400">
                     <span>{t("segments.speaker")}</span>
                     <input
                       aria-label={`${t("segments.speaker")} ${index + 1}`}
+                      className="bg-[#0C0C0C] border border-white/5 rounded-lg px-2 py-1 text-xs text-white focus:outline-none focus:border-white/20"
                       onChange={(event) =>
                         updateSegmentSpeaker(segment.id, event.target.value)
                       }
@@ -563,7 +574,7 @@ function TranscriptDetail() {
                   </label>
                   <textarea
                     aria-label={`${t("segments.textLabel")} ${index + 1}`}
-                    className="segment-textarea"
+                    className="w-full bg-[#0C0C0C] border border-white/5 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-white/20 resize-y"
                     onChange={(event) =>
                       updateSegmentText(segment.id, event.target.value)
                     }
@@ -578,23 +589,27 @@ function TranscriptDetail() {
       </section>
 
       <section
-        className="polish-preview-card"
+        className="bg-[#0C0C0C] border border-white/5 rounded-2xl p-6 space-y-3"
         aria-label="Wispr-style polished preview"
       >
         <div>
-          <p className="section-title">Wispr-style auto-edit</p>
-          <h4>Raw speech → polished text</h4>
+          <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-slate-400">
+            Wispr-style auto-edit
+          </p>
+          <h4 className="text-sm text-white mt-0.5">
+            Raw speech → polished text
+          </h4>
         </div>
-        <p className="preview-text">
+        <p className="text-sm text-slate-300 leading-relaxed">
           {polishedPreview ||
             "Record or type a dictation to see the cleaned preview."}
         </p>
         {insertionStatus ? (
-          <p className="editor-meta">{insertionStatus}</p>
+          <p className="text-[11px] text-slate-500">{insertionStatus}</p>
         ) : null}
-        <div className="inline-actions">
+        <div className="flex gap-2">
           <button
-            className="ghost-button"
+            className={ghost}
             disabled={!polishedPreview.trim()}
             onClick={applyPolishedPreview}
             type="button"
@@ -602,7 +617,7 @@ function TranscriptDetail() {
             Replace editor with preview
           </button>
           <button
-            className="primary-button compact"
+            className={primary}
             disabled={!polishedPreview.trim() && !transcript.trim()}
             onClick={() => void insertPolishedDictation()}
             type="button"
@@ -612,18 +627,18 @@ function TranscriptDetail() {
         </div>
       </section>
 
-      <footer className="editor-footer">
+      <footer className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500 pt-2">
         <span>
           {wordCount} {t("editor.wordCount")}
         </span>
         <span>{t("editor.language")}</span>
-        <button className="ghost-button" onClick={handleCopy} type="button">
+        <button className={ghost} onClick={handleCopy} type="button">
           {t("editor.copy")}
         </button>
         {(["txt", "md", "srt", "vtt", "json"] as TranscriptExportFormat[]).map(
           (format) => (
             <button
-              className="ghost-button"
+              className={ghost}
               key={format}
               onClick={() => handleDownload(format)}
               type="button"
@@ -633,7 +648,7 @@ function TranscriptDetail() {
           ),
         )}
         <button
-          className="primary-button"
+          className={primary}
           disabled={transforming}
           onClick={transformTranscript}
           type="button"
@@ -652,9 +667,12 @@ function ToastContainer() {
   const t = useT();
   if (toasts.length === 0) return null;
   return (
-    <div className="toast-container">
+    <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
       {toasts.map((toast) => (
-        <div key={toast.id} className="toast">
+        <div
+          key={toast.id}
+          className="px-4 py-2.5 rounded-xl bg-[#0C0C0C] border border-white/10 text-xs text-white shadow-2xl"
+        >
           {t(toast.message as LocaleKeys)}
         </div>
       ))}
