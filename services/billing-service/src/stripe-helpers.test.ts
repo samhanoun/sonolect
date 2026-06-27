@@ -77,6 +77,20 @@ describe("verifyStripeSignature", () => {
   it("returns false for a malformed header", () => {
     assert.equal(verifyStripeSignature('{"id":"evt_1"}', "", SECRET), false);
   });
+
+  it("returns false for a timestamp too far in the past (replay attack)", () => {
+    const payload = '{"id":"evt_1"}';
+    const oldTimestamp = (Math.floor(Date.now() / 1000) - 400).toString(); // 6 minutes 40 seconds ago
+    const header = makeSignature(payload, SECRET, oldTimestamp);
+    assert.equal(verifyStripeSignature(payload, header, SECRET), false);
+  });
+
+  it("returns false for a timestamp too far in the future", () => {
+    const payload = '{"id":"evt_1"}';
+    const futureTimestamp = (Math.floor(Date.now() / 1000) + 400).toString(); // 6 minutes 40 seconds in the future
+    const header = makeSignature(payload, SECRET, futureTimestamp);
+    assert.equal(verifyStripeSignature(payload, header, SECRET), false);
+  });
 });
 
 describe("parseStripeEvent", () => {

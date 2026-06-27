@@ -18,6 +18,7 @@ export const verifyStripeSignature = (
   payload: string | Buffer,
   signature: string,
   secret: string,
+  tolerance = 300, // 5 minutes default tolerance to prevent replay attacks
 ): boolean => {
   const parts = Object.fromEntries(
     signature.split(",").map((part) => {
@@ -28,6 +29,15 @@ export const verifyStripeSignature = (
   const timestamp = parts.t;
   const sig = parts.v1;
   if (!timestamp || !sig) return false;
+
+  const parsedTimestamp = parseInt(timestamp, 10);
+  if (isNaN(parsedTimestamp)) return false;
+
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - parsedTimestamp) > tolerance) {
+    return false; // Replay attack protection
+  }
+
   const expected = createHmac("sha256", secret)
     .update(`${timestamp}.${payload}`)
     .digest("hex");
