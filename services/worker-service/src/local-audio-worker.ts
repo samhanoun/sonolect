@@ -1,4 +1,4 @@
-import { exec, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +13,6 @@ interface LocalAudioStorePayload {
 export interface LocalAudioWorkerOptions {
   storePath: string;
   now?: () => Date;
-  localSttCommand?: string;
   localSttCommandArgs?: string[];
   sttTimeoutMs?: number;
   allowMockTranscription?: boolean;
@@ -63,27 +62,12 @@ const mockTranscriptText = (job: AudioUploadJob): string => {
 const isEnabled = (value: string | undefined): boolean =>
   value === "1" || value?.toLowerCase() === "true";
 
-const shellQuote = (value: string): string =>
-  `'${value.replace(/'/g, `'"'"'`)}'`;
-
 const commandReplacements = (job: AudioUploadJob, transcript: Transcript) =>
   new Map<string, string>([
     ["audioPath", job.upload.localPath ?? ""],
     ["mimeType", job.upload.mimeType ?? job.mimeType],
     ["language", transcript.language],
   ]);
-
-const resolveLocalSttCommand = (
-  commandTemplate: string,
-  job: AudioUploadJob,
-  transcript: Transcript,
-): string => {
-  const replacements = commandReplacements(job, transcript);
-  return commandTemplate.replace(
-    /\{(audioPath|mimeType|language)\}/g,
-    (_match, key: string) => shellQuote(replacements.get(key) ?? ""),
-  );
-};
 
 const resolveLocalSttCommandArgs = (
   commandArgsTemplate: string[],
@@ -116,49 +100,6 @@ class LocalSttCommandAbortedError extends Error {
 
 const isAbortError = (error: unknown): boolean =>
   error instanceof LocalSttCommandAbortedError;
-
-const runLocalSttCommand = async (
-  command: string,
-  timeoutMs: number,
-  signal?: AbortSignal,
-): Promise<string> =>
-  new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new LocalSttCommandAbortedError());
-      return;
-    }
-
-    let settled = false;
-    const child = exec(
-      command,
-      { timeout: timeoutMs, maxBuffer: 1024 * 1024 },
-      (error, stdout, stderr) => {
-        if (settled) return;
-        settled = true;
-        if (error) {
-          const detail = stderr.trim() || stdout.trim() || error.message;
-          reject(new Error(`Local STT command failed: ${detail}`));
-          return;
-        }
-        try {
-          resolve(textFromCommandOutput(stdout));
-        } catch (outputError) {
-          reject(outputError);
-        }
-      },
-    );
-
-    signal?.addEventListener(
-      "abort",
-      () => {
-        if (settled) return;
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new LocalSttCommandAbortedError());
-      },
-      { once: true },
-    );
-  });
 
 const runLocalSttCommandArgs = async (
   commandArgs: string[],
@@ -244,19 +185,6 @@ const transcribeLocalAudio = async (
     };
   }
 
-  const commandTemplate =
-    options.localSttCommand ?? process.env.SONOLECT_LOCAL_STT_COMMAND;
-  if (commandTemplate?.trim()) {
-    return {
-      text: await runLocalSttCommand(
-        resolveLocalSttCommand(commandTemplate, job, transcript),
-        options.sttTimeoutMs ?? 120_000,
-        options.signal,
-      ),
-      tags: ["audio", "local-stt", "offline-transcribed"],
-    };
-  }
-
   if (
     options.allowMockTranscription ||
     isEnabled(process.env.SONOLECT_ALLOW_MOCK_TRANSCRIPTION)
@@ -268,7 +196,7 @@ const transcribeLocalAudio = async (
   }
 
   throw new Error(
-    "Set SONOLECT_LOCAL_STT_COMMAND or SONOLECT_LOCAL_STT_COMMAND_ARGS to an offline STT command, or explicitly enable mock transcription for tests/dev.",
+    "Set SONOLECT_LOCAL_STT_COMMAND_ARGS to an offline STT command, or explicitly enable mock transcription for tests/dev.",
   );
 };
 
