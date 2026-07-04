@@ -18,6 +18,7 @@ export const verifyStripeSignature = (
   payload: string | Buffer,
   signature: string,
   secret: string,
+  tolerance: number = 300,
 ): boolean => {
   const parts = Object.fromEntries(
     signature.split(",").map((part) => {
@@ -25,16 +26,45 @@ export const verifyStripeSignature = (
       return [key, value];
     }),
   );
-  const timestamp = parts.t;
+  const timestampStr = parts.t;
   const sig = parts.v1;
-  if (!timestamp || !sig) return false;
+  if (!timestampStr || !sig) return false;
+
+  const timestamp = parseInt(timestampStr, 10);
+  if (Number.isNaN(timestamp)) return false;
+
+  if (tolerance > 0) {
+    const now = Math.floor(Date.now() / 1000);
+    if (Math.abs(now - timestamp) > tolerance) {
+      return false;
+    }
+  }
+
   const expected = createHmac("sha256", secret)
-    .update(`${timestamp}.${payload}`)
+    .update(`${timestampStr}.${payload}`)
     .digest("hex");
-  const actualBuffer = Buffer.from(sig, "hex");
   const expectedBuffer = Buffer.from(expected, "hex");
-  if (actualBuffer.length !== expectedBuffer.length) return false;
-  return timingSafeEqual(actualBuffer, expectedBuffer);
+
+  const signatures = signature
+    .split(",")
+    .map((part) => part.split("=", 2))
+    .filter(([key]) => key === "v1")
+    .map(([, value]) => value);
+
+  if (signatures.length === 0) return false;
+
+  for (const s of signatures) {
+    if (!s) continue;
+    const actualBuffer = Buffer.from(s, "hex");
+    if (
+      actualBuffer.length === expectedBuffer.length &&
+      timingSafeEqual(actualBuffer, expectedBuffer)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 };
 
 export const parseStripeEvent = (
