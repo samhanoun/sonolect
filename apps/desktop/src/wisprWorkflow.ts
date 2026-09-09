@@ -24,7 +24,7 @@ export type InsertionPlan = {
 };
 
 const FILLER_PATTERN =
-  /\b(um+|uh+|erm+|ah+|like|you know|sort of|kind of)\b[,.!?\s]*/gi;
+  /\b(um+|uh+|erm+)\b[,.!?\t ]*/gi;
 
 export function createId(prefix: string, seed = Date.now()): string {
   return `${prefix}-${seed.toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -64,7 +64,7 @@ export function applyDictionary(
 ): string {
   return entries.reduce((current, entry) => {
     const pattern = new RegExp(`\\b${escapeRegex(entry.spoken)}\\b`, "gi");
-    return current.replace(pattern, entry.replacement);
+    return current.replace(pattern, () => entry.replacement);
   }, text);
 }
 
@@ -87,14 +87,16 @@ export function polishDictation(
 ): string {
   const cleaned = raw
     .replace(FILLER_PATTERN, "")
-    .replace(/\s+/g, " ")
-    .replace(/\s+([,.!?;:])/g, "$1")
+    .replace(/[\t ]+/g, " ")
+    .replace(/[\t ]+([,.!?;:])/g, "$1")
     .trim();
   if (!cleaned) return "";
 
   const withDictionary = applyDictionary(cleaned, options.dictionary ?? []);
   const withSnippets = expandSnippets(withDictionary, options.snippets ?? []);
-  const sentences = withSnippets
+  return withSnippets.split(/(\n+)/).map((paragraph) => {
+    if (/^\n+$/.test(paragraph)) return paragraph;
+    const sentences = paragraph
     .split(/(?<=[.!?])\s+/)
     .map((sentence) => sentence.trim())
     .filter(Boolean)
@@ -102,7 +104,8 @@ export function polishDictation(
       const capitalized = sentence.charAt(0).toUpperCase() + sentence.slice(1);
       return /[.!?]$/.test(capitalized) ? capitalized : `${capitalized}.`;
     });
-  return sentences.join(" ");
+    return sentences.join(" ");
+  }).join("");
 }
 
 export function buildInsertionPlan(

@@ -29,7 +29,11 @@ export type TranscriptJobResult = {
   message?: string;
 };
 
-type SubmitCapturedAudioOptions = {
+export type SubmitCapturedAudioOptions = {
+  processingMode?: "local" | "cloud" | undefined;
+  modelPath?: string;
+  canUseCloud?: () => boolean;
+  signal?: AbortSignal;
   apiUrl?: string;
   fetchImpl?: typeof fetch;
   language?: string;
@@ -37,11 +41,25 @@ type SubmitCapturedAudioOptions = {
     audio: Blob,
     metadata: VoiceCaptureMetadata,
     language?: string,
+    modelPath?: string,
   ) => Promise<DesktopWhisperResult | undefined>;
 };
 
 const API_URL = import.meta.env?.VITE_SONOLECT_API_URL?.trim();
 const AUDIO_JOBS_PATH = "/audio/jobs";
+
+function cloudAllowed(options: SubmitCapturedAudioOptions): boolean {
+  return options.processingMode === "cloud" && !options.signal?.aborted &&
+    (options.canUseCloud?.() ?? true);
+}
+
+function guardedFetch(options: SubmitCapturedAudioOptions): typeof fetch {
+  const request = options.fetchImpl ?? fetch;
+  return (input, init) => {
+    if (!cloudAllowed(options)) throw new Error("Local only: cloud processing is disabled.");
+    return request(input, { ...init, signal: options.signal ?? AbortSignal.timeout(60_000) });
+  };
+}
 
 export function isVoiceApiConfigured() {
   return Boolean(API_URL);
@@ -73,7 +91,7 @@ export async function submitCapturedAudio(
 ): Promise<TranscriptJobResult> {
   const desktopResult = await (
     options.desktopTranscriber ?? transcribeWithDesktopWhisper
-  )(audio, metadata, options.language).catch(() => undefined);
+  )(audio, metadata, options.language, options.modelPath).catch(() => undefined);
   if (desktopResult) {
     return {
       status: "completed",
@@ -83,6 +101,9 @@ export async function submitCapturedAudio(
     };
   }
 
+  if (!cloudAllowed(options)) {
+    return offlineResult("Local transcription unavailable. Check your installed model. No audio was uploaded.");
+  }
   const apiUrl = options.apiUrl ?? API_URL;
   if (!apiUrl) {
     return offlineResult(
@@ -90,7 +111,7 @@ export async function submitCapturedAudio(
     );
   }
 
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl = guardedFetch(options);
 
   try {
     const endpoint = new URL(AUDIO_JOBS_PATH, apiUrl).toString();
@@ -157,7 +178,7 @@ async function cloudTranscribe(
   apiUrl: string,
   options: SubmitCapturedAudioOptions,
 ): Promise<string> {
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl = guardedFetch(options);
   const url = new URL(TRANSCRIBE_PATH, apiUrl);
   if (options.language && options.language !== "auto") {
     url.searchParams.set("language", options.language);
@@ -184,7 +205,7 @@ async function cloudPolish(
   apiUrl: string,
   options: SubmitCapturedAudioOptions,
 ): Promise<string> {
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl = guardedFetch(options);
   const url = new URL(POLISH_PATH, apiUrl).toString();
   const response = await fetchImpl(url, {
     method: "POST",
@@ -212,7 +233,7 @@ export async function submitCapturedAudioCloud(
 ): Promise<TranscriptJobResult> {
   const desktopResult = await (
     options.desktopTranscriber ?? transcribeWithDesktopWhisper
-  )(audio, metadata, options.language).catch(() => undefined);
+  )(audio, metadata, options.language, options.modelPath).catch(() => undefined);
   if (desktopResult) {
     return {
       status: "completed",
@@ -222,6 +243,9 @@ export async function submitCapturedAudioCloud(
     };
   }
 
+  if (!cloudAllowed(options)) {
+    return offlineResult("Local transcription unavailable. Check your installed model. No audio was uploaded.");
+  }
   const apiUrl = options.apiUrl ?? API_URL;
   if (apiUrl) {
     try {
