@@ -33,7 +33,7 @@ export type SubmitCapturedAudioOptions = {
   processingMode?: "local" | "cloud" | undefined;
   modelPath?: string;
   canUseCloud?: () => boolean;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
   apiUrl?: string;
   fetchImpl?: typeof fetch;
   language?: string;
@@ -49,15 +49,25 @@ const API_URL = import.meta.env?.VITE_SONOLECT_API_URL?.trim();
 const AUDIO_JOBS_PATH = "/audio/jobs";
 
 function cloudAllowed(options: SubmitCapturedAudioOptions): boolean {
-  return options.processingMode === "cloud" && !options.signal?.aborted &&
-    (options.canUseCloud?.() ?? true);
+  return (
+    options.processingMode === "cloud" &&
+    !options.signal?.aborted &&
+    (options.canUseCloud?.() ?? true)
+  );
 }
 
 function guardedFetch(options: SubmitCapturedAudioOptions): typeof fetch {
   const request = options.fetchImpl ?? fetch;
   return (input, init) => {
-    if (!cloudAllowed(options)) throw new Error("Local only: cloud processing is disabled.");
-    return request(input, { ...init, signal: options.signal ?? AbortSignal.timeout(60_000) });
+    if (!cloudAllowed(options))
+      throw new Error("Local only: cloud processing is disabled.");
+    const timeout = AbortSignal.timeout(60_000);
+    return request(input, {
+      ...init,
+      signal: options.signal
+        ? AbortSignal.any([options.signal, timeout])
+        : timeout,
+    });
   };
 }
 
@@ -91,7 +101,9 @@ export async function submitCapturedAudio(
 ): Promise<TranscriptJobResult> {
   const desktopResult = await (
     options.desktopTranscriber ?? transcribeWithDesktopWhisper
-  )(audio, metadata, options.language, options.modelPath).catch(() => undefined);
+  )(audio, metadata, options.language, options.modelPath).catch(
+    () => undefined,
+  );
   if (desktopResult) {
     return {
       status: "completed",
@@ -102,7 +114,9 @@ export async function submitCapturedAudio(
   }
 
   if (!cloudAllowed(options)) {
-    return offlineResult("Local transcription unavailable. Check your installed model. No audio was uploaded.");
+    return offlineResult(
+      "Local transcription unavailable. Check your installed model. No audio was uploaded.",
+    );
   }
   const apiUrl = options.apiUrl ?? API_URL;
   if (!apiUrl) {
@@ -233,7 +247,9 @@ export async function submitCapturedAudioCloud(
 ): Promise<TranscriptJobResult> {
   const desktopResult = await (
     options.desktopTranscriber ?? transcribeWithDesktopWhisper
-  )(audio, metadata, options.language, options.modelPath).catch(() => undefined);
+  )(audio, metadata, options.language, options.modelPath).catch(
+    () => undefined,
+  );
   if (desktopResult) {
     return {
       status: "completed",
@@ -244,7 +260,9 @@ export async function submitCapturedAudioCloud(
   }
 
   if (!cloudAllowed(options)) {
-    return offlineResult("Local transcription unavailable. Check your installed model. No audio was uploaded.");
+    return offlineResult(
+      "Local transcription unavailable. Check your installed model. No audio was uploaded.",
+    );
   }
   const apiUrl = options.apiUrl ?? API_URL;
   if (apiUrl) {

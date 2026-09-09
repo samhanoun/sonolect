@@ -68,9 +68,16 @@ export async function transcribeWithDesktopWhisper(
 ): Promise<DesktopWhisperResult | undefined> {
   if (!isTauriRuntime()) return undefined;
 
-  const { invoke } = await import("@tauri-apps/api/core");
-  const audioBytes = await prepareLocalAudio(audio);
-  const payload = createDesktopWhisperPayload(audioBytes, { ...metadata, mimeType: "audio/wav" }, language, modelPath);
+  const [{ invoke }, audioBytes] = await Promise.all([
+    import("@tauri-apps/api/core"),
+    prepareLocalAudio(audio),
+  ]);
+  const payload = createDesktopWhisperPayload(
+    audioBytes,
+    { ...metadata, mimeType: "audio/wav" },
+    language,
+    modelPath,
+  );
   const result = await invoke<{
     text: string;
     segments?: DesktopWhisperSegmentPayload[];

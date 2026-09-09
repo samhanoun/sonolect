@@ -140,15 +140,18 @@ export type DesktopState = {
   transformTranscript: () => void;
 };
 
-export const API_URL = import.meta.env.VITE_SONOLECT_API_URL?.trim();
+export const API_URL = import.meta.env?.VITE_SONOLECT_API_URL?.trim();
 const AUTH_CONFIG = resolveDesktopAuthConfig();
 const API_TOKEN = AUTH_CONFIG.token;
-const sessions: TranscriptSession[] = offlineTranscriptHistory;
+const sessions: TranscriptSession[] = [];
 
 let activeRecorder: MediaRecorder | undefined;
 let activeStream: MediaStream | undefined;
 let activeChunks: BlobPart[] = [];
 let activeStartedAt = 0;
+let captureTimer: ReturnType<typeof setTimeout> | undefined;
+let cloudAbort: AbortController | undefined;
+let permissionCancelled = false;
 
 const preferredAudioMimeTypes = [
   "audio/webm;codecs=opus",
@@ -300,6 +303,7 @@ function withUndoSnapshot(
 }
 
 function stopActiveStream() {
+  clearTimeout(captureTimer);
   activeStream?.getTracks().forEach((track) => track.stop());
   activeStream = undefined;
 }
@@ -399,6 +403,13 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       return;
     }
 
+    const captureSettings = {
+      processingMode: get().privacyLevel,
+      language: get().sttLanguage,
+      modelPath: get().whisperConfig.modelPath,
+    };
+    permissionCancelled = false;
+    cloudAbort = new AbortController();
     set({
       recordingState: "requesting-permission",
       voiceError: undefined,
@@ -407,6 +418,11 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (permissionCancelled) {
+        stream.getTracks().forEach((track) => track.stop());
+        set({ recordingState: "idle" });
+        return;
+      }
       const mimeType = supportedAudioMimeType();
       activeStream = stream;
       activeChunks = [];
@@ -444,7 +460,11 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
         activeChunks = [];
         set({ recordingState: "uploading" });
 
-        void submitCapturedAudioCloud(blob, metadata)
+        void submitCapturedAudioCloud(blob, metadata, {
+          ...captureSettings,
+          canUseCloud: () => get().privacyLevel === "cloud",
+          signal: cloudAbort?.signal,
+        })
           .then((api) => {
             const objectUrl = URL.createObjectURL(blob);
             const completedAt = new Date().toISOString();
@@ -460,9 +480,12 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
                 : `\n\n[Job ${api.jobId ?? "pending"} · ${formatDuration(metadata.durationMs)}]`;
             set((state) => {
               const nextBaseState = {
-                recordingState: "completed" as const,
+                recordingState:
+                  api.status === "offline"
+                    ? ("error" as const)
+                    : ("completed" as const),
                 voiceCapture: capture,
-                voiceError: undefined,
+                voiceError: api.status === "offline" ? api.message : undefined,
               };
               if (api.segments?.length) {
                 const captureSegments = api.segments.map((segment, index) => ({
@@ -483,7 +506,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
                 };
               }
               const next = syncTranscriptText(
-                `${state.transcript}${api.transcript ? `\n\n${api.transcript}` : fallbackTranscript}`,
+                `${state.transcript}${api.transcript ? `\n\n${api.transcript}` : ""}`,
               );
               return {
                 ...nextBaseState,
@@ -505,6 +528,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       };
 
       activeRecorder.start();
+      captureTimer = setTimeout(() => get().stopVoiceCapture(), 179_000);
       set({ recordingState: "recording" });
     } catch (error) {
       stopActiveStream();
@@ -517,6 +541,11 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     }
   },
   stopVoiceCapture: () => {
+    clearTimeout(captureTimer);
+    if (get().recordingState === "requesting-permission") {
+      permissionCancelled = true;
+      return;
+    }
     if (activeRecorder?.state === "recording") {
       activeRecorder.stop();
       return;
@@ -537,10 +566,19 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     }),
   setActiveView: (view) => set({ activeView: view }),
   setPrivacyLevel: (level) => {
+    if (level === "local") cloudAbort?.abort();
     saveSettings(SETTINGS_KEYS.privacyLevel, level);
     set({ privacyLevel: level });
   },
   loadTranscriptHistory: async () => {
+    if (get().privacyLevel !== "cloud") {
+      set({
+        transcriptHistory: [],
+        transcriptHistorySource: "offline",
+        transcriptHistoryLoading: false,
+      });
+      return;
+    }
     set({ transcriptHistoryLoading: true, transcriptHistoryError: undefined });
     try {
       const history = await fetchTranscriptHistory({
@@ -584,6 +622,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
         draftRestored: false,
       });
     }
+    if (get().privacyLevel !== "cloud") return;
     try {
       const detail = await fetchTranscriptDetail(sessionId, {
         apiUrl: API_URL,

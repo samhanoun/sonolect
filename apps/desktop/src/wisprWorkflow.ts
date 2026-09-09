@@ -23,8 +23,7 @@ export type InsertionPlan = {
   status: string;
 };
 
-const FILLER_PATTERN =
-  /\b(um+|uh+|erm+)\b[,.!?\t ]*/gi;
+const FILLER_PATTERN = /\b(um+|uh+|erm+)\b[,.!?\t ]*/gi;
 
 export function createId(prefix: string, seed = Date.now()): string {
   return `${prefix}-${seed.toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -94,18 +93,22 @@ export function polishDictation(
 
   const withDictionary = applyDictionary(cleaned, options.dictionary ?? []);
   const withSnippets = expandSnippets(withDictionary, options.snippets ?? []);
-  return withSnippets.split(/(\n+)/).map((paragraph) => {
-    if (/^\n+$/.test(paragraph)) return paragraph;
-    const sentences = paragraph
-    .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean)
-    .map((sentence) => {
-      const capitalized = sentence.charAt(0).toUpperCase() + sentence.slice(1);
-      return /[.!?]$/.test(capitalized) ? capitalized : `${capitalized}.`;
-    });
-    return sentences.join(" ");
-  }).join("");
+  return withSnippets
+    .split(/(\n+)/)
+    .map((paragraph) => {
+      if (/^\n+$/.test(paragraph)) return paragraph;
+      const sentences = paragraph
+        .split(/(?<=[.!?])\s+/)
+        .map((sentence) => sentence.trim())
+        .filter(Boolean)
+        .map((sentence) => {
+          const capitalized =
+            sentence.charAt(0).toUpperCase() + sentence.slice(1);
+          return /[.!?]$/.test(capitalized) ? capitalized : `${capitalized}.`;
+        });
+      return sentences.join(" ");
+    })
+    .join("");
 }
 
 export function buildInsertionPlan(

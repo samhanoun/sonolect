@@ -43,6 +43,7 @@ describe("desktop voice API client", () => {
         sizeBytes: wavBytes.byteLength,
       },
       {
+        processingMode: "cloud",
         apiUrl: "http://localhost:4321",
         desktopTranscriber: async () => undefined,
         fetchImpl: (async (_url: URL | RequestInfo, init?: RequestInit) => {
@@ -73,6 +74,7 @@ describe("desktop voice API client", () => {
       new Blob([new Uint8Array([1, 2, 3])], { type: "audio/webm" }),
       { durationMs: 1200, mimeType: "audio/webm", sizeBytes: 3 },
       {
+        processingMode: "cloud",
         apiUrl: "https://api.example.test",
         fetchImpl: async () => {
           fetchCalled = true;
@@ -122,6 +124,7 @@ describe("desktop voice API client", () => {
       new Blob([new Uint8Array([1, 2, 3])], { type: "audio/webm" }),
       { durationMs: 1200, mimeType: "audio/webm", sizeBytes: 3 },
       {
+        processingMode: "cloud",
         apiUrl: "http://localhost:4321",
         desktopTranscriber: async () => {
           throw new Error("Whisper command args are not configured");
@@ -172,7 +175,8 @@ describe("desktop voice API client", () => {
     const result = await submitCapturedAudio(
       audio,
       { durationMs: 2500, mimeType: "audio/webm", sizeBytes: audio.size },
-      { apiUrl: "http://localhost:4321", fetchImpl: fetchImpl as typeof fetch },
+      { processingMode: "cloud",
+        apiUrl: "http://localhost:4321", fetchImpl: fetchImpl as typeof fetch },
     );
 
     assert.equal(result.status, "submitted");
@@ -196,6 +200,7 @@ describe("desktop voice API client", () => {
       audio,
       { durationMs: 1000, mimeType: "audio/webm", sizeBytes: audio.size },
       {
+        processingMode: "cloud",
         apiUrl: "http://localhost:4321",
         fetchImpl: async () => {
           throw new Error("connection refused");

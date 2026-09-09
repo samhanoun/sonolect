@@ -3,6 +3,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+mod local_engine;
+mod local_history;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -13,6 +15,7 @@ struct WhisperPayload {
     mime_type: String,
     duration_ms: u64,
     language: Option<String>,
+    model_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -195,17 +198,13 @@ fn run_whisper_command(
 }
 
 #[tauri::command]
-fn transcribe_audio(payload: WhisperPayload) -> Result<WhisperResult, String> {
-    if payload.audio_bytes.is_empty() {
-        return Err("Audio payload is empty".to_owned());
-    }
-    let audio_path = create_temp_audio_path(&payload.mime_type);
-    fs::write(&audio_path, &payload.audio_bytes)
-        .map_err(|error| format!("Failed to write temporary audio: {error}"))?;
-    let audio_path_string = audio_path.to_string_lossy().to_string();
-    let result = run_whisper_command(&payload, &audio_path_string);
-    let _ = fs::remove_file(&audio_path);
-    result
+async fn transcribe_audio(
+    app: tauri::AppHandle,
+    payload: WhisperPayload,
+) -> Result<WhisperResult, String> {
+    tauri::async_runtime::spawn_blocking(move || local_history::process(&app, payload, None))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -432,8 +431,7 @@ fn edge_tts_synthesize(payload: EdgeTtsPayload) -> Result<Vec<u8>, String> {
         let _ = fs::remove_file(&out_path);
         return Err(format!("edge-tts failed: {stderr}"));
     }
-    let audio = fs::read(&out_path)
-        .map_err(|e| format!("Failed to read TTS output: {e}"))?;
+    let audio = fs::read(&out_path).map_err(|e| format!("Failed to read TTS output: {e}"))?;
     let _ = fs::remove_file(&out_path);
     Ok(audio)
 }
@@ -487,7 +485,12 @@ fn start_system_audio_capture(output_path: String) -> Result<(), String> {
             .and_then(|l| l.split_whitespace().nth(1))
             .ok_or_else(|| "No PulseAudio monitor source found".to_owned())?;
         Command::new("parec")
-            .args(["--device", monitor_source, "--file-format=wav", &output_path])
+            .args([
+                "--device",
+                monitor_source,
+                "--file-format=wav",
+                &output_path,
+            ])
             .spawn()
             .map_err(|e| format!("Failed to start parec: {e}"))?;
         Ok(())
@@ -496,11 +499,16 @@ fn start_system_audio_capture(output_path: String) -> Result<(), String> {
     {
         Command::new("ffmpeg")
             .args([
-                "-f", "avfoundation",
-                "-i", ":BlackHole 2ch",
-                "-acodec", "pcm_s16le",
-                "-ar", "44100",
-                "-ac", "1",
+                "-f",
+                "avfoundation",
+                "-i",
+                ":BlackHole 2ch",
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+                "44100",
+                "-ac",
+                "1",
                 &output_path,
             ])
             .spawn()
@@ -510,7 +518,10 @@ fn start_system_audio_capture(output_path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         let _ = output_path;
-        Err("Windows WASAPI capture requires native integration — use Stereo Mix recording device".to_owned())
+        Err(
+            "Windows WASAPI capture requires native integration — use Stereo Mix recording device"
+                .to_owned(),
+        )
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
@@ -549,10 +560,47 @@ fn stop_system_audio_capture() -> Result<(), String> {
 }
 
 fn main() {
+    // A local diagnostic path exercises the exact production engine without UI automation.
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--transcribe-file") {
+        let result = (|| -> Result<WhisperResult, String> {
+            let audio_path = args
+                .get(2)
+                .ok_or("Usage: --transcribe-file audio.wav model.bin [language]")?;
+            let model_path = args.get(3).ok_or("Provide a Whisper model path")?;
+            let audio_bytes = fs::read(audio_path).map_err(|e| e.to_string())?;
+            local_engine::transcribe_with_model(
+                PathBuf::from(model_path),
+                WhisperPayload {
+                    duration_ms: audio_bytes.len().saturating_sub(44) as u64 * 1000 / 32000,
+                    audio_bytes,
+                    mime_type: "audio/wav".into(),
+                    model_path: Some(model_path.clone()),
+                    language: args.get(4).cloned(),
+                },
+            )
+        })();
+        match result {
+            Ok(output) => println!(
+                "{}",
+                serde_json::to_string(&output).expect("serialize transcript")
+            ),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             transcribe_audio,
+            local_engine::local_model_status,
+            local_engine::download_local_model,
+            local_history::list_local_captures,
+            local_history::delete_local_capture,
+            local_history::retry_local_capture,
             insert_text_into_active_app,
             check_accessibility_permission,
             open_accessibility_settings,
@@ -617,6 +665,7 @@ mod tests {
             r#"["whisper-cli","-f","{audioPath}","-l","{language}","--duration","{durationMs}"]"#,
         );
         let payload = WhisperPayload {
+            model_path: None,
             audio_bytes: vec![1, 2, 3],
             mime_type: "audio/webm".to_owned(),
             duration_ms: 1200,

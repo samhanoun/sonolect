@@ -98,8 +98,9 @@ import { preprocessAudio, AUDIO_PRESETS } from "./audioPreprocessing";
 import "./tailwind.css";
 import DictionaryPanel from "./components/DictionaryPanel";
 import SnippetsPanel from "./components/SnippetsPanel";
-import SettingsPanel from "./components/SettingsPanel";
-import HistoryPanel from "./components/HistoryPanel";
+import SettingsPanel from "./components/LocalSettingsPanel";
+import CloudFeature from "./components/CloudFeature";
+import HistoryPanel from "./components/LocalHistoryPanel";
 import AppSidebar from "./components/Sidebar";
 import OnboardingView from "./components/OnboardingPanel";
 import CommandPaletteView from "./components/CommandPalette";
@@ -157,7 +158,7 @@ function App() {
       }
       // Hands-free toggle: ⌘⇧M — press to start, press to stop
       if (
-        (event.metaKey || event.ctrlKey) &&
+        !isTauriRuntime() && (event.metaKey || event.ctrlKey) &&
         event.shiftKey &&
         event.key.toLowerCase() === "m"
       ) {
@@ -166,6 +167,7 @@ function App() {
       }
       // Push-to-talk: ⌘⇧V — hold to record
       if (
+        !isTauriRuntime() &&
         (event.metaKey || event.ctrlKey) &&
         event.shiftKey &&
         event.key.toLowerCase() === "v" &&
@@ -189,7 +191,7 @@ function App() {
     const handleKeyUp = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() === "v") {
         const { recordingState: rs } = useDesktopStore.getState();
-        if (rs === "recording") {
+        if (!isTauriRuntime() && (rs === "recording" || rs === "requesting-permission")) {
           useDesktopStore.getState().stopVoiceCapture();
         }
       }
@@ -216,7 +218,7 @@ function App() {
     };
     const stopPushToTalk = () => {
       const { recordingState: rs } = useDesktopStore.getState();
-      if (rs === "recording") {
+      if (rs === "recording" || rs === "requesting-permission") {
         useDesktopStore.getState().stopVoiceCapture();
       }
     };
@@ -269,6 +271,15 @@ function WorkspaceRouter() {
   const activeSessionId = useDesktopStore((state) => state.activeSessionId);
   const t = useT();
 
+  const panels: Partial<Record<ViewId, React.ReactNode>> = {
+    settings: <SettingsPanel />,
+    dictionary: <DictionaryPanel />,
+    snippets: <SnippetsPanel />,
+    onboarding: <SettingsPanel />,
+    team: <div className="flex-1 overflow-y-auto p-10"><CloudFeature><TeamView currentUserId="local-user" /></CloudFeature></div>,
+    reader: <div className="flex-1 overflow-y-auto p-10"><CloudFeature><ReaderView /></CloudFeature></div>,
+  };
+
   return (
     <section
       className="flex flex-1 flex-col h-full min-w-0 overflow-hidden"
@@ -276,27 +287,7 @@ function WorkspaceRouter() {
     >
       <TopBar />
       <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
-        {activeView === "settings" ? (
-          <SettingsPanel />
-        ) : activeView === "dictionary" ? (
-          <DictionaryPanel />
-        ) : activeView === "snippets" ? (
-          <SnippetsPanel />
-        ) : activeView === "onboarding" ? (
-          <OnboardingView />
-        ) : activeView === "team" ? (
-          <div className="flex-1 overflow-y-auto p-10">
-            <TeamView currentUserId="local-user" />
-          </div>
-        ) : activeView === "reader" ? (
-          <div className="flex-1 overflow-y-auto p-10">
-            <ReaderView />
-          </div>
-        ) : activeSessionId ? (
-          <TranscriptDetail />
-        ) : (
-          <HistoryPanel />
-        )}
+        {panels[activeView] ?? (activeSessionId ? <TranscriptDetail /> : <HistoryPanel />)}
       </div>
     </section>
   );
@@ -313,7 +304,7 @@ function TopBar() {
     <header className="flex items-center justify-between gap-4 px-8 py-4 border-b border-white/5 bg-[#0A0A0A] shrink-0">
       <div>
         <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
-          {t("topbar.eyebrow")}
+          Sonolect · local speech
         </p>
         <h2 className="text-sm font-medium text-white mt-0.5">
           {t("topbar.headline")}
@@ -787,7 +778,7 @@ if (isRecorderWindow) {
 } else {
   // Wrap App to include the recorder window lifecycle hook
   function AppWithRecorderWindow() {
-    useRecorderWindowLifecycle();
+    // Use the in-window recorder until cross-window state and focus are verified.
     return <App />;
   }
 

@@ -10,6 +10,7 @@ describe("cloud dictation loop", () => {
       audio,
       { durationMs: 1000, mimeType: "audio/webm", sizeBytes: 3 },
       {
+        processingMode: "cloud",
         apiUrl: "http://localhost:4321",
         desktopTranscriber: async () => undefined,
         fetchImpl: (async (url: URL | RequestInfo) => {
@@ -42,6 +43,7 @@ describe("cloud dictation loop", () => {
       new Blob([new Uint8Array([1])], { type: "audio/webm" }),
       { durationMs: 500, mimeType: "audio/webm", sizeBytes: 1 },
       {
+        processingMode: "cloud",
         apiUrl: "http://localhost:4321",
         fetchImpl: async () => {
           fetchCalled = true;
@@ -65,6 +67,7 @@ describe("cloud dictation loop", () => {
       new Blob([new Uint8Array([1])], { type: "audio/webm" }),
       { durationMs: 500, mimeType: "audio/webm", sizeBytes: 1 },
       {
+        processingMode: "cloud",
         apiUrl: "http://localhost:4321",
         desktopTranscriber: async () => undefined,
         fetchImpl: async () => {

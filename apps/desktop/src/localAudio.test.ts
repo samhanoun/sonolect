@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { encodeMonoWav } from "./localAudio";
+import { encodeMonoWav, prepareLocalAudio } from "./localAudio";
 
 it("converts stereo 48kHz into mono 16kHz PCM WAV", () => {
-  const bytes = encodeMonoWav([new Float32Array(480).fill(0.75), new Float32Array(480).fill(0.25)], 48_000);
+  const bytes = encodeMonoWav(
+    [new Float32Array(480).fill(0.75), new Float32Array(480).fill(0.25)],
+    48_000,
+  );
   const view = new DataView(bytes.buffer);
   assert.equal(new TextDecoder().decode(bytes.slice(0, 4)), "RIFF");
   assert.equal(view.getUint32(24, true), 16_000);
@@ -13,7 +16,9 @@ it("converts stereo 48kHz into mono 16kHz PCM WAV", () => {
   assert.equal(view.getInt16(44, true), 16384);
 });
 it("clips samples and preserves silence", () => {
-  const data = new DataView(encodeMonoWav([new Float32Array([2, -2, 0])], 16_000).buffer);
+  const data = new DataView(
+    encodeMonoWav([new Float32Array([2, -2, 0])], 16_000).buffer,
+  );
   assert.equal(data.getInt16(44, true), 32767);
   assert.equal(data.getInt16(46, true), -32768);
   assert.equal(data.getInt16(48, true), 0);
@@ -22,4 +27,27 @@ it("rejects invalid or empty audio before inference", () => {
   assert.throws(() => encodeMonoWav([], 0));
   assert.throws(() => encodeMonoWav([new Float32Array()], 16_000));
   assert.throws(() => encodeMonoWav([new Float32Array([NaN])], 16_000));
+});
+
+it("closes the audio decoder after both success and decoding failure", async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "AudioContext");
+  try {
+    for (const fail of [false, true]) {
+      let closed = false;
+      class Decoder {
+        async decodeAudioData() {
+          if (fail) throw new Error("Corrupt recording");
+          return { numberOfChannels: 1, sampleRate: 16_000, getChannelData: () => new Float32Array([0, 0.5]) };
+        }
+        async close() { closed = true; }
+      }
+      Object.defineProperty(globalThis, "AudioContext", { configurable: true, value: Decoder });
+      if (fail) await assert.rejects(prepareLocalAudio(new Blob(["bad"])), /Corrupt recording/);
+      else assert.equal((await prepareLocalAudio(new Blob(["audio"]))).length, 48);
+      assert.equal(closed, true);
+    }
+  } finally {
+    if (original) Object.defineProperty(globalThis, "AudioContext", original);
+    else Reflect.deleteProperty(globalThis, "AudioContext");
+  }
 });

@@ -8,6 +8,8 @@ coverage/
 !.env.example
 .DS_Store
 *.log
+/local-test/
+/dependency-audit.json
 apps/desktop/src-tauri/target/
 apps/mobile/.expo/
 infra/terraform/**/.terraform/
