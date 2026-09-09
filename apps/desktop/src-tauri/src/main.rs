@@ -5,6 +5,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 mod local_engine;
 mod local_history;
+mod online;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
