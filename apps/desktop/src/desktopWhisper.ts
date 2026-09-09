@@ -1,5 +1,6 @@
 import type { VoiceCaptureMetadata } from "./voiceApi";
 import type { TranscriptSegment } from "./segmentEditor";
+import { prepareLocalAudio } from "./localAudio";
 
 export type DesktopWhisperPayload = {
   audioBytes: number[];
@@ -68,8 +69,8 @@ export async function transcribeWithDesktopWhisper(
   if (!isTauriRuntime()) return undefined;
 
   const { invoke } = await import("@tauri-apps/api/core");
-  const audioBytes = new Uint8Array(await audio.arrayBuffer());
-  const payload = createDesktopWhisperPayload(audioBytes, metadata, language, modelPath);
+  const audioBytes = await prepareLocalAudio(audio);
+  const payload = createDesktopWhisperPayload(audioBytes, { ...metadata, mimeType: "audio/wav" }, language, modelPath);
   const result = await invoke<{
     text: string;
     segments?: DesktopWhisperSegmentPayload[];
