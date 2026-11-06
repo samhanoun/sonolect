@@ -563,6 +563,19 @@ fn stop_system_audio_capture() -> Result<(), String> {
 fn main() {
     // A local diagnostic path exercises the exact production engine without UI automation.
     let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--list-provider-models") {
+        match online::discover_models(args.get(2).map(String::as_str).unwrap_or("openrouter")) {
+            Ok(models) => println!(
+                "{}",
+                serde_json::to_string(&models).expect("serialize public models")
+            ),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if args.get(1).map(String::as_str) == Some("--transcribe-file") {
         let result = (|| -> Result<WhisperResult, String> {
             let audio_path = args
@@ -597,6 +610,14 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             transcribe_audio,
+            online::save_provider_key,
+            online::provider_key_status,
+            online::delete_provider_key,
+            online::provider_models,
+            online::set_online_enabled,
+            online::provider_transcribe,
+            online::provider_speak,
+            online::provider_rewrite,
             local_engine::local_model_status,
             local_engine::download_local_model,
             local_history::list_local_captures,

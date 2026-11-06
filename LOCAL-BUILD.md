@@ -1,5 +1,7 @@
 # Sonolect Local — first working development build
 
+**Current build:** see [STUDIO-STATUS.md](STUDIO-STATUS.md) for the redesigned workspace and OpenRouter/OpenCode integration. The notes below describe the initial local-only milestone.
+
 ## Run
 
 Open `build/Sonolect Local/Sonolect.exe`. Keep its `models` folder alongside the executable. This copy contains a verified multilingual Whisper Base model; it does not require an account, API key, development server, or a model download to use that model.

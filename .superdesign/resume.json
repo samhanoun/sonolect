@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "targets": {
+    "models-voices": {
+      "targetKind": "new-target",
+      "projectId": "d5121030-4b10-4b90-a9c0-080b5d54f426",
+      "activeDraftId": "1b25e05e-1fd4-460f-9f81-b154d5746b16",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "apps/desktop/src/components/LocalSettingsPanel.tsx",
+        "apps/desktop/src/components/Sidebar.tsx",
+        "apps/desktop/src/tailwind.css"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "c0c56ecc1157f598788093993a257ce3f0372096f5d05d9c592703ed2f3b5823",
+        "apps/desktop/src/components/LocalSettingsPanel.tsx": "764b2fc30c5af3de035c45f4dd65f2222a21b24a39e1a245e2016b0297f91270",
+        "apps/desktop/src/components/Sidebar.tsx": "5f06f908b9299860c51ac0efa651a66f287805ba55cf252a10d9d8b8b8240931",
+        "apps/desktop/src/tailwind.css": "fbb7d7972aa7e5613238e6c69e716614d861cc3e5da88c714c473067cfb91fc0"
+      },
+      "drafts": {
+        "1b25e05e-1fd4-460f-9f81-b154d5746b16": {
+          "title": "Models & voices — Forest Studio",
+          "visualDirection": "Approved ivory and forest Windows studio",
+          "currentVersion": 1
+        }
+      },
+      "updatedAt": "2026-09-09T22:39:40.250Z"
+    }
+  }
+}

@@ -10,6 +10,10 @@ coverage/
 *.log
 /local-test/
 /dependency-audit.json
+/studio-dependency-audit.json
+/apps/desktop/src-tauri/gen/schemas/windows-schema.json
+/.superdesign/tmp/
+/.superdesign/init/
 apps/desktop/src-tauri/target/
 apps/mobile/.expo/
 infra/terraform/**/.terraform/

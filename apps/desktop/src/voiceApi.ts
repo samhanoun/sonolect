@@ -34,6 +34,10 @@ export type SubmitCapturedAudioOptions = {
   modelPath?: string;
   canUseCloud?: () => boolean;
   signal?: AbortSignal | undefined;
+  cloudTranscriber?: (
+    audio: Blob,
+    metadata: VoiceCaptureMetadata,
+  ) => Promise<DesktopWhisperResult>;
   apiUrl?: string;
   fetchImpl?: typeof fetch;
   language?: string;
@@ -245,6 +249,21 @@ export async function submitCapturedAudioCloud(
   metadata: VoiceCaptureMetadata,
   options: SubmitCapturedAudioOptions = {},
 ): Promise<TranscriptJobResult> {
+  if (options.cloudTranscriber && cloudAllowed(options)) {
+    try {
+      const result = await options.cloudTranscriber(audio, metadata);
+      return {
+        status: "completed",
+        transcript: result.text,
+        segments: result.segments,
+        message: "Transcribed with your selected online model.",
+      };
+    } catch (error) {
+      return offlineResult(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
   const desktopResult = await (
     options.desktopTranscriber ?? transcribeWithDesktopWhisper
   )(audio, metadata, options.language, options.modelPath).catch(

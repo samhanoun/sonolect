@@ -49,6 +49,16 @@ pub fn process(
     payload: super::WhisperPayload,
     id: Option<String>,
 ) -> Result<super::WhisperResult, String> {
+    process_with(app, payload, id, |payload| {
+        super::local_engine::transcribe(app, payload)
+    })
+}
+pub fn process_with(
+    app: &tauri::AppHandle,
+    payload: super::WhisperPayload,
+    id: Option<String>,
+    transcribe: impl FnOnce(super::WhisperPayload) -> Result<super::WhisperResult, String>,
+) -> Result<super::WhisperResult, String> {
     if payload.audio_bytes.is_empty() || payload.audio_bytes.len() > 5_800_044 {
         return Err("Invalid recording size.".into());
     }
@@ -68,7 +78,7 @@ pub fn process(
         language: payload.language.clone(),
     };
     write_record(app, &record)?;
-    let result = super::local_engine::transcribe(app, payload);
+    let result = transcribe(payload);
     match &result {
         Ok(output) => {
             record.transcript = Some(output.text.clone());

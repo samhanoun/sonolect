@@ -99,6 +99,7 @@ import "./tailwind.css";
 import DictionaryPanel from "./components/DictionaryPanel";
 import SnippetsPanel from "./components/SnippetsPanel";
 import SettingsPanel from "./components/LocalSettingsPanel";
+import StudioShell from "./components/StudioShell";
 import CloudFeature from "./components/CloudFeature";
 import HistoryPanel from "./components/LocalHistoryPanel";
 import AppSidebar from "./components/Sidebar";
@@ -253,15 +254,7 @@ function App() {
     });
   }, [activeSessionId, transcript, transcriptSegments, selectedSegmentIds]);
 
-  return (
-    <main className="relative flex h-screen w-screen overflow-hidden bg-[#0A0A0A] text-[#F0F0F0]">
-      <AppSidebar />
-      <WorkspaceRouter />
-      <RecorderPillView />
-      {commandOpen ? <CommandPaletteView /> : null}
-      <ToastContainer />
-    </main>
-  );
+  return <StudioShell />;
 }
 
 /* ── Workspace Router ────────────────────────────────────────── */

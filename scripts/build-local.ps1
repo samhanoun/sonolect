@@ -3,8 +3,11 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $projectRoot
 try {
-    & npx --yes pnpm@9.15.0 --filter '@sonolect/desktop' build
-    if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
+    Push-Location (Join-Path $projectRoot 'apps/desktop')
+    try {
+        & node 'node_modules/vite/bin/vite.js' build
+        if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
+    } finally { Pop-Location }
     if (Test-Path 'C:\Program Files\LLVM\bin\libclang.dll') { $env:LIBCLANG_PATH = 'C:\Program Files\LLVM\bin' }
     $cargoArguments = @('build', '--locked', '--manifest-path', 'apps/desktop/src-tauri/Cargo.toml', '--features', 'tauri/custom-protocol')
     $profile = 'debug'

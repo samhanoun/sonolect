@@ -11,7 +11,11 @@ tauri-plugin-global-shortcut = "2"
 whisper-rs = { version = "=0.16.0", default-features = false }
 hound = "3.5"
 sha2 = "0.10"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
+base64 = "0.22"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.6", features = ["windows-native"] }
 
 [features]
 default = []

@@ -47,6 +47,11 @@ import {
 } from "../wisprWorkflow";
 import { insertTextIntoActiveApp, isTauriRuntime } from "../desktopNative";
 import { formatDuration } from "../lib/format";
+import {
+  useProviderStore,
+  transcribeUsingProvider,
+  setProviderMode,
+} from "../providerSettings";
 
 export type PrivacyLevel = "local" | "cloud";
 export type RecordingState =
@@ -57,6 +62,10 @@ export type RecordingState =
   | "completed"
   | "error";
 export type ViewId =
+  | "models"
+  | "speech"
+  | "transcribe"
+  | "library"
   | "home"
   | "settings"
   | "dictionary"
@@ -408,6 +417,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       language: get().sttLanguage,
       modelPath: get().whisperConfig.modelPath,
     };
+    const onlineChoice = { ...useProviderStore.getState().preferences.stt };
     permissionCancelled = false;
     cloudAbort = new AbortController();
     set({
@@ -464,6 +474,21 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
           ...captureSettings,
           canUseCloud: () => get().privacyLevel === "cloud",
           signal: cloudAbort?.signal,
+          ...(onlineChoice.provider !== "local"
+            ? {
+                cloudTranscriber: (
+                  audio: Blob,
+                  metadata: VoiceCaptureMetadata,
+                ) =>
+                  transcribeUsingProvider(
+                    audio,
+                    metadata,
+                    onlineChoice,
+                    captureSettings.language,
+                    () => get().privacyLevel === "cloud",
+                  ),
+              }
+            : {}),
         })
           .then((api) => {
             const objectUrl = URL.createObjectURL(blob);
@@ -566,6 +591,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     }),
   setActiveView: (view) => set({ activeView: view }),
   setPrivacyLevel: (level) => {
+    void setProviderMode(level === "cloud").catch(() => undefined);
     if (level === "local") cloudAbort?.abort();
     saveSettings(SETTINGS_KEYS.privacyLevel, level);
     set({ privacyLevel: level });
