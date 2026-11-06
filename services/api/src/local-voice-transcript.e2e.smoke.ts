@@ -1,9 +1,10 @@
+import { createAuthenticatedTestApp as createApp } from "./test-app.js";
 import { strict as assert } from "node:assert";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import type { AudioUploadJob, Transcript } from "@sonolect/types";
-import { createApp } from "./index.js";
+
 import { processNextQueuedAudioJob } from "../../worker-service/src/local-audio-worker.js";
 
 const tempDir = await mkdtemp(join(tmpdir(), "sonolect-local-voice-e2e-"));
@@ -23,7 +24,7 @@ try {
   const created = await app.inject({
     method: "POST",
     url: "/audio/jobs",
-    headers: { "x-user-id": userId },
+    headers: { authorization: `Bearer ${userId}` },
     payload: {
       fileName: "daily-note.webm",
       mimeType: "audio/webm",
@@ -43,7 +44,7 @@ try {
     method: "POST",
     url: `/audio/jobs/${createdJob.id}/audio`,
     headers: {
-      "x-user-id": userId,
+      authorization: `Bearer ${userId}`,
       "content-type": "audio/webm",
     },
     payload: audioPayload,
@@ -70,13 +71,13 @@ try {
   assert.equal(beforeWorker.transcripts?.[0]?.id, createdJob.transcriptId);
   assert.equal(beforeWorker.transcripts?.[0]?.status, "processing");
 
-  const localSttCommand = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(
+  const localSttCommandArgs = [process.execPath, "-e",
     "const path = require('node:path'); const [audioPath, mimeType, language] = process.argv.slice(1); console.log('Offline transcript for ' + path.basename(audioPath) + ' in ' + language + ' from ' + mimeType + '.');",
-  )} {audioPath} {mimeType} {language}`;
+  "{audioPath}", "{mimeType}", "{language}"];
   const processed = await processNextQueuedAudioJob({
     storePath,
     now: () => new Date("2026-01-02T03:04:05.000Z"),
-    localSttCommand,
+    localSttCommandArgs,
   });
   assert.equal(processed?.job.id, createdJob.id);
   assert.equal(processed?.job.status, "completed");
@@ -90,7 +91,7 @@ try {
   const fetchedJob = await app.inject({
     method: "GET",
     url: `/audio/jobs/${createdJob.id}`,
-    headers: { "x-user-id": userId },
+    headers: { authorization: `Bearer ${userId}` },
   });
   assert.equal(fetchedJob.statusCode, 200, fetchedJob.body);
   const completedJob = fetchedJob.json<AudioUploadJob>();
@@ -100,7 +101,7 @@ try {
   const fetchedTranscript = await app.inject({
     method: "GET",
     url: `/transcripts/${createdJob.transcriptId}`,
-    headers: { "x-user-id": userId },
+    headers: { authorization: `Bearer ${userId}` },
   });
   assert.equal(fetchedTranscript.statusCode, 200, fetchedTranscript.body);
   const completedTranscript = fetchedTranscript.json<Transcript>();
@@ -116,7 +117,7 @@ try {
   const listed = await app.inject({
     method: "GET",
     url: "/transcripts?limit=10",
-    headers: { "x-user-id": userId },
+    headers: { authorization: `Bearer ${userId}` },
   });
   assert.equal(listed.statusCode, 200, listed.body);
   const listBody = listed.json<{ items: Transcript[] }>();

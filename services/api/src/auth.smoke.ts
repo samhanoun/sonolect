@@ -63,10 +63,10 @@ import type { User } from "@sonolect/types";
       url: "/users/profile",
       headers: { authorization: "Bearer dev:mallory" },
     });
-    assert.equal(profile.statusCode, 501, profile.body);
+    assert.equal(profile.statusCode, 401, profile.body);
     assert.equal(
       profile.json<{ error: string }>().error,
-      "firebase_auth_not_configured",
+      "invalid_token",
     );
   } finally {
     await app.close();
@@ -138,6 +138,7 @@ import type { User } from "@sonolect/types";
     authRequired: true,
     allowDevTokens: true,
     nodeEnv: "production",
+    verifyToken: async () => { throw new Error("Invalid token"); },
   });
   try {
     const profile = await app.inject({
@@ -190,10 +191,10 @@ import type { User } from "@sonolect/types";
       url: "/users/profile",
       headers: { authorization: "Bearer firebase-token" },
     });
-    assert.equal(profile.statusCode, 501, profile.body);
+    assert.equal(profile.statusCode, 401, profile.body);
     assert.equal(
       profile.json<{ error: string }>().error,
-      "firebase_auth_not_configured",
+      "invalid_token",
     );
   } finally {
     await app.close();

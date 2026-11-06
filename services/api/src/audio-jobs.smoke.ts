@@ -1,8 +1,9 @@
+import { createAuthenticatedTestApp as createApp } from "./test-app.js";
 import { strict as assert } from "node:assert";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
-import { createApp, getAudioDir, type InMemoryStores } from "./index.js";
+import { getAudioDir, type InMemoryStores } from "./index.js";
 import type { AudioUploadJob, Transcript, User } from "@sonolect/types";
 
 const audioDir = await mkdtemp(join(tmpdir(), "sonolect-api-audio-test-"));
@@ -18,7 +19,7 @@ try {
   const created = await app.inject({
     method: "POST",
     url: "/audio/jobs",
-    headers: { "x-user-id": "audio-user" },
+    headers: { authorization: "Bearer audio-user" },
     payload: {
       fileName: "capture.webm",
       mimeType: "audio/webm",
@@ -46,7 +47,7 @@ try {
   const fetchedJob = await app.inject({
     method: "GET",
     url: `/audio/jobs/${job.id}`,
-    headers: { "x-user-id": "audio-user" },
+    headers: { authorization: "Bearer audio-user" },
   });
   assert.equal(fetchedJob.statusCode, 200, fetchedJob.body);
   assert.equal(fetchedJob.json<AudioUploadJob>().id, job.id);
@@ -56,7 +57,7 @@ try {
     method: "POST",
     url: `/audio/jobs/${job.id}/audio`,
     headers: {
-      "x-user-id": "audio-user",
+      authorization: "Bearer audio-user",
       "content-type": "audio/webm",
     },
     payload: audioPayload,
@@ -84,7 +85,7 @@ try {
   const sameNameCreated = await app.inject({
     method: "POST",
     url: "/audio/jobs",
-    headers: { "x-user-id": "audio-user" },
+    headers: { authorization: "Bearer audio-user" },
     payload: {
       fileName: "capture.webm",
       mimeType: "audio/webm",
@@ -99,7 +100,7 @@ try {
     method: "POST",
     url: `/audio/jobs/${sameNameJob.id}/audio`,
     headers: {
-      "x-user-id": "audio-user",
+      authorization: "Bearer audio-user",
       "content-type": "audio/webm",
     },
     payload: Buffer.from("same original filename, different bytes"),
@@ -118,7 +119,7 @@ try {
   const fetchedUploaded = await app.inject({
     method: "GET",
     url: `/audio/jobs/${job.id}`,
-    headers: { "x-user-id": "audio-user" },
+    headers: { authorization: "Bearer audio-user" },
   });
   assert.equal(fetchedUploaded.statusCode, 200, fetchedUploaded.body);
   assert.deepEqual(
@@ -129,7 +130,7 @@ try {
   const wrongOwnerUpload = await app.inject({
     method: "POST",
     url: `/audio/jobs/${job.id}/audio`,
-    headers: { "x-user-id": "other-user", "content-type": "audio/webm" },
+    headers: { authorization: "Bearer other-user", "content-type": "audio/webm" },
     payload: Buffer.from("other audio"),
   });
   assert.equal(wrongOwnerUpload.statusCode, 404, wrongOwnerUpload.body);
@@ -137,7 +138,7 @@ try {
   const missingJobUpload = await app.inject({
     method: "POST",
     url: "/audio/jobs/../../etc/passwd/audio",
-    headers: { "x-user-id": "audio-user", "content-type": "audio/webm" },
+    headers: { authorization: "Bearer audio-user", "content-type": "audio/webm" },
     payload: Buffer.from("unsafe"),
   });
   assert.equal(missingJobUpload.statusCode, 404, missingJobUpload.body);
@@ -145,7 +146,7 @@ try {
   const invalidContentType = await app.inject({
     method: "POST",
     url: `/audio/jobs/${job.id}/audio`,
-    headers: { "x-user-id": "audio-user", "content-type": "text/plain" },
+    headers: { authorization: "Bearer audio-user", "content-type": "text/plain" },
     payload: Buffer.from("not audio"),
   });
   assert.equal(invalidContentType.statusCode, 415, invalidContentType.body);
@@ -153,7 +154,7 @@ try {
   const tooLarge = await app.inject({
     method: "POST",
     url: `/audio/jobs/${job.id}/audio`,
-    headers: { "x-user-id": "audio-user", "content-type": "audio/webm" },
+    headers: { authorization: "Bearer audio-user", "content-type": "audio/webm" },
     payload: Buffer.alloc(1_025),
   });
   assert.equal(tooLarge.statusCode, 413, tooLarge.body);
@@ -161,7 +162,7 @@ try {
   const fetchedTranscript = await app.inject({
     method: "GET",
     url: `/transcripts/${job.transcriptId}`,
-    headers: { "x-user-id": "audio-user" },
+    headers: { authorization: "Bearer audio-user" },
   });
   assert.equal(fetchedTranscript.statusCode, 200, fetchedTranscript.body);
   const transcript = fetchedTranscript.json<Transcript>();
@@ -170,6 +171,7 @@ try {
   assert.equal(transcript.durationMs, 4_321);
 
   const invalid = await app.inject({
+    headers: {authorization:"Bearer audio-user"},
     method: "POST",
     url: "/audio/jobs",
     payload: {
@@ -181,6 +183,7 @@ try {
   assert.equal(invalid.statusCode, 400, invalid.body);
 
   const invalidMimeType = await app.inject({
+    headers: {authorization:"Bearer audio-user"},
     method: "POST",
     url: "/audio/jobs",
     payload: {
@@ -194,7 +197,7 @@ try {
   const emptyBody = await app.inject({
     method: "POST",
     url: `/audio/jobs/${job.id}/audio`,
-    headers: { "x-user-id": "audio-user", "content-type": "audio/webm" },
+    headers: { authorization: "Bearer audio-user", "content-type": "audio/webm" },
     payload: Buffer.alloc(0),
   });
   assert.equal(emptyBody.statusCode, 400, emptyBody.body);
@@ -234,7 +237,7 @@ try {
       method: "POST",
       url: `/audio/jobs/${encodeURIComponent(maliciousJobId)}/audio`,
       headers: {
-        "x-user-id": maliciousUserId,
+        authorization: `Bearer ${maliciousUserId}`,
         "content-type": "audio/x-..wav",
       },
       payload: Buffer.from("malicious audio"),
@@ -264,7 +267,7 @@ try {
     const envCreated = await envApp.inject({
       method: "POST",
       url: "/audio/jobs",
-      headers: { "x-user-id": "env-audio-user" },
+      headers: { authorization: "Bearer env-audio-user" },
       payload: { mimeType: "audio/ogg", sizeBytes: 3, durationMs: 1 },
     });
     assert.equal(envCreated.statusCode, 201, envCreated.body);
@@ -272,7 +275,7 @@ try {
     const envUploaded = await envApp.inject({
       method: "POST",
       url: `/audio/jobs/${envJob.id}/audio`,
-      headers: { "x-user-id": "env-audio-user", "content-type": "audio/ogg" },
+      headers: { authorization: "Bearer env-audio-user", "content-type": "audio/ogg" },
       payload: Buffer.from("env"),
     });
     assert.equal(envUploaded.statusCode, 200, envUploaded.body);
@@ -299,7 +302,7 @@ try {
     const persistentCreated = await persistentApp.inject({
       method: "POST",
       url: "/audio/jobs",
-      headers: { "x-user-id": "persist-user" },
+      headers: { authorization: "Bearer persist-user" },
       payload: { mimeType: "audio/webm", sizeBytes: 7, durationMs: 1 },
     });
     assert.equal(persistentCreated.statusCode, 201, persistentCreated.body);
@@ -307,7 +310,7 @@ try {
     const persistentUploaded = await persistentApp.inject({
       method: "POST",
       url: `/audio/jobs/${persistentJob.id}/audio`,
-      headers: { "x-user-id": "persist-user", "content-type": "audio/webm" },
+      headers: { authorization: "Bearer persist-user", "content-type": "audio/webm" },
       payload: Buffer.from("persist"),
     });
     assert.equal(persistentUploaded.statusCode, 200, persistentUploaded.body);
@@ -343,7 +346,7 @@ try {
     const secondPersistentCreated = await persistentApp.inject({
       method: "POST",
       url: "/audio/jobs",
-      headers: { "x-user-id": "persist-user" },
+      headers: { authorization: "Bearer persist-user" },
       payload: { mimeType: "audio/webm", sizeBytes: 9, durationMs: 2 },
     });
     assert.equal(
@@ -380,7 +383,7 @@ try {
     const reloaded = await reloadedApp.inject({
       method: "GET",
       url: `/audio/jobs/${persistentJob.id}`,
-      headers: { "x-user-id": "persist-user" },
+      headers: { authorization: "Bearer persist-user" },
     });
     assert.equal(reloaded.statusCode, 200, reloaded.body);
     assert.deepEqual(
