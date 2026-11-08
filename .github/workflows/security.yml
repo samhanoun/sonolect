@@ -24,6 +24,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
+      actions: read
     container:
       image: semgrep/semgrep:1.184.0
     # Dependabot PRs cannot upload SARIF; they are covered by the SCA jobs.
@@ -42,9 +43,20 @@ jobs:
       - name: Upload SARIF to code scanning
         if: always()
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        # Code scanning must be enabled in repo settings (needs GitHub Advanced
+        # Security on private repos); the SARIF is also kept as an artifact.
+        continue-on-error: true
         with:
           sarif_file: semgrep.sarif
           category: semgrep
+
+      - name: Keep SARIF as artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: semgrep-sarif
+          path: semgrep.sarif
+          retention-days: 14
 
       - name: Gate on ERROR-severity findings
         run: >-
@@ -60,6 +72,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -78,9 +91,20 @@ jobs:
       - name: Upload SARIF to code scanning
         if: github.actor != 'dependabot[bot]'
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        # Code scanning must be enabled in repo settings (needs GitHub Advanced
+        # Security on private repos); the SARIF is also kept as an artifact.
+        continue-on-error: true
         with:
           sarif_file: osv.sarif
           category: osv-scanner
+
+      - name: Keep SARIF as artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: osv-sarif
+          path: osv.sarif
+          retention-days: 14
 
   cargo-audit:
     name: cargo-audit (desktop Rust crates)
