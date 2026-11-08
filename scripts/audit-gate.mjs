@@ -27,9 +27,21 @@ function runAudit() {
 }
 
 const report = JSON.parse(runAudit());
+// A failed audit (no lockfile, registry error) must not read as a clean report.
+if (
+  report.error ||
+  typeof report.advisories !== "object" ||
+  report.advisories === null
+) {
+  console.error(
+    "pnpm audit did not return a usable report:",
+    JSON.stringify(report.error ?? report).slice(0, 500),
+  );
+  process.exit(2);
+}
 const failures = [];
 
-for (const advisory of Object.values(report.advisories ?? {})) {
+for (const advisory of Object.values(report.advisories)) {
   if (!BLOCKING.has(advisory.severity)) continue;
   if (ACCEPTED.has(advisory.github_advisory_id)) continue;
   const paths = advisory.findings.flatMap((finding) => finding.paths);
