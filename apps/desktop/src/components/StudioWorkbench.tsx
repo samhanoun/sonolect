@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  AudioLines,
   Check,
   Copy,
   Cpu,
@@ -29,6 +28,40 @@ import { submitCapturedAudioCloud } from "../voiceApi";
 import { prepareLocalAudio } from "../localAudio";
 import { STT_LANGUAGES } from "../sttLanguages";
 
+const SIGNAL_BARS = [
+  18, 30, 44, 26, 58, 72, 40, 64, 86, 52, 70, 94, 62, 80, 48, 90, 66, 76, 42,
+  60, 84, 50, 68, 36, 56, 74, 32, 46, 24, 38, 20, 28,
+];
+
+/** The hero centerpiece: a signal meter that comes alive while dictating. */
+function SignalMeter({ live }: { live: boolean }) {
+  return (
+    <div className={`studio-signal ${live ? "live" : ""}`} aria-hidden="true">
+      <div className="studio-signal-head">
+        <span className="studio-signal-dot" />
+        <span>{live ? "Listening" : "Ready"}</span>
+        <span className="studio-signal-meta">16 kHz · mono · on device</span>
+      </div>
+      <div className="studio-signal-bars">
+        {SIGNAL_BARS.map((height, index) => (
+          <i
+            key={index}
+            style={{
+              height: `${height}%`,
+              animationDelay: `${(index % 8) * 90}ms`,
+            }}
+          />
+        ))}
+      </div>
+      <div className="studio-signal-scale">
+        <span>-60</span>
+        <span>-30</span>
+        <span>-12</span>
+        <span>0 dB</span>
+      </div>
+    </div>
+  );
+}
 /** A status line that scrolls itself into view so feedback is never below the fold. */
 function StatusNotice({ text }: { text: string }) {
   const ref = useRef<HTMLParagraphElement>(null);
@@ -98,15 +131,15 @@ export function StudioOverview({ captures }: { captures: SavedCapture[] }) {
     <div className="studio-page">
       <div className="studio-page-heading">
         <div>
-          <p className="studio-eyebrow">A LITTLE LESS TYPING</p>
-          <h1>Make room for your thoughts.</h1>
+          <p className="studio-eyebrow">A little less typing</p>
+          <h1>Make room for your thoughts</h1>
           <p>Speak naturally. Turn your voice into something useful.</p>
         </div>
         <span className="studio-chip">Your personal workspace</span>
       </div>
       <div className="studio-hero">
         <div>
-          <span className="studio-eyebrow">START WITH YOUR VOICE</span>
+          <span className="studio-eyebrow">Start with your voice</span>
           <h2>
             Say it.
             <br />
@@ -130,12 +163,7 @@ export function StudioOverview({ captures }: { captures: SavedCapture[] }) {
             <kbd>Ctrl ⇧ M</kbd>
           </button>
         </div>
-        <div className="studio-voice-visual" aria-hidden="true">
-          <div className="studio-orbit">
-            <AudioLines size={84} strokeWidth={1} />
-          </div>
-          <span>YOUR WORDS, IN YOUR OWN WAY</span>
-        </div>
+        <SignalMeter live={recordingState === "recording"} />
       </div>
       <div className="studio-stat-grid">
         <div>
@@ -319,8 +347,8 @@ export function StudioTranscribe({
     <div className="studio-page">
       <div className="studio-page-heading">
         <div>
-          <p className="studio-eyebrow">FROM THOUGHT TO TEXT</p>
-          <h1>Find your flow.</h1>
+          <p className="studio-eyebrow">From thought to text</p>
+          <h1>Find your flow</h1>
           <p>Record your voice, import audio, or work on your next draft.</p>
         </div>
         <button
@@ -344,7 +372,7 @@ export function StudioTranscribe({
           <div className="studio-section-heading">
             <h3>Your transcript</h3>
             <span className="studio-tag">
-              {state.privacyLevel === "local" ? "LOCAL ONLY" : "CLOUD ENABLED"}
+              {state.privacyLevel === "local" ? "Local only" : "Cloud enabled"}
             </span>
           </div>
           <textarea
@@ -555,8 +583,8 @@ export function StudioSpeech() {
     <div className="studio-page">
       <div className="studio-page-heading">
         <div>
-          <p className="studio-eyebrow">WORDS WORTH HEARING</p>
-          <h1>Give your writing a voice.</h1>
+          <p className="studio-eyebrow">Words worth hearing</p>
+          <h1>Give your writing a voice</h1>
           <p>Pick a model, find a voice, and listen before you share.</p>
         </div>
       </div>
@@ -564,7 +592,7 @@ export function StudioSpeech() {
         <section className="studio-card studio-editor">
           <div className="studio-section-heading">
             <h3>What would you like to hear?</h3>
-            <span className="studio-tag">TEXT TO SPEECH</span>
+            <span className="studio-tag">Text to speech</span>
           </div>
           <textarea
             aria-label="Text to speak"
@@ -737,8 +765,8 @@ export function StudioLibrary({
     <div className="studio-page">
       <div className="studio-page-heading">
         <div>
-          <p className="studio-eyebrow">A PLACE FOR EVERY THOUGHT</p>
-          <h1>Your voice library.</h1>
+          <p className="studio-eyebrow">A place for every thought</p>
+          <h1>Your voice library</h1>
           <p>
             Saved recordings, ready to revisit. Audio stays here until you
             delete it.
@@ -792,7 +820,7 @@ export function StudioLibrary({
                 <span
                   className={`studio-tag ${item.error ? "amber" : "green"}`}
                 >
-                  {item.error ? "RETRY NEEDED" : "SAVED ON DEVICE"}
+                  {item.error ? "Retry needed" : "Saved on device"}
                 </span>
               </div>
               <p className="studio-transcript-preview">
@@ -874,9 +902,9 @@ export function StudioVocabulary({ snippets = false }: { snippets?: boolean }) {
     <div className="studio-page">
       <div className="studio-page-heading">
         <div>
-          <p className="studio-eyebrow">SOUNDS LIKE YOU</p>
+          <p className="studio-eyebrow">Sounds like you</p>
           <h1>
-            {snippets ? "Say less. Write more." : "Your words, spelled right."}
+            {snippets ? "Say less, write more" : "Your words, spelled right"}
           </h1>
           <p>
             {snippets
@@ -1010,8 +1038,8 @@ export function StudioSettings() {
     <div className="studio-page">
       <div className="studio-page-heading">
         <div>
-          <p className="studio-eyebrow">YOUR SPACE, YOUR RULES</p>
-          <h1>Make yourself at home.</h1>
+          <p className="studio-eyebrow">Your space, your rules</p>
+          <h1>Make yourself at home</h1>
           <p>Local models, language, and privacy in one place.</p>
         </div>
       </div>

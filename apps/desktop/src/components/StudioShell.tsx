@@ -28,6 +28,7 @@ import {
   useSavedCaptures,
 } from "./StudioWorkbench";
 import "../studio.css";
+import "../studio-night.css";
 
 const navigation: {
   id: ViewId;
@@ -35,29 +36,29 @@ const navigation: {
   Icon: typeof Mic;
   group: string;
 }[] = [
-  { id: "home", label: "Overview", Icon: LayoutDashboard, group: "WORKSPACE" },
+  { id: "home", label: "Overview", Icon: LayoutDashboard, group: "Workspace" },
   {
     id: "transcribe",
     label: "Transcribe",
     Icon: AudioLines,
-    group: "WORKSPACE",
+    group: "Workspace",
   },
-  { id: "speech", label: "Text to speech", Icon: Volume2, group: "WORKSPACE" },
-  { id: "library", label: "Library", Icon: Folder, group: "WORKSPACE" },
+  { id: "speech", label: "Text to speech", Icon: Volume2, group: "Workspace" },
+  { id: "library", label: "Library", Icon: Folder, group: "Workspace" },
   {
     id: "dictionary",
     label: "Dictionary",
     Icon: BookOpen,
-    group: "PERSONALIZE",
+    group: "Personalize",
   },
-  { id: "snippets", label: "Snippets", Icon: Quote, group: "PERSONALIZE" },
+  { id: "snippets", label: "Snippets", Icon: Quote, group: "Personalize" },
   {
     id: "models",
     label: "Models & voices",
     Icon: SlidersHorizontal,
-    group: "PERSONALIZE",
+    group: "Personalize",
   },
-  { id: "settings", label: "Settings", Icon: Settings2, group: "PERSONALIZE" },
+  { id: "settings", label: "Settings", Icon: Settings2, group: "Personalize" },
 ];
 function QuickNavigation() {
   const { commandOpen, setCommandOpen, setActiveView } = useDesktopStore();
@@ -190,7 +191,7 @@ export default function StudioShell() {
       <aside className="studio-sidebar">
         <div className="studio-brand">
           sonolect<span>.</span>
-          <small>YOUR VOICE WORKSPACE</small>
+          <small>Voice workspace</small>
         </div>
         <button
           className="studio-new-recording"
@@ -204,7 +205,7 @@ export default function StudioShell() {
           {recordingState === "recording" ? "Stop dictation" : "New dictation"}
           <kbd>Ctrl ⇧ M</kbd>
         </button>
-        {["WORKSPACE", "PERSONALIZE"].map((group) => (
+        {["Workspace", "Personalize"].map((group) => (
           <div className="studio-nav-group" key={group}>
             <p>{group}</p>
             <nav aria-label={group}>

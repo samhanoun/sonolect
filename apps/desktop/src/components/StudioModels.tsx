@@ -159,7 +159,7 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
           </p>
         </div>
         <span className={`studio-tag ${keys[provider] ? "green" : ""}`}>
-          {keys[provider] ? "KEY SAVED" : "NO KEY SAVED"}
+          {keys[provider] ? "Key saved" : "No key saved"}
         </span>
       </div>
       <div className="studio-tags">
@@ -234,8 +234,8 @@ export default function StudioModels() {
     <div className="studio-page">
       <div className="studio-page-heading">
         <div>
-          <p className="studio-eyebrow">MAKE IT YOURS</p>
-          <h1>Your models. Your choice.</h1>
+          <p className="studio-eyebrow">Make it yours</p>
+          <h1>Your models, your choice</h1>
           <p>Choose how Sonolect listens, speaks, and refines your words.</p>
         </div>
         <span className="studio-chip">
@@ -307,13 +307,13 @@ export default function StudioModels() {
             </section>
             <section className="studio-privacy-card">
               <ShieldCheck size={27} />
-              <h3>Always in your control.</h3>
+              <h3>Always in your control</h3>
               <p>
                 Adding a key doesn’t change your processing mode. Audio and text
                 only go online when you choose cloud processing.
               </p>
               <span>
-                <Check size={13} /> PRIVATE BY DEFAULT
+                <Check size={13} /> Private by default
               </span>
             </section>
           </div>
