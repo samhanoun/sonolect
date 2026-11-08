@@ -7,30 +7,32 @@ export type CaptureStatus =
   | "ready"
   | "error";
 export type PrivacyLevel = "standard" | "local_first" | "ephemeral";
-export type NotificationIntent =
-  | "recording"
-  | "sync"
-  | "refinement"
-  | "privacy";
+
+/** BCP-47 tags the capture screen offers for dictation. */
+export const DICTATION_LANGUAGES = [
+  "en-US",
+  "fr-FR",
+  "es-ES",
+  "de-DE",
+  "ar-SA",
+] as const;
+export type DictationLanguage = (typeof DICTATION_LANGUAGES)[number];
+
+export type UiLanguage = "en" | "fr";
 
 export interface TranscriptTurn {
   id: string;
   rawText: string;
   refinedText: string;
   mode: SonolectMode;
-  language: "fr-FR" | "en-US" | "auto";
+  /** BCP-47 tag, or "auto" for transcripts whose language is unknown. */
+  language: string;
   privacyMode: boolean;
   createdAt: string;
   durationMs: number;
-  source: "microphone" | "typed" | "sample";
+  source: "microphone" | "typed" | "remote";
   syncState: "local" | "queued" | "synced";
-}
-
-export interface RefinementAction {
-  id: SonolectMode;
-  label: string;
-  helper: string;
-  promptPreview: string;
+  pinned?: boolean;
 }
 
 export interface CaptureSession {
@@ -42,75 +44,83 @@ export interface CaptureSession {
   error?: string;
 }
 
+export interface DictionaryEntry {
+  id: string;
+  spoken: string;
+  replacement: string;
+}
+
+export interface Snippet {
+  id: string;
+  trigger: string;
+  body: string;
+}
+
 export interface CompanionSettings {
-  language: TranscriptTurn["language"];
+  language: DictationLanguage;
+  uiLanguage: UiLanguage;
   privacyLevel: PrivacyLevel;
   saveHistory: boolean;
   cloudSyncEnabled: boolean;
-  localApiUrl?: string;
-  notificationsEnabled: boolean;
+  localApiUrl?: string | undefined;
   hapticsEnabled: boolean;
+  speechRate: number;
+  onboarded: boolean;
 }
 
-export interface AuthSnapshot {
-  status: "guest" | "ready";
-  userId?: string;
-  email?: string;
-  tokenRef?: string;
-}
+/** Refinement modes offered after a capture, in display order. */
+export const REFINEMENT_MODES = [
+  "dictate",
+  "rewrite",
+  "summarize",
+  "reply",
+  "task_creation",
+] as const satisfies readonly SonolectMode[];
+export type RefinementMode = (typeof REFINEMENT_MODES)[number];
 
-export interface NotificationRequest {
-  id: string;
-  intent: NotificationIntent;
-  title: string;
-  body: string;
-  createdAt: string;
-}
-
-export const REFINEMENT_ACTIONS: RefinementAction[] = [
-  {
-    id: "dictate",
-    label: "Nettoyer",
-    helper: "Corrige les hésitations sans changer le sens.",
-    promptPreview: "Transforme cette dictée brute en texte clair et fidèle.",
-  },
-  {
-    id: "rewrite",
-    label: "Réécrire",
-    helper: "Rend le texte plus fluide et professionnel.",
-    promptPreview: "Réécris en français naturel, concis et premium.",
-  },
-  {
-    id: "summarize",
-    label: "Résumer",
-    helper: "Produit les points clés actionnables.",
-    promptPreview: "Résume les idées et actions importantes.",
-  },
-  {
-    id: "reply",
-    label: "Répondre",
-    helper: "Prépare une réponse courte prête à envoyer.",
-    promptPreview: "Rédige une réponse polie, directe et utile.",
-  },
-  {
-    id: "task_creation",
-    label: "Tâches",
-    helper: "Extrait les prochaines actions.",
-    promptPreview: "Convertis en checklist priorisée.",
-  },
-];
+export const HISTORY_LIMIT = 100;
 
 export const DEFAULT_SETTINGS: CompanionSettings = {
-  language: "fr-FR",
+  language: "en-US",
+  uiLanguage: "en",
   privacyLevel: "local_first",
   saveHistory: true,
   cloudSyncEnabled: false,
-  notificationsEnabled: true,
   hapticsEnabled: true,
+  speechRate: 1,
+  onboarded: false,
 };
 
-export const SAMPLE_TRANSCRIPTS = [
-  "Rappelle-moi de préparer la synthèse client avant seize heures et d'envoyer la version courte à l'équipe.",
-  "Réponds à Camille que je valide la proposition mais que je veux garder une marge sur le planning.",
-  "Note réunion produit: simplifier l'onboarding mobile, garder le mode privé visible, puis tester la capture vocale.",
-] as const;
+export function isDictationLanguage(
+  value: unknown,
+): value is DictationLanguage {
+  return (
+    typeof value === "string" &&
+    (DICTATION_LANGUAGES as readonly string[]).includes(value)
+  );
+}
+
+/** Coerces persisted settings from older app versions into the current shape. */
+export function normalizeSettings(
+  saved: Partial<CompanionSettings> | undefined,
+): CompanionSettings {
+  const merged = { ...DEFAULT_SETTINGS, ...(saved ?? {}) };
+  if (!isDictationLanguage(merged.language)) {
+    merged.language = DEFAULT_SETTINGS.language;
+  }
+  if (merged.uiLanguage !== "en" && merged.uiLanguage !== "fr") {
+    merged.uiLanguage = DEFAULT_SETTINGS.uiLanguage;
+  }
+  if (
+    typeof merged.speechRate !== "number" ||
+    !Number.isFinite(merged.speechRate)
+  ) {
+    merged.speechRate = 1;
+  }
+  merged.speechRate = Math.min(2, Math.max(0.5, merged.speechRate));
+  return merged;
+}
+
+export function createId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}

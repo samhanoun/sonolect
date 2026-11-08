@@ -104,7 +104,7 @@ pub fn list_local_captures(app: tauri::AppHandle) -> Result<Vec<Capture>, String
             }
         }
     }
-    captures.sort_by(|a, b| b.created_at_ms.cmp(&a.created_at_ms));
+    captures.sort_by_key(|capture| std::cmp::Reverse(capture.created_at_ms));
     Ok(captures)
 }
 #[tauri::command]
