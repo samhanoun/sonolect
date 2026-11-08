@@ -1088,3 +1088,8 @@ body {
   margin: 8px 0 0 !important;
   overflow-wrap: anywhere;
 }
+.studio-command-empty {
+  padding: 18px 22px;
+  font-size: 13px;
+  color: var(--studio-muted);
+}

@@ -29,6 +29,19 @@ import { submitCapturedAudioCloud } from "../voiceApi";
 import { prepareLocalAudio } from "../localAudio";
 import { STT_LANGUAGES } from "../sttLanguages";
 
+/** A status line that scrolls itself into view so feedback is never below the fold. */
+function StatusNotice({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    ref.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [text]);
+  return (
+    <p ref={ref} role="status" className="studio-notice">
+      {text}
+    </p>
+  );
+}
+
 export type SavedCapture = {
   id: string;
   createdAtMs: number;
@@ -402,9 +415,7 @@ export function StudioTranscribe({
             </button>
           </div>
           {(message || state.voiceError) && (
-            <p role="status" className="studio-notice">
-              {message || state.voiceError}
-            </p>
+            <StatusNotice text={message || state.voiceError || ""} />
           )}
         </section>
         <aside className="studio-editor-tools">
@@ -592,11 +603,7 @@ export function StudioSpeech() {
               enabled before generating online speech.
             </p>
           )}
-          {message && (
-            <p role="status" className="studio-notice">
-              {message}
-            </p>
-          )}
+          {message && <StatusNotice text={message} />}
         </section>
         <aside className="studio-editor-tools">
           <section className="studio-card">

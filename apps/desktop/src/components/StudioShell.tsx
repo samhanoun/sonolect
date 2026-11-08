@@ -63,6 +63,13 @@ function QuickNavigation() {
   const { commandOpen, setCommandOpen, setActiveView } = useDesktopStore();
   const [query, setQuery] = useState("");
   const dialog = useRef<HTMLDialogElement>(null);
+  const matches = navigation.filter((item) =>
+    item.label.toLowerCase().includes(query.trim().toLowerCase()),
+  );
+  const go = (id: ViewId) => {
+    setActiveView(id);
+    setCommandOpen(false);
+  };
   useEffect(() => {
     if (commandOpen) {
       setQuery("");
@@ -83,6 +90,12 @@ function QuickNavigation() {
           placeholder="Where would you like to go?"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && matches[0]) {
+              e.preventDefault();
+              go(matches[0].id);
+            }
+          }}
         />
         <button
           className="studio-icon-button"
@@ -93,23 +106,16 @@ function QuickNavigation() {
         </button>
       </div>
       <nav>
-        {navigation
-          .filter((item) =>
-            item.label.toLowerCase().includes(query.toLowerCase()),
-          )
-          .map(({ id, label, Icon }) => (
-            <button
-              key={id}
-              onClick={() => {
-                setActiveView(id);
-                setCommandOpen(false);
-              }}
-            >
-              <Icon size={18} />
-              {label}
-              <span>↵</span>
-            </button>
-          ))}
+        {matches.map(({ id, label, Icon }) => (
+          <button key={id} onClick={() => go(id)}>
+            <Icon size={18} />
+            {label}
+            <span>↵</span>
+          </button>
+        ))}
+        {!matches.length && (
+          <p className="studio-command-empty">No page matches “{query}”.</p>
+        )}
       </nav>
     </dialog>
   );
