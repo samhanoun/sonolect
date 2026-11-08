@@ -12,6 +12,8 @@ permissions: read-all
 jobs:
   analysis:
     name: Scorecard analysis
+    # Results upload to code scanning; see ENABLE_CODE_SCANNING in codeql.yml.
+    if: vars.ENABLE_CODE_SCANNING == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

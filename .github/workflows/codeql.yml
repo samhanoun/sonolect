@@ -19,6 +19,9 @@ concurrency:
 jobs:
   analyze:
     name: CodeQL (${{ matrix.language }})
+    # CodeQL needs code scanning enabled for the repo (GitHub Code Security on
+    # private repos). Set repository variable ENABLE_CODE_SCANNING=true once on.
+    if: vars.ENABLE_CODE_SCANNING == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
