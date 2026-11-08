@@ -7,14 +7,18 @@
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0B120E",
+    "icon": "./assets/icon.png",
     "splash": {
-      "backgroundColor": "#0B120E",
-      "resizeMode": "contain"
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B120E"
     },
     "ios": {
       "bundleIdentifier": "com.sonolect.app",
       "supportsTablet": true,
-      "config": { "usesNonExemptEncryption": false }
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.sonolect.app",
@@ -24,11 +28,16 @@
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.SYSTEM_ALERT_WINDOW"
       ],
-      "allowBackup": false
+      "allowBackup": false,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0B120E"
+      }
     },
     "web": {
       "bundler": "metro",
-      "output": "single"
+      "output": "single",
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-router",
@@ -40,8 +49,19 @@
           "microphonePermission": "Sonolect uses the microphone to turn your voice into text.",
           "speechRecognitionPermission": "Sonolect uses speech recognition to transcribe what you dictate."
         }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160,
+          "backgroundColor": "#0B120E"
+        }
       ]
     ],
-    "experiments": { "typedRoutes": false, "tsconfigPaths": false }
+    "experiments": {
+      "typedRoutes": false,
+      "tsconfigPaths": false
+    }
   }
 }
