@@ -13,13 +13,18 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Runner selection: GitHub-hosted by default. Set the repository variable
+# LINUX_RUNNER (e.g. ["self-hosted","Linux","laptop"]) and/or WINDOWS_RUNNER
+# to a JSON label list to route jobs to self-hosted runners; delete the
+# variable to switch back. Fork PRs always stay on GitHub-hosted runners.
+
 env:
   PNPM_VERSION: 9.15.0
 
 jobs:
   quality:
     name: Quality (${{ matrix.node-version }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -53,7 +58,7 @@ jobs:
 
   mobile-bundle:
     name: Mobile web bundle
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -78,7 +83,7 @@ jobs:
   desktop-e2e:
     name: Desktop Playwright E2E
     # Playwright 1.59 cannot install browser deps on ubuntu-latest (26.04) yet.
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.LINUX_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-24.04' }}
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -105,7 +110,7 @@ jobs:
 
   desktop-rust:
     name: Desktop Rust (fmt, clippy, test)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 30
     defaults:
       run:
@@ -136,7 +141,7 @@ jobs:
 
   config-validation:
     name: Config validation
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -177,7 +182,7 @@ jobs:
 
   release-package-validation:
     name: Release package validation (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'windows-latest' && vars.WINDOWS_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.WINDOWS_RUNNER) || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -249,7 +254,7 @@ jobs:
 
   terraform:
     name: Terraform formatting
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-latest' }}
     defaults:
       run:
         working-directory: infra/terraform
@@ -267,7 +272,7 @@ jobs:
 
   security:
     name: Dependency and secret scanning
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
