@@ -68,6 +68,9 @@ export function trayMenuAction(
     >
   >,
 ): boolean {
+  // Only accept own keys so ids like "constructor" or "__proto__" never
+  // resolve to inherited Object.prototype members.
+  if (!Object.hasOwn(callbacks, itemId)) return false;
   const handler = callbacks[itemId as keyof typeof callbacks];
   if (handler) {
     handler();
