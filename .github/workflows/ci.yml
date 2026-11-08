@@ -53,7 +53,8 @@ jobs:
 
   desktop-e2e:
     name: Desktop Playwright E2E
-    runs-on: ubuntu-latest
+    # Playwright 1.59 cannot install browser deps on ubuntu-latest (26.04) yet.
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
