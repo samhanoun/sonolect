@@ -64,10 +64,7 @@ import type { User } from "@sonolect/types";
       headers: { authorization: "Bearer dev:mallory" },
     });
     assert.equal(profile.statusCode, 401, profile.body);
-    assert.equal(
-      profile.json<{ error: string }>().error,
-      "invalid_token",
-    );
+    assert.equal(profile.json<{ error: string }>().error, "invalid_token");
   } finally {
     await app.close();
   }
@@ -138,7 +135,9 @@ import type { User } from "@sonolect/types";
     authRequired: true,
     allowDevTokens: true,
     nodeEnv: "production",
-    verifyToken: async () => { throw new Error("Invalid token"); },
+    verifyToken: async () => {
+      throw new Error("Invalid token");
+    },
   });
   try {
     const profile = await app.inject({
@@ -192,10 +191,7 @@ import type { User } from "@sonolect/types";
       headers: { authorization: "Bearer firebase-token" },
     });
     assert.equal(profile.statusCode, 401, profile.body);
-    assert.equal(
-      profile.json<{ error: string }>().error,
-      "invalid_token",
-    );
+    assert.equal(profile.json<{ error: string }>().error, "invalid_token");
   } finally {
     await app.close();
   }
