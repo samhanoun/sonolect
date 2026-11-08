@@ -30,13 +30,13 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
-    "@playwright/test": "^1.49.1",
-    "@tauri-apps/cli": "^2.2.0",
+    "@playwright/test": "^1.64.1",
+    "@tauri-apps/cli": "^2.12.4",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^4.3.4",
-    "tailwindcss": "^4.3.1",
-    "tsx": "4.21.0",
+    "tailwindcss": "^4.3.4",
+    "tsx": "4.23.15",
     "vite": "^6.4.5"
   }
 }
