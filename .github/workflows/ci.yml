@@ -165,11 +165,7 @@ jobs:
           node -e "const fs=require('fs'); const cp=require('child_process'); const files=cp.execSync('git ls-files \"*.json\"',{encoding:'utf8'}).trim().split(/\n/).filter(Boolean); for (const file of files) { JSON.parse(fs.readFileSync(file,'utf8')); console.log('ok', file); }"
 
       - name: Validate YAML files
-        run: |
-          for file in $(git ls-files "*.yml" "*.yaml"); do
-            echo "validating ${file}"
-            npx --yes yaml valid < "${file}"
-          done
+        run: node scripts/validate-yaml.mjs
 
       - name: Check release readiness
         run: pnpm test:release-readiness
