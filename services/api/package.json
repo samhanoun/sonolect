@@ -20,7 +20,7 @@
     "@sonolect/types": "workspace:*",
     "@sonolect/validation": "workspace:*",
     "fastify": "^5.12.8",
-    "zod": "^3.24.1"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "tsx": "^4.19.2",
