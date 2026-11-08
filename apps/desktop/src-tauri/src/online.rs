@@ -331,9 +331,13 @@ pub async fn provider_speak(
         return Err("Enter between 1 and 12,000 characters and a valid voice.".into());
     }
     let format = response_format.unwrap_or_else(|| "mp3".into());
-    if !matches!(format.as_str(), "mp3" | "pcm") { return Err("Choose MP3 or PCM output.".into()); }
+    if !matches!(format.as_str(), "mp3" | "pcm") {
+        return Err("Choose MP3 or PCM output.".into());
+    }
     let rate = sample_rate.unwrap_or(24000);
-    if ![16000, 22050, 24000, 44100, 48000].contains(&rate) { return Err("Unsupported PCM sample rate.".into()); }
+    if ![16000, 22050, 24000, 44100, 48000].contains(&rate) {
+        return Err("Unsupported PCM sample rate.".into());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let mut body = json!({"model":model,"input":text,"response_format":format});
         if !voice.trim().is_empty() {
@@ -359,24 +363,54 @@ pub async fn provider_speak(
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SpeechAudio { bytes: Vec<u8>, mime_type: String }
+pub struct SpeechAudio {
+    bytes: Vec<u8>,
+    mime_type: String,
+}
 fn wav_from_pcm(bytes: &[u8], sample_rate: u32) -> Result<Vec<u8>, String> {
-    if bytes.is_empty() || bytes.len() % 2 != 0 || ![16000,22050,24000,44100,48000].contains(&sample_rate) { return Err("Invalid 16-bit mono PCM audio or sample rate.".into()); }
+    if bytes.is_empty()
+        || !bytes.len().is_multiple_of(2)
+        || ![16000, 22050, 24000, 44100, 48000].contains(&sample_rate)
+    {
+        return Err("Invalid 16-bit mono PCM audio or sample rate.".into());
+    }
     let mut output = std::io::Cursor::new(Vec::new());
     {
-        let mut writer = hound::WavWriter::new(&mut output, hound::WavSpec { channels: 1, sample_rate, bits_per_sample: 16, sample_format: hound::SampleFormat::Int }).map_err(|e|e.to_string())?;
-        for sample in bytes.chunks_exact(2) { writer.write_sample(i16::from_le_bytes([sample[0],sample[1]])).map_err(|e|e.to_string())?; }
-        writer.finalize().map_err(|e|e.to_string())?;
+        let mut writer = hound::WavWriter::new(
+            &mut output,
+            hound::WavSpec {
+                channels: 1,
+                sample_rate,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .map_err(|e| e.to_string())?;
+        for sample in bytes.as_chunks::<2>().0 {
+            writer
+                .write_sample(i16::from_le_bytes(*sample))
+                .map_err(|e| e.to_string())?;
+        }
+        writer.finalize().map_err(|e| e.to_string())?;
     }
     Ok(output.into_inner())
 }
 fn text_endpoint(provider: &str, model: &str) -> Result<String, String> {
-    provider_ok(provider)?; model_ok(model)?;
-    if provider == "openrouter" { return Ok("https://openrouter.ai/api/v1/chat/completions".into()); }
-    let path = if model.starts_with("gpt-") || model.starts_with("grok-") || model.starts_with("muse-") { "openai/v1/responses".to_owned() }
-        else if model.starts_with("claude-") || model.starts_with("qwen") { "anthropic/v1/messages".into() }
-        else if model.starts_with("gemini-") { format!("google/v1beta/models/{model}:generateContent") }
-        else { "openai/v1/chat/completions".into() };
+    provider_ok(provider)?;
+    model_ok(model)?;
+    if provider == "openrouter" {
+        return Ok("https://openrouter.ai/api/v1/chat/completions".into());
+    }
+    let path =
+        if model.starts_with("gpt-") || model.starts_with("grok-") || model.starts_with("muse-") {
+            "openai/v1/responses".to_owned()
+        } else if model.starts_with("claude-") || model.starts_with("qwen") {
+            "anthropic/v1/messages".into()
+        } else if model.starts_with("gemini-") {
+            format!("google/v1beta/models/{model}:generateContent")
+        } else {
+            "openai/v1/chat/completions".into()
+        };
     Ok(format!("https://opencode.ai/inference/{path}"))
 }
 #[tauri::command]
@@ -418,15 +452,30 @@ mod tests {
 
     #[test]
     fn current_opencode_endpoints_and_pcm_playback() {
-        assert_eq!(text_endpoint("opencode", "gpt-6.1-sol").unwrap(), "https://opencode.ai/inference/openai/v1/responses");
-        assert_eq!(text_endpoint("opencode", "claude-sonnet-5-5").unwrap(), "https://opencode.ai/inference/anthropic/v1/messages");
-        assert_eq!(text_endpoint("opencode", "gemini-4-argon").unwrap(), "https://opencode.ai/inference/google/v1beta/models/gemini-4-argon:generateContent");
+        assert_eq!(
+            text_endpoint("opencode", "gpt-6.1-sol").unwrap(),
+            "https://opencode.ai/inference/openai/v1/responses"
+        );
+        assert_eq!(
+            text_endpoint("opencode", "claude-sonnet-5-5").unwrap(),
+            "https://opencode.ai/inference/anthropic/v1/messages"
+        );
+        assert_eq!(
+            text_endpoint("opencode", "gemini-4-argon").unwrap(),
+            "https://opencode.ai/inference/google/v1beta/models/gemini-4-argon:generateContent"
+        );
         let wav = wav_from_pcm(&[0, 0, 255, 127], 24000).unwrap();
         let mut reader = hound::WavReader::new(std::io::Cursor::new(wav)).unwrap();
         assert_eq!(reader.spec().sample_rate, 24000);
-        assert_eq!(reader.samples::<i16>().collect::<Result<Vec<_>,_>>().unwrap(), vec![0, 32767]);
+        assert_eq!(
+            reader
+                .samples::<i16>()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap(),
+            vec![0, 32767]
+        );
         assert!(wav_from_pcm(&[0], 24000).is_err());
-        assert!(wav_from_pcm(&[0,0], 0).is_err());
+        assert!(wav_from_pcm(&[0, 0], 0).is_err());
     }
 
     #[test]
