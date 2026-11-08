@@ -123,7 +123,12 @@ jobs:
         # APK installs on any Android phone for testing (not for the store).
         # arm64-v8a covers current phones and halves native compile time.
         working-directory: apps/mobile/android
-        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+        run: |
+          # Point Gradle at the SDK that setup-android installed (a fresh
+          # self-hosted SDK lives under $HOME), and fail early if it is missing.
+          test -d "$ANDROID_HOME/platforms/android-35" || { echo "::error::No Android SDK platform 35 under $ANDROID_HOME"; exit 1; }
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
 
       - name: Upload the test APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
