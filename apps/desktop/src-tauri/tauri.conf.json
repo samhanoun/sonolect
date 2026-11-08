@@ -11,7 +11,11 @@
   },
   "app": {
     "windows": [
-      { "title": "Sonolect", "width": 1200, "height": 800 },
+      {
+        "title": "Sonolect",
+        "width": 1200,
+        "height": 800
+      },
       {
         "label": "recorder",
         "url": "index.html?window=recorder",
@@ -31,7 +35,10 @@
     "active": true,
     "createUpdaterArtifacts": false,
     "targets": ["nsis"],
-    "icon": ["icons/icon.png", "icons/icon.ico"]
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
   },
   "plugins": {
     "updater": {

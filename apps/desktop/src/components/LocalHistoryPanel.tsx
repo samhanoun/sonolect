@@ -134,7 +134,15 @@ export default function LocalHistoryPanel() {
             <p className="text-xs text-amber-300">{capture.error}</p>
           )}
           <div className="flex gap-5 text-xs pt-2">
-            <button disabled={!capture.transcript} onClick={() => setActiveSession(capture.id, capture.transcript || "")} className="disabled:opacity-30">Edit &amp; format</button>
+            <button
+              disabled={!capture.transcript}
+              onClick={() =>
+                setActiveSession(capture.id, capture.transcript || "")
+              }
+              className="disabled:opacity-30"
+            >
+              Edit &amp; format
+            </button>
             <button
               disabled={!capture.transcript}
               onClick={() => {

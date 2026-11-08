@@ -100,10 +100,12 @@ describe("cloud consent and recovery", () => {
       canUseCloud: () => allowed,
       apiUrl: "https://example.test",
       desktopTranscriber: async () => undefined,
-      fetchImpl: async input => {
+      fetchImpl: async (input) => {
         requests.push(String(input));
         allowed = false;
-        return new Response(JSON.stringify({ transcript: "Keep the raw result." }));
+        return new Response(
+          JSON.stringify({ transcript: "Keep the raw result." }),
+        );
       },
     });
     assert.equal(requests.length, 1);
@@ -116,7 +118,10 @@ describe("cloud consent and recovery", () => {
       signal: AbortSignal.abort(),
       apiUrl: "https://example.test",
       desktopTranscriber: async () => undefined,
-      fetchImpl: async () => { requests++; return new Response("{}"); },
+      fetchImpl: async () => {
+        requests++;
+        return new Response("{}");
+      },
     });
     assert.equal(requests, 0);
     assert.equal(result.status, "offline");
@@ -125,7 +130,9 @@ describe("cloud consent and recovery", () => {
     const result = await submitCapturedAudioCloud(audio, metadata, {
       processingMode: "cloud",
       desktopTranscriber: async () => ({ text: "", segments: [] }),
-      fetchImpl: async () => { throw new Error("Silence must not trigger an upload"); },
+      fetchImpl: async () => {
+        throw new Error("Silence must not trigger an upload");
+      },
     });
     assert.equal(result.status, "completed");
     assert.equal(result.transcript, "");
@@ -133,11 +140,15 @@ describe("cloud consent and recovery", () => {
   it("retains recognized text when the polish service fails", async () => {
     const requests: string[] = [];
     const result = await submitCapturedAudioCloud(audio, metadata, {
-      processingMode: "cloud", language: "fr", apiUrl: "https://example.test",
+      processingMode: "cloud",
+      language: "fr",
+      apiUrl: "https://example.test",
       desktopTranscriber: async () => undefined,
-      fetchImpl: async input => {
+      fetchImpl: async (input) => {
         requests.push(String(input));
-        return requests.length === 1 ? new Response(JSON.stringify({ transcript: "Bonjour." })) : new Response("unavailable", { status: 503 });
+        return requests.length === 1
+          ? new Response(JSON.stringify({ transcript: "Bonjour." }))
+          : new Response("unavailable", { status: 503 });
       },
     });
     assert.equal(requests.length, 2);

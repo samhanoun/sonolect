@@ -175,8 +175,11 @@ describe("desktop voice API client", () => {
     const result = await submitCapturedAudio(
       audio,
       { durationMs: 2500, mimeType: "audio/webm", sizeBytes: audio.size },
-      { processingMode: "cloud",
-        apiUrl: "http://localhost:4321", fetchImpl: fetchImpl as typeof fetch },
+      {
+        processingMode: "cloud",
+        apiUrl: "http://localhost:4321",
+        fetchImpl: fetchImpl as typeof fetch,
+      },
     );
 
     assert.equal(result.status, "submitted");

@@ -71,9 +71,14 @@ try {
   assert.equal(beforeWorker.transcripts?.[0]?.id, createdJob.transcriptId);
   assert.equal(beforeWorker.transcripts?.[0]?.status, "processing");
 
-  const localSttCommandArgs = [process.execPath, "-e",
+  const localSttCommandArgs = [
+    process.execPath,
+    "-e",
     "const path = require('node:path'); const [audioPath, mimeType, language] = process.argv.slice(1); console.log('Offline transcript for ' + path.basename(audioPath) + ' in ' + language + ' from ' + mimeType + '.');",
-  "{audioPath}", "{mimeType}", "{language}"];
+    "{audioPath}",
+    "{mimeType}",
+    "{language}",
+  ];
   const processed = await processNextQueuedAudioJob({
     storePath,
     now: () => new Date("2026-01-02T03:04:05.000Z"),
