@@ -37,13 +37,27 @@ it("closes the audio decoder after both success and decoding failure", async () 
       class Decoder {
         async decodeAudioData() {
           if (fail) throw new Error("Corrupt recording");
-          return { numberOfChannels: 1, sampleRate: 16_000, getChannelData: () => new Float32Array([0, 0.5]) };
+          return {
+            numberOfChannels: 1,
+            sampleRate: 16_000,
+            getChannelData: () => new Float32Array([0, 0.5]),
+          };
         }
-        async close() { closed = true; }
+        async close() {
+          closed = true;
+        }
       }
-      Object.defineProperty(globalThis, "AudioContext", { configurable: true, value: Decoder });
-      if (fail) await assert.rejects(prepareLocalAudio(new Blob(["bad"])), /Corrupt recording/);
-      else assert.equal((await prepareLocalAudio(new Blob(["audio"]))).length, 48);
+      Object.defineProperty(globalThis, "AudioContext", {
+        configurable: true,
+        value: Decoder,
+      });
+      if (fail)
+        await assert.rejects(
+          prepareLocalAudio(new Blob(["bad"])),
+          /Corrupt recording/,
+        );
+      else
+        assert.equal((await prepareLocalAudio(new Blob(["audio"]))).length, 48);
       assert.equal(closed, true);
     }
   } finally {

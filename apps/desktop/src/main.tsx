@@ -159,7 +159,8 @@ function App() {
       }
       // Hands-free toggle: ⌘⇧M — press to start, press to stop
       if (
-        !isTauriRuntime() && (event.metaKey || event.ctrlKey) &&
+        !isTauriRuntime() &&
+        (event.metaKey || event.ctrlKey) &&
         event.shiftKey &&
         event.key.toLowerCase() === "m"
       ) {
@@ -192,7 +193,10 @@ function App() {
     const handleKeyUp = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() === "v") {
         const { recordingState: rs } = useDesktopStore.getState();
-        if (!isTauriRuntime() && (rs === "recording" || rs === "requesting-permission")) {
+        if (
+          !isTauriRuntime() &&
+          (rs === "recording" || rs === "requesting-permission")
+        ) {
           useDesktopStore.getState().stopVoiceCapture();
         }
       }
@@ -269,8 +273,20 @@ function WorkspaceRouter() {
     dictionary: <DictionaryPanel />,
     snippets: <SnippetsPanel />,
     onboarding: <SettingsPanel />,
-    team: <div className="flex-1 overflow-y-auto p-10"><CloudFeature><TeamView currentUserId="local-user" /></CloudFeature></div>,
-    reader: <div className="flex-1 overflow-y-auto p-10"><CloudFeature><ReaderView /></CloudFeature></div>,
+    team: (
+      <div className="flex-1 overflow-y-auto p-10">
+        <CloudFeature>
+          <TeamView currentUserId="local-user" />
+        </CloudFeature>
+      </div>
+    ),
+    reader: (
+      <div className="flex-1 overflow-y-auto p-10">
+        <CloudFeature>
+          <ReaderView />
+        </CloudFeature>
+      </div>
+    ),
   };
 
   return (
@@ -280,7 +296,8 @@ function WorkspaceRouter() {
     >
       <TopBar />
       <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
-        {panels[activeView] ?? (activeSessionId ? <TranscriptDetail /> : <HistoryPanel />)}
+        {panels[activeView] ??
+          (activeSessionId ? <TranscriptDetail /> : <HistoryPanel />)}
       </div>
     </section>
   );
