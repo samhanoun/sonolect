@@ -3,16 +3,45 @@
     "name": "Sonolect",
     "slug": "sonolect",
     "scheme": "sonolect",
+    "version": "0.2.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0B120E",
+    "splash": {
+      "backgroundColor": "#0B120E",
+      "resizeMode": "contain"
+    },
     "ios": {
       "bundleIdentifier": "com.sonolect.app",
-      "infoPlist": {
-        "NSMicrophoneUsageDescription": "Sonolect utilise le microphone pour capturer vos dictées vocales.",
-        "NSSpeechRecognitionUsageDescription": "Sonolect prépare la transcription vocale lorsque la reconnaissance vocale est activée."
-      }
+      "supportsTablet": true,
+      "config": { "usesNonExemptEncryption": false }
     },
     "android": {
       "package": "com.sonolect.app",
-      "permissions": ["RECORD_AUDIO", "POST_NOTIFICATIONS"]
-    }
+      "permissions": ["RECORD_AUDIO"],
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
+      "allowBackup": false
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Sonolect uses the microphone to turn your voice into text.",
+          "speechRecognitionPermission": "Sonolect uses speech recognition to transcribe what you dictate."
+        }
+      ]
+    ],
+    "experiments": { "typedRoutes": false }
   }
 }
