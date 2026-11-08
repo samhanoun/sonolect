@@ -80,7 +80,7 @@ jobs:
 
   mobile-android:
     name: Mobile Android build
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.LINUX_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-24.04' }}
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -102,6 +102,10 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+
+      - name: Setup Android SDK
+        # GitHub images ship the SDK; self-hosted runners may not.
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
