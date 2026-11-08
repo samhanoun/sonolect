@@ -19,15 +19,15 @@ Only the latest release and the `main` branch receive security fixes.
 
 Every pull request and push to `main` runs:
 
-| Check      | Tool                         | What it covers                                                                                                                                          |
-| ---------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SAST       | CodeQL (`security-extended`) | TypeScript/JavaScript, Rust, GitHub Actions                                                                                                             |
-| SAST / IaC | Semgrep                      | Code, Dockerfiles, Terraform, workflows; fails on ERROR findings                                                                                        |
-| SCA        | OSV-Scanner                  | `pnpm-lock.yaml` and `Cargo.lock`, results in code scanning                                                                                             |
-| SCA        | `pnpm audit`, `cargo audit`  | Fails on high/critical npm advisories in desktop, services and packages (accepted exceptions in `scripts/audit-gate.mjs`) and any RustSec vulnerability |
-| SCA        | Dependency Review            | Blocks PRs adding high-severity or copyleft-licensed dependencies                                                                                       |
-| Secrets    | Gitleaks                     | Full git history                                                                                                                                        |
-| Posture    | OpenSSF Scorecard            | Weekly, on `main`                                                                                                                                       |
+| Check      | Tool                         | What it covers                                                                                                                                            |
+| ---------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SAST       | CodeQL (`security-extended`) | TypeScript/JavaScript, Rust, GitHub Actions                                                                                                               |
+| SAST / IaC | Semgrep                      | Code, Dockerfiles, Terraform, workflows; fails on ERROR findings                                                                                          |
+| SCA        | OSV-Scanner                  | `pnpm-lock.yaml` and `Cargo.lock`, results in code scanning                                                                                               |
+| SCA        | `pnpm audit`, `cargo audit`  | Fails on high/critical npm advisories in desktop, services and packages (accepted exceptions in `scripts/audit-gate.mjs`) and any RustSec vulnerability   |
+| SCA        | Dependency Review            | Blocks PRs adding high-severity or copyleft-licensed dependencies (enable with repo variable `ENABLE_DEPENDENCY_REVIEW=true` once Dependency graph is on) |
+| Secrets    | Gitleaks                     | Full git history (CI workflow, `security` job)                                                                                                            |
+| Posture    | OpenSSF Scorecard            | Weekly, on `main`                                                                                                                                         |
 
 Dependabot opens weekly update PRs for npm, Cargo, GitHub Actions, Docker base
 images and Terraform providers.

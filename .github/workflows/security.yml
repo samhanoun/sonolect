@@ -135,7 +135,10 @@ jobs:
 
   dependency-review:
     name: Dependency review (new deps in this PR)
-    if: github.event_name == 'pull_request'
+    # Needs the Dependency graph (and, on private repos, GitHub Advanced
+    # Security). Set the repository variable ENABLE_DEPENDENCY_REVIEW=true
+    # once it is enabled in Settings > Code security.
+    if: github.event_name == 'pull_request' && vars.ENABLE_DEPENDENCY_REVIEW == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -151,18 +154,3 @@ jobs:
           fail-on-severity: high
           deny-licenses: AGPL-3.0-only, AGPL-3.0-or-later, GPL-3.0-only, GPL-3.0-or-later, SSPL-1.0
           comment-summary-in-pr: on-failure
-
-  gitleaks:
-    name: Secret scanning (full history)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-
-      - name: Gitleaks
-        uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
