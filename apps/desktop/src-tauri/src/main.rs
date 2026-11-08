@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -200,7 +201,13 @@ fn transcribe_audio(payload: WhisperPayload) -> Result<WhisperResult, String> {
         return Err("Audio payload is empty".to_owned());
     }
     let audio_path = create_temp_audio_path(&payload.mime_type);
-    fs::write(&audio_path, &payload.audio_bytes)
+    // create_new refuses to open a pre-existing path (including a planted
+    // symlink) in the shared temp directory.
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&audio_path)
+        .and_then(|mut file| file.write_all(&payload.audio_bytes))
         .map_err(|error| format!("Failed to write temporary audio: {error}"))?;
     let audio_path_string = audio_path.to_string_lossy().to_string();
     let result = run_whisper_command(&payload, &audio_path_string);
@@ -432,8 +439,7 @@ fn edge_tts_synthesize(payload: EdgeTtsPayload) -> Result<Vec<u8>, String> {
         let _ = fs::remove_file(&out_path);
         return Err(format!("edge-tts failed: {stderr}"));
     }
-    let audio = fs::read(&out_path)
-        .map_err(|e| format!("Failed to read TTS output: {e}"))?;
+    let audio = fs::read(&out_path).map_err(|e| format!("Failed to read TTS output: {e}"))?;
     let _ = fs::remove_file(&out_path);
     Ok(audio)
 }
@@ -487,7 +493,12 @@ fn start_system_audio_capture(output_path: String) -> Result<(), String> {
             .and_then(|l| l.split_whitespace().nth(1))
             .ok_or_else(|| "No PulseAudio monitor source found".to_owned())?;
         Command::new("parec")
-            .args(["--device", monitor_source, "--file-format=wav", &output_path])
+            .args([
+                "--device",
+                monitor_source,
+                "--file-format=wav",
+                &output_path,
+            ])
             .spawn()
             .map_err(|e| format!("Failed to start parec: {e}"))?;
         Ok(())
@@ -496,11 +507,16 @@ fn start_system_audio_capture(output_path: String) -> Result<(), String> {
     {
         Command::new("ffmpeg")
             .args([
-                "-f", "avfoundation",
-                "-i", ":BlackHole 2ch",
-                "-acodec", "pcm_s16le",
-                "-ar", "44100",
-                "-ac", "1",
+                "-f",
+                "avfoundation",
+                "-i",
+                ":BlackHole 2ch",
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+                "44100",
+                "-ac",
+                "1",
                 &output_path,
             ])
             .spawn()
@@ -510,7 +526,10 @@ fn start_system_audio_capture(output_path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         let _ = output_path;
-        Err("Windows WASAPI capture requires native integration — use Stereo Mix recording device".to_owned())
+        Err(
+            "Windows WASAPI capture requires native integration — use Stereo Mix recording device"
+                .to_owned(),
+        )
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
