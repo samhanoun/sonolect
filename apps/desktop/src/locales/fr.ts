@@ -24,7 +24,7 @@ export const fr: Record<LocaleKeys, string> = {
   "topbar.eyebrow": "Shell desktop premium",
   "topbar.headline": "Capture vocale → texte → actions",
   "topbar.searchCommand": "Rechercher une commande",
-  "topbar.localFirst": "Local-first",
+  "topbar.localFirst": "Local uniquement",
   "topbar.cloudAssisted": "Cloud assisté",
   "topbar.apiReady": "API prête",
   "topbar.offline": "Offline",
@@ -181,7 +181,7 @@ export const fr: Record<LocaleKeys, string> = {
   "palette.agentCenter": "Centre agents",
   "palette.agentCenterHint": "Voir les actions connectées",
   "palette.privacySettings": "Réglages confidentialité",
-  "palette.privacySettingsHint": "Local-first, cloud, rétention",
+  "palette.privacySettingsHint": "Local uniquement, cloud, rétention",
 
   // Errors
   "error.micUnavailable":

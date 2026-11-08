@@ -106,6 +106,9 @@ importers:
       tailwindcss:
         specifier: ^4.3.1
         version: 4.3.1
+      tsx:
+        specifier: 4.21.0
+        version: 4.21.0
       vite:
         specifier: ^6.4.5
         version: 6.4.5(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.46.2)(tsx@4.21.0)(yaml@2.8.4)
@@ -301,6 +304,9 @@ importers:
       fastify:
         specifier: ^5.12.8
         version: 5.12.8
+      jose:
+        specifier: 6.2.15
+        version: 6.2.15
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -1564,7 +1570,7 @@ packages:
 
   '@expo/bunyan@4.0.1':
     resolution: {integrity: sha512-+Lla7nYSiHZirgK+U/uYzsLv/X+HaJienbD5AKX1UQZHYfWaP+9uuQluRB4GrEVWF0GZ7vEVp/jzaOT9k/SQlg==}
-    engines: {'0': node >=0.10.0}
+    engines: {node: '>=0.10.0'}
 
   '@expo/cli@0.22.28':
     resolution: {integrity: sha512-lvt72KNitGuixYD2l3SZmRKVu2G4zJpmg5V7WfUBNpmUU5oODBw/6qmiJ6kSLAlfDozscUk+BBGknBBzxUrwrA==}
@@ -3898,6 +3904,9 @@ packages:
 
   join-component@1.1.0:
     resolution: {integrity: sha512-bF7vcQxbODoGK1imE2P9GS9aw4zD0Sd+Hni68IMZLj7zRnquH7dXUmMw9hDI5S/Jzt7q+IyTXN0rSg2GI0IKhQ==}
+
+  jose@6.2.15:
+    resolution: {integrity: sha512-qdF6ewcZARtef63fJ9AKKZPgxw+t7USH6HLXYcD4CrdmSvDp79rpJSPFEKc90QBeGS63u1KQtN2MZQHC0yDIzA==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -9622,6 +9631,8 @@ snapshots:
   jiti@2.7.0: {}
 
   join-component@1.1.0: {}
+
+  jose@6.2.15: {}
 
   js-tokens@4.0.0: {}
 
