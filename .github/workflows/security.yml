@@ -19,7 +19,7 @@ concurrency:
 jobs:
   semgrep:
     name: Semgrep SAST (code, Dockerfiles, Terraform, workflows)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -67,7 +67,7 @@ jobs:
 
   osv-scanner:
     name: OSV-Scanner SCA (pnpm + Cargo lockfiles)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -78,9 +78,14 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install OSV-Scanner
+        # Downloads through the API (gh) rather than the github.com download
+        # URL, which has been timing out from some networks.
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -sSfL -o osv-scanner \
-            https://github.com/google/osv-scanner/releases/download/v2.3.8/osv-scanner_linux_amd64
+          gh release download v2.3.8 --repo google/osv-scanner \
+            --pattern osv-scanner_linux_amd64 --output osv-scanner --clobber
           chmod +x osv-scanner
 
       - name: Scan lockfiles
@@ -108,7 +113,7 @@ jobs:
 
   cargo-audit:
     name: cargo-audit (desktop Rust crates)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 20
     defaults:
       run:
@@ -130,7 +135,7 @@ jobs:
 
   npm-audit:
     name: pnpm audit gate
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -163,7 +168,7 @@ jobs:
     # Security). Set the repository variable ENABLE_DEPENDENCY_REVIEW=true
     # once it is enabled in Settings > Code security.
     if: github.event_name == 'pull_request' && vars.ENABLE_DEPENDENCY_REVIEW == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.LINUX_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 10
     permissions:
       contents: read
