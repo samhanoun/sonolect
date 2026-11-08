@@ -304,3 +304,7 @@ jobs:
         uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # gitleaks-action downloads to $TMPDIR/gitleaks.tmp and never removes
+          # it, so on a reused (self-hosted) runner the next run fails with
+          # "already exists". The per-job runner temp dir is wiped every job.
+          TMPDIR: ${{ runner.temp }}
