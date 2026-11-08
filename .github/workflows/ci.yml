@@ -104,8 +104,13 @@ jobs:
           java-version: 17
 
       - name: Setup Android SDK
-        # GitHub images ship the SDK; self-hosted runners may not.
+        # GitHub images ship the SDK; self-hosted runners may not. The action's
+        # default list includes the obsolete "tools" package, which a fresh SDK
+        # cannot install, so list what this build needs (Expo SDK 52 / RN 0.76).
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          log-accepted-android-sdk-licenses: false
+          packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;26.1.10909125 cmake;3.22.1
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
