@@ -8,7 +8,7 @@ const PAGES: Array<[string, RegExp]> = [
   ["Library", /Your voice library/],
   ["Dictionary", /./],
   ["Snippets", /./],
-  ["Models & voices", /Your models\. Your choice/],
+  ["Models & voices", /Your models, your choice/],
   ["Settings", /Make yourself at home/],
 ];
 
