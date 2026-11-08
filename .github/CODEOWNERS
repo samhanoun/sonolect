@@ -1,0 +1,9 @@
+# Default owner for everything.
+*                     @samhanoun
+
+# Security-sensitive paths: changes here need an explicit owner review.
+/.github/             @samhanoun
+/infra/               @samhanoun
+/services/api/src/auth.ts            @samhanoun
+/services/billing-service/           @samhanoun
+/apps/desktop/src-tauri/             @samhanoun
