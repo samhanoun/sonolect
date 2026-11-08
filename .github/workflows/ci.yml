@@ -81,7 +81,7 @@ jobs:
   mobile-android:
     name: Mobile Android build
     runs-on: ${{ vars.LINUX_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.LINUX_RUNNER) || 'ubuntu-24.04' }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -116,8 +116,9 @@ jobs:
       - name: Build an installable APK
         # The template signs release builds with the debug keystore, so this
         # APK installs on any Android phone for testing (not for the store).
+        # arm64-v8a covers current phones and halves native compile time.
         working-directory: apps/mobile/android
-        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,x86_64
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
 
       - name: Upload the test APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
