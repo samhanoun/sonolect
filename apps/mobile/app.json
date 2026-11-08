@@ -42,6 +42,6 @@
         }
       ]
     ],
-    "experiments": { "typedRoutes": false }
+    "experiments": { "typedRoutes": false, "tsconfigPaths": false }
   }
 }

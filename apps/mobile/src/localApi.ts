@@ -1,6 +1,7 @@
 import type { SonolectMode, Transcript } from "@sonolect/types";
 
 import type { CompanionSettings, TranscriptTurn } from "./domain";
+import { HISTORY_LIMIT } from "./domain";
 
 export type MobileLocalApiConfig = {
   apiUrl?: string;
@@ -171,7 +172,7 @@ export async function fetchLocalTranscriptHistory(
   if (!apiUrl) return [];
 
   const endpoint = new URL("/transcripts", apiUrl);
-  endpoint.searchParams.set("limit", String(config.limit ?? 25));
+  endpoint.searchParams.set("limit", String(config.limit ?? HISTORY_LIMIT));
 
   const response = await (config.fetchImpl ?? fetch)(endpoint.toString(), {
     headers: createJsonHeaders({ token: config.apiToken }),
@@ -359,7 +360,7 @@ export function mergeTranscriptHistory(
     .sort(
       (left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt),
     )
-    .slice(0, 25);
+    .slice(0, HISTORY_LIMIT);
 }
 
 function withOptionalTranscriptId<T extends MobileAudioUploadResult>(

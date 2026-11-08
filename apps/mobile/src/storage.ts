@@ -27,6 +27,44 @@ const KEYS = {
 
 const webSecrets = new Map<string, string>();
 
+let legacyMigration: Promise<void> | undefined;
+
+/**
+ * Version 0.1 kept settings and history in SecureStore. Copy them into
+ * AsyncStorage once (only where nothing newer exists), then delete the
+ * SecureStore copies. Runs at most once per launch.
+ */
+function migrateLegacySecureStore(): Promise<void> {
+  if (Platform.OS === "web") return Promise.resolve();
+  legacyMigration ??= (async () => {
+    try {
+      const [legacySettings, legacyHistory] = await Promise.all([
+        SecureStore.getItemAsync(KEYS.settings),
+        SecureStore.getItemAsync(KEYS.legacyHistory),
+      ]);
+      if (legacySettings && !(await AsyncStorage.getItem(KEYS.settings))) {
+        await AsyncStorage.setItem(KEYS.settings, legacySettings);
+      }
+      if (legacyHistory && !(await AsyncStorage.getItem(KEYS.history))) {
+        await AsyncStorage.setItem(KEYS.history, legacyHistory);
+      }
+      await Promise.all([
+        legacySettings ? SecureStore.deleteItemAsync(KEYS.settings) : undefined,
+        legacyHistory
+          ? SecureStore.deleteItemAsync(KEYS.legacyHistory)
+          : undefined,
+        SecureStore.deleteItemAsync("sonolect.mobile.auth").catch(
+          () => undefined,
+        ),
+      ]);
+    } catch {
+      // Keep the legacy copies so the next launch can retry.
+      legacyMigration = undefined;
+    }
+  })();
+  return legacyMigration;
+}
+
 async function readJson<T>(key: string, fallback: T): Promise<T> {
   try {
     const raw = await AsyncStorage.getItem(key);
@@ -55,6 +93,7 @@ function isTurn(value: unknown): value is TranscriptTurn {
 
 export const mobileStorage = {
   async loadSettings(): Promise<CompanionSettings> {
+    await migrateLegacySecureStore();
     return normalizeSettings(
       await readJson<Partial<CompanionSettings>>(KEYS.settings, {}),
     );
@@ -65,6 +104,7 @@ export const mobileStorage = {
   },
 
   async loadHistory(): Promise<TranscriptTurn[]> {
+    await migrateLegacySecureStore();
     const history = await readJson<unknown[]>(KEYS.history, []);
     return Array.isArray(history) ? history.filter(isTurn) : [];
   },
@@ -75,6 +115,11 @@ export const mobileStorage = {
 
   async clearHistory(): Promise<void> {
     await AsyncStorage.multiRemove([KEYS.history, KEYS.legacyHistory]);
+    if (Platform.OS !== "web") {
+      await SecureStore.deleteItemAsync(KEYS.legacyHistory).catch(
+        () => undefined,
+      );
+    }
   },
 
   async loadDictionary(): Promise<DictionaryEntry[]> {

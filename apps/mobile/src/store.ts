@@ -90,17 +90,59 @@ function apiConfig(settings: CompanionSettings, apiToken?: string) {
 }
 
 export const useCompanionStore = create<CompanionState>((set, get) => {
+  // Bumped whenever stored history is wiped, so in-flight sync/persist work
+  // started before the wipe cannot write transcripts back afterwards.
+  let dataEpoch = 0;
+  const stillAllowed = (epoch: number) =>
+    epoch === dataEpoch && keepsHistory(get().settings);
+
   const persistHistory = async (history: TranscriptTurn[]) => {
-    const { settings, apiToken } = get();
+    const epoch = dataEpoch;
     const trimmed = history.slice(0, HISTORY_LIMIT);
     set({ history: trimmed });
+    const { settings, apiToken } = get();
     if (!keepsHistory(settings)) return;
     const config = apiConfig(settings, apiToken);
-    const synced = config.apiUrl
-      ? await syncQueuedTranscriptTurns(trimmed, config)
-      : trimmed;
-    if (synced !== trimmed) set({ history: synced });
-    await mobileStorage.saveHistory(synced);
+    if (config.apiUrl) {
+      const synced = await syncQueuedTranscriptTurns(trimmed, config);
+      if (!stillAllowed(epoch)) return;
+      if (synced !== trimmed) applySyncResult(trimmed, synced);
+    }
+    if (!stillAllowed(epoch)) return;
+    await mobileStorage.saveHistory(get().history);
+  };
+
+  /**
+   * Maps server ids/sync state onto the current history (which may have
+   * changed during the request) and onto `latest`. A turn edited meanwhile
+   * only takes the new id and stays queued so its edit is synced next time.
+   */
+  const applySyncResult = (
+    before: TranscriptTurn[],
+    after: TranscriptTurn[],
+  ) => {
+    const updates = new Map<
+      string,
+      { original: TranscriptTurn; synced: TranscriptTurn }
+    >();
+    before.forEach((original, index) => {
+      const synced = after[index];
+      if (synced && synced !== original) {
+        updates.set(original.id, { original, synced });
+      }
+    });
+    const reconcile = (turn: TranscriptTurn): TranscriptTurn => {
+      const update = updates.get(turn.id);
+      if (!update) return turn;
+      return turn === update.original
+        ? update.synced
+        : { ...turn, id: update.synced.id };
+    };
+    const latest = get().latest;
+    set({
+      history: get().history.map(reconcile),
+      ...(latest ? { latest: reconcile(latest) } : {}),
+    });
   };
 
   const addTurn = async (turn: TranscriptTurn) => {
@@ -150,9 +192,11 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
 
       const config = apiConfig(settings, apiToken);
       if (!config.apiUrl || !keepsHistory(settings)) return;
+      const epoch = dataEpoch;
       try {
         const synced = await syncQueuedTranscriptTurns(history, config);
         const remote = await fetchLocalTranscriptHistory(config);
+        if (!stillAllowed(epoch)) return;
         const merged = mergeTranscriptHistory(synced, remote);
         set({ history: merged, latest: merged[0] });
         await mobileStorage.saveHistory(merged);
@@ -362,11 +406,13 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     },
 
     clearHistory: async () => {
+      dataEpoch += 1;
       set({ history: [], latest: undefined });
       await mobileStorage.clearHistory();
     },
 
     eraseAll: async () => {
+      dataEpoch += 1;
       activeSession?.abort();
       activeSession = null;
       await mobileStorage.eraseAll();
@@ -389,6 +435,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       await mobileStorage.saveSettings(settings);
       if (!keepsHistory(settings) && keepsHistory(previous)) {
         // Turning history off or going ephemeral removes what was stored.
+        dataEpoch += 1;
         await mobileStorage.clearHistory();
         set({ history: [] });
       }

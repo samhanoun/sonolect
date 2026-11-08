@@ -151,4 +151,19 @@ describe("mobile local API client", () => {
       {},
     );
   });
+  it("keeps up to the local history limit when merging with server history", () => {
+    const local = Array.from({ length: 60 }, (_, index) => ({
+      id: `local-${index}`,
+      rawText: "a",
+      refinedText: "a",
+      mode: "dictate" as const,
+      language: "en-US",
+      privacyMode: true,
+      createdAt: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+      durationMs: 0,
+      source: "typed" as const,
+      syncState: "local" as const,
+    }));
+    assert.equal(mergeTranscriptHistory(local, []).length, 60);
+  });
 });

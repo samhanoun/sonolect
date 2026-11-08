@@ -51,6 +51,30 @@ jobs:
       - name: Test
         run: pnpm test
 
+  mobile-bundle:
+    name: Mobile web bundle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Bundle the mobile app (catches Metro resolution errors)
+        run: pnpm --filter @sonolect/mobile exec expo export --platform web --output-dir dist-web
+
   desktop-e2e:
     name: Desktop Playwright E2E
     # Playwright 1.59 cannot install browser deps on ubuntu-latest (26.04) yet.
