@@ -75,6 +75,44 @@ jobs:
       - name: Bundle the mobile app (catches Metro resolution errors)
         run: pnpm --filter @sonolect/mobile exec expo export --platform web --output-dir dist-web
 
+      - name: Generate native projects (catches config plugin errors)
+        run: pnpm --filter @sonolect/mobile exec expo prebuild --no-install --clean
+
+  mobile-android:
+    name: Mobile Android debug build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate the Android project
+        run: pnpm --filter @sonolect/mobile exec expo prebuild --no-install --clean --platform android
+
+      - name: Build the debug APK
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleDebug --no-daemon -PreactNativeArchitectures=x86_64
+
   desktop-e2e:
     name: Desktop Playwright E2E
     # Playwright 1.59 cannot install browser deps on ubuntu-latest (26.04) yet.
