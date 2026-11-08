@@ -239,7 +239,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         message: `${models.length} compatible models loaded from ${PROVIDER_NAMES[provider]}.`,
       });
     } catch (error) {
-      set({ message: String(error) });
+      set({ message: error instanceof Error ? error.message : String(error) });
     } finally {
       set({ busy: null });
     }
@@ -253,7 +253,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       });
       return true;
     } catch (error) {
-      set({ message: String(error) });
+      set({ message: error instanceof Error ? error.message : String(error) });
       return false;
     }
   },
@@ -265,7 +265,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
         message: "Saved key removed.",
       });
     } catch (error) {
-      set({ message: String(error) });
+      set({ message: error instanceof Error ? error.message : String(error) });
     }
   },
 }));

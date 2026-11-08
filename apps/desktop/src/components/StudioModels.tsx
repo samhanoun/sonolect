@@ -24,9 +24,23 @@ const TASK_NAMES = {
   tts: "Text to speech",
   text: "Text editing",
 };
-export function StudioModelSelector({ task }: { task: ModelTask }) {
-  const { preferences, models, selectModel, refreshModels, busy, setVoice } =
-    useProviderStore();
+export function StudioModelSelector({
+  task,
+  inlineStatus = false,
+}: {
+  task: ModelTask;
+  /** Show catalog status beside the selector on pages without a global notice. */
+  inlineStatus?: boolean;
+}) {
+  const {
+    preferences,
+    models,
+    selectModel,
+    refreshModels,
+    busy,
+    setVoice,
+    message,
+  } = useProviderStore();
   const choice = preferences[task];
   const available =
     choice.provider === "local"
@@ -98,6 +112,11 @@ export function StudioModelSelector({ task }: { task: ModelTask }) {
             <RefreshCw size={15} />
             {busy === choice.provider ? "Loading models…" : "Load live catalog"}
           </button>
+          {inlineStatus && message && (
+            <p role="status" className="studio-inline-status">
+              {message}
+            </p>
+          )}
           {!available.length && (
             <p className="studio-muted">
               Load the live catalog to see models that support{" "}
@@ -119,8 +138,11 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
   const Icon = router ? Route : Terminal;
   const save = async () => {
     setSaving(true);
-    try { if (await saveKey(provider, key)) setKey(""); }
-    finally { setSaving(false); }
+    try {
+      if (await saveKey(provider, key)) setKey("");
+    } finally {
+      setSaving(false);
+    }
   };
   return (
     <section className="studio-card provider-card">

@@ -1078,3 +1078,13 @@ body {
     left: calc(50% + 70px);
   }
 }
+.studio-grid + .studio-card {
+  margin-top: 20px;
+}
+.studio-inline-status {
+  font-size: 12px !important;
+  line-height: 1.6;
+  color: #667553;
+  margin: 8px 0 0 !important;
+  overflow-wrap: anywhere;
+}

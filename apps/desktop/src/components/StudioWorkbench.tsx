@@ -49,17 +49,27 @@ export function useSavedCaptures() {
       );
       setError("");
     } catch (error) {
-      setError(String(error));
+      setError(error instanceof Error ? error.message : String(error));
     }
   };
   useEffect(() => {
     let cancelled = false;
     if (isTauriRuntime()) {
-      void nativeProviderCall<SavedCapture[]>("list_local_captures").then(result => {
-        if (!cancelled) { setCaptures(result); setError(""); }
-      }).catch(error => { if (!cancelled) setError(String(error)); });
+      void nativeProviderCall<SavedCapture[]>("list_local_captures")
+        .then((result) => {
+          if (!cancelled) {
+            setCaptures(result);
+            setError("");
+          }
+        })
+        .catch((error) => {
+          if (!cancelled)
+            setError(error instanceof Error ? error.message : String(error));
+        });
     }
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [recordingState]);
   return { captures, error, refresh };
 }
@@ -257,7 +267,7 @@ export function StudioTranscribe({
           : "No speech was detected.",
       );
     } catch (error) {
-      setMessage(String(error));
+      setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
       await onSaved();
@@ -277,7 +287,7 @@ export function StudioTranscribe({
         ),
       );
     } catch (error) {
-      setMessage(String(error));
+      setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
@@ -391,11 +401,16 @@ export function StudioTranscribe({
               <Download size={17} />
             </button>
           </div>
+          {(message || state.voiceError) && (
+            <p role="status" className="studio-notice">
+              {message || state.voiceError}
+            </p>
+          )}
         </section>
         <aside className="studio-editor-tools">
           <section className="studio-card">
             <h3>Recognition</h3>
-            <StudioModelSelector task="stt" />
+            <StudioModelSelector task="stt" inlineStatus />
             <label>
               Language
               <select
@@ -451,11 +466,6 @@ export function StudioTranscribe({
           </section>
         </aside>
       </div>
-      {(message || state.voiceError) && (
-        <p role="status" className="studio-notice">
-          {message || state.voiceError}
-        </p>
-      )}
       {proposed && (
         <section className="studio-card">
           <h3>Review the suggested edit</h3>
@@ -524,7 +534,8 @@ export function StudioSpeech() {
         setExtension(blob.type === "audio/wav" ? "wav" : "mp3");
       }
     } catch (error) {
-      if (mounted.current) setMessage(String(error));
+      if (mounted.current)
+        setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       if (mounted.current) setBusy(false);
     }
@@ -575,11 +586,22 @@ export function StudioSpeech() {
             )}
           </div>
           {url && <audio className="studio-audio" controls src={url} />}
+          {mode === "local" && (
+            <p className="studio-notice">
+              Local only is selected. Switch the processing control to Cloud
+              enabled before generating online speech.
+            </p>
+          )}
+          {message && (
+            <p role="status" className="studio-notice">
+              {message}
+            </p>
+          )}
         </section>
         <aside className="studio-editor-tools">
           <section className="studio-card">
             <h3>Model & voice</h3>
-            <StudioModelSelector task="tts" />
+            <StudioModelSelector task="tts" inlineStatus />
             <label>
               Audio format
               <select
@@ -652,17 +674,6 @@ export function StudioSpeech() {
           </section>
         </aside>
       </div>
-      {mode === "local" && (
-        <p className="studio-notice">
-          Local only is selected. Switch the processing control to Cloud enabled
-          before generating online speech.
-        </p>
-      )}
-      {message && (
-        <p role="status" className="studio-notice">
-          {message}
-        </p>
-      )}
     </div>
   );
 }
@@ -690,7 +701,7 @@ export function StudioLibrary({
       });
       setMessage("Recording transcribed locally.");
     } catch (error) {
-      setMessage(String(error));
+      setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       await refresh();
       setBusy("");
@@ -707,7 +718,7 @@ export function StudioLibrary({
       await nativeProviderCall("delete_local_capture", { id });
       await refresh();
     } catch (error) {
-      setMessage(String(error));
+      setMessage(error instanceof Error ? error.message : String(error));
     }
   };
   const visible = captures.filter((item) =>
@@ -943,11 +954,21 @@ export function StudioSettings() {
   useEffect(() => {
     let cancelled = false;
     if (isTauriRuntime()) {
-      void nativeProviderCall<{ready:boolean;path:string}>("local_model_status", {modelPath:state.whisperConfig.modelPath || null}).then(result => {
-        if (!cancelled) setModel(result);
-      }).catch(error => { if (!cancelled) setMessage(String(error)); });
+      void nativeProviderCall<{ ready: boolean; path: string }>(
+        "local_model_status",
+        { modelPath: state.whisperConfig.modelPath || null },
+      )
+        .then((result) => {
+          if (!cancelled) setModel(result);
+        })
+        .catch((error) => {
+          if (!cancelled)
+            setMessage(error instanceof Error ? error.message : String(error));
+        });
     }
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [state.whisperConfig.modelPath]);
   const install = async () => {
     setBusy(true);
@@ -972,7 +993,7 @@ export function StudioSettings() {
         "Model downloaded and checksum verified. You can use it offline.",
       );
     } catch (error) {
-      setMessage(String(error));
+      setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       unlisten?.();
       setBusy(false);
@@ -1044,7 +1065,9 @@ export function StudioSettings() {
             >
               {STT_LANGUAGES.map((language) => (
                 <option value={language.code} key={language.code}>
-                  {language.nativeName} ({language.name})
+                  {language.nativeName === language.name
+                    ? language.name
+                    : `${language.nativeName} (${language.name})`}
                 </option>
               ))}
             </select>
