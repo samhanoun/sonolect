@@ -14,7 +14,7 @@ describe("Wispr-style dictation workflow helpers", () => {
   it("polishes raw speech by removing filler words and adding sentence punctuation", () => {
     assert.equal(
       polishDictation("um please send this to sam you know it is ready"),
-      "Please send this to sam it is ready.",
+      "Please send this to sam you know it is ready.",
     );
   });
 

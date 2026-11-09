@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { createFirebaseVerifier } from "./firebase-verifier.js";
 
 export interface AuthenticatedActor {
   userId: string;
@@ -53,11 +54,6 @@ const getAuthorizationValue = (request: FastifyRequest): string | undefined => {
   return Array.isArray(header) ? header[0] : header;
 };
 
-const getLegacyUserId = (request: FastifyRequest): string | undefined => {
-  const header = request.headers["x-user-id"];
-  return Array.isArray(header) ? header[0] : header;
-};
-
 const parseBearerToken = (
   authorization: string | undefined,
 ): string | undefined => {
@@ -70,25 +66,44 @@ const parseBearerToken = (
 
 const isNonProduction = (nodeEnv: string): boolean => nodeEnv !== "production";
 
-export const createAuthConfig = (options: AuthOptions = {}): AuthConfig => ({
-  authRequired:
-    options.authRequired ?? envFlagEnabled(process.env.SONOLECT_AUTH_REQUIRED),
-  firebaseProjectId:
-    options.firebaseProjectId ?? process.env.FIREBASE_PROJECT_ID,
-  verifyToken: options.verifyToken,
-  localDevAuth:
-    options.localDevAuth ?? envFlagEnabled(process.env.SONOLECT_LOCAL_DEV_AUTH),
-  localUserId: sanitizeLocalUserId(
-    options.localUserId ?? process.env.SONOLECT_LOCAL_USER_ID,
-  ),
-  allowDevTokens: Boolean(
-    options.allowDevTokens ??
-    (envFlagEnabled(process.env.SONOLECT_ALLOW_DEV_TOKENS) ||
+export const createAuthConfig = (options: AuthOptions = {}): AuthConfig => {
+  const nodeEnv = options.nodeEnv ?? process.env.NODE_ENV ?? "development";
+  const production = nodeEnv === "production";
+  const firebaseProjectId = (
+    options.firebaseProjectId ?? process.env.FIREBASE_PROJECT_ID
+  )?.trim();
+  const verifyToken =
+    options.verifyToken ??
+    (firebaseProjectId ? createFirebaseVerifier(firebaseProjectId) : undefined);
+  if (production && !verifyToken)
+    throw new Error(
+      "Production authentication requires FIREBASE_PROJECT_ID or a configured token verifier",
+    );
+  return {
+    authRequired:
+      production ||
+      (options.authRequired ??
+        envFlagEnabled(process.env.SONOLECT_AUTH_REQUIRED)),
+    firebaseProjectId,
+    verifyToken,
+    localDevAuth:
+      !production &&
       (options.localDevAuth ??
-        envFlagEnabled(process.env.SONOLECT_LOCAL_DEV_AUTH))),
-  ),
-  nodeEnv: options.nodeEnv ?? process.env.NODE_ENV ?? "development",
-});
+        envFlagEnabled(process.env.SONOLECT_LOCAL_DEV_AUTH)),
+    localUserId: sanitizeLocalUserId(
+      options.localUserId ?? process.env.SONOLECT_LOCAL_USER_ID,
+    ),
+    allowDevTokens:
+      !production &&
+      Boolean(
+        options.allowDevTokens ??
+        (envFlagEnabled(process.env.SONOLECT_ALLOW_DEV_TOKENS) ||
+          (options.localDevAuth ??
+            envFlagEnabled(process.env.SONOLECT_LOCAL_DEV_AUTH))),
+      ),
+    nodeEnv,
+  };
+};
 
 export async function resolveAuthenticatedActor(
   request: FastifyRequest,
@@ -105,7 +120,7 @@ export async function resolveAuthenticatedActor(
       });
     }
     return {
-      userId: getLegacyUserId(request) ?? config.localUserId,
+      userId: config.localUserId,
       provider: "anonymous",
     };
   }
@@ -122,6 +137,8 @@ export async function resolveAuthenticatedActor(
   if (config.verifyToken) {
     try {
       const verified = await config.verifyToken(token);
+      if (!verified.uid || verified.uid.length > 128)
+        throw new Error("Invalid verified user ID");
       return {
         userId: verified.uid,
         provider: "firebase",

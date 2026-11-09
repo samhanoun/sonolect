@@ -1,0 +1,10 @@
+node_modules/
+dist/
+build/
+coverage/
+target/
+apps/desktop/src-tauri/gen/
+pnpm-lock.yaml
+# Test fixtures use deliberately fake keys.
+*.smoke.ts
+*.test.ts

@@ -3,16 +3,65 @@
     "name": "Sonolect",
     "slug": "sonolect",
     "scheme": "sonolect",
+    "version": "0.2.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0B120E",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B120E"
+    },
     "ios": {
       "bundleIdentifier": "com.sonolect.app",
-      "infoPlist": {
-        "NSMicrophoneUsageDescription": "Sonolect utilise le microphone pour capturer vos dictées vocales.",
-        "NSSpeechRecognitionUsageDescription": "Sonolect prépare la transcription vocale lorsque la reconnaissance vocale est activée."
+      "supportsTablet": true,
+      "config": {
+        "usesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "com.sonolect.app",
-      "permissions": ["RECORD_AUDIO", "POST_NOTIFICATIONS"]
+      "permissions": ["RECORD_AUDIO"],
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
+      "allowBackup": false,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0B120E"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Sonolect uses the microphone to turn your voice into text.",
+          "speechRecognitionPermission": "Sonolect uses speech recognition to transcribe what you dictate."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160,
+          "backgroundColor": "#0B120E"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false,
+      "tsconfigPaths": false
     }
   }
 }

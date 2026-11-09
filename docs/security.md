@@ -6,7 +6,7 @@
 - **Tenant isolation**: Firestore and Storage rules require authenticated user ownership or tenant membership.
 - **No secrets in source**: Terraform creates Secret Manager placeholders only; secret versions must be populated through approved operational channels.
 - **Private by default**: Cloud Storage enforces uniform bucket-level access and public access prevention. Production API ingress should be fronted by an API gateway, load balancer, or IAP where possible.
-- **Auditability**: CI runs typecheck/lint/test plus JSON/YAML validation, Terraform formatting, dependency audit, and secret scanning.
+- **Auditability**: CI runs typecheck/lint/test, Rust fmt/clippy/test, JSON/YAML validation, Terraform formatting, SAST (CodeQL, Semgrep), SCA (OSV-Scanner, `pnpm audit`, `cargo audit`, Dependency Review), and secret scanning (Gitleaks). See [SECURITY.md](../SECURITY.md) for the full matrix.
 
 ## Data classification
 
@@ -38,6 +38,9 @@ Rules live in `infra/firebase`:
 - Prefer OIDC/Workload Identity Federation for cloud deploys; do not store long-lived GCP keys in GitHub secrets.
 - Review `pnpm audit` findings before release. Document accepted risk with owner and expiry.
 - Secret scanning is blocking in CI; remove leaked values and rotate them before retrying.
+- GitHub Actions are pinned to full commit SHAs; Dependabot keeps the pins current.
+- Service containers run as the unprivileged `node` user.
+- Code scanning results (CodeQL, Semgrep, OSV-Scanner, Scorecard) land in the repository's Security tab. Triage notes for accepted findings live in [security-scan-triage.md](security-scan-triage.md).
 
 ## Incident response checklist
 

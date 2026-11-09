@@ -1,497 +1,403 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  Pressable,
-  SafeAreaView,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
+  Share,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
 } from "react-native";
+import * as Clipboard from "expo-clipboard";
+import * as Haptics from "expo-haptics";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-import { DEFAULT_SETTINGS, REFINEMENT_ACTIONS } from "../src/domain";
+import { REFINEMENT_MODES } from "../src/domain";
+import { strings } from "../src/i18n";
+import { formatDuration } from "../src/library";
+import { resolveMobileLocalApiConfig } from "../src/localApi";
+import {
+  getSpeechAvailability,
+  requestMicrophonePermission,
+} from "../src/speech";
 import { useCompanionStore } from "../src/store";
+import {
+  Button,
+  Card,
+  Chip,
+  Icon,
+  Label,
+  MicOrb,
+  Waveform,
+} from "../src/ui/components";
+import { colors, fonts, modeColor, radius, space } from "../src/ui/theme";
 
-const palette = {
-  background: "#08090A",
-  surface: "#111317",
-  surfaceMuted: "#181B21",
-  border: "#2A2F38",
-  primary: "#8B5CF6",
-  primarySoft: "#A78BFA",
-  success: "#22C55E",
-  text: "#F4F4F5",
-  textMuted: "#A1A1AA",
-  warning: "#F59E0B",
-};
+export default function CaptureScreen() {
+  const settings = useCompanionStore((s) => s.settings);
+  const apiToken = useCompanionStore((s) => s.apiToken);
+  const capture = useCompanionStore((s) => s.capture);
+  const level = useCompanionStore((s) => s.level);
+  const latest = useCompanionStore((s) => s.latest);
+  const notice = useCompanionStore((s) => s.notice);
+  const noticeDetail = useCompanionStore((s) => s.noticeDetail);
+  const refining = useCompanionStore((s) => s.refining);
+  const startCapture = useCompanionStore((s) => s.startCapture);
+  const stopCapture = useCompanionStore((s) => s.stopCapture);
+  const cancelCapture = useCompanionStore((s) => s.cancelCapture);
+  const saveTyped = useCompanionStore((s) => s.saveTyped);
+  const refine = useCompanionStore((s) => s.refine);
+  const updateSettings = useCompanionStore((s) => s.updateSettings);
+  const t = strings(settings.uiLanguage);
 
-export default function HomeScreen() {
-  const hydrated = useCompanionStore((state) => state.hydrated);
-  const auth = useCompanionStore((state) => state.auth);
-  const settings = useCompanionStore((state) => state.settings);
-  const capture = useCompanionStore((state) => state.capture);
-  const history = useCompanionStore((state) => state.history);
-  const hydrate = useCompanionStore((state) => state.hydrate);
-  const startCapture = useCompanionStore((state) => state.startCapture);
-  const stopCapture = useCompanionStore((state) => state.stopCapture);
-  const cancelCapture = useCompanionStore((state) => state.cancelCapture);
-  const refineLast = useCompanionStore((state) => state.refineLast);
-  const updateSettings = useCompanionStore((state) => state.updateSettings);
-  const clearHistory = useCompanionStore((state) => state.clearHistory);
-  const markAuthReady = useCompanionStore((state) => state.markAuthReady);
+  const [typing, setTyping] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+
+  const listening = capture.status === "listening";
+  const processing = capture.status === "processing";
+  const availability = useMemo(() => getSpeechAvailability(), []);
+  const apiConnected = Boolean(
+    resolveMobileLocalApiConfig({ ...settings, apiToken }).apiUrl,
+  );
 
   useEffect(() => {
-    void hydrate();
-  }, [hydrate]);
+    if (!listening || !capture.startedAt) {
+      setElapsed(0);
+      return;
+    }
+    const startedAt = Date.parse(capture.startedAt);
+    const timer = setInterval(() => setElapsed(Date.now() - startedAt), 500);
+    return () => clearInterval(timer);
+  }, [listening, capture.startedAt]);
 
-  const isListening = capture.status === "listening";
-  const latest = history[0];
+  useEffect(() => {
+    if (notice === "unavailable") setTyping(true);
+  }, [notice]);
+
+  const haptic = () => {
+    if (settings.hapticsEnabled && Platform.OS !== "web") {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(
+        () => undefined,
+      );
+    }
+  };
+
+  const onOrbPress = () => {
+    haptic();
+    if (listening) stopCapture();
+    else void startCapture();
+  };
+
+  const statusLabel = listening
+    ? `● ${t.capture.listening} · ${formatDuration(elapsed)}`
+    : processing
+      ? t.capture.processing
+      : capture.status === "ready"
+        ? t.capture.ready
+        : capture.status === "error"
+          ? t.capture.error
+          : t.capture.idle;
+
+  const modeBadge = apiConnected
+    ? { icon: "cloud" as const, label: t.mode.api }
+    : availability.available && availability.onDevice
+      ? { icon: "lock" as const, label: t.mode.onDevice }
+      : { icon: "cloud" as const, label: t.mode.deviceService };
+
+  const noticeText =
+    notice === "noSpeech"
+      ? t.capture.noSpeech
+      : notice === "unavailable"
+        ? t.capture.unavailable
+        : notice === "permissionDenied"
+          ? t.capture.permissionDenied
+          : notice === "needsModel"
+            ? t.capture.needsModel
+            : notice === "error"
+              ? (noticeDetail ?? t.capture.noSpeech)
+              : null;
+
+  const liveText = listening || processing ? capture.partialTranscript : "";
+
+  const copyLatest = async () => {
+    if (!latest) return;
+    await Clipboard.setStringAsync(latest.refinedText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const showOnboarding = !settings.onboarded;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.hero}>
-          <View style={styles.badgeRow}>
-            <Text style={styles.badge}>Sonolect mobile</Text>
-            <Text style={styles.badgeMuted}>
-              {auth.status === "ready" ? "Auth prêt" : "Invité"}
-            </Text>
-          </View>
-          <Text style={styles.title}>Speak. Refine. Act.</Text>
-          <Text style={styles.subtitle}>
-            Compagnon vocal Expo pour capturer une idée, conserver l'historique
-            et préparer les actions IA avant la synchronisation cloud.
-          </Text>
-        </View>
-
-        <View style={styles.captureCard}>
-          <Text style={styles.sectionEyebrow}>Capture vocale</Text>
-          <Text style={styles.captureStatus}>{statusCopy(capture.status)}</Text>
-          <Text style={styles.captureHint}>
-            {capture.partialTranscript ||
-              "Appuyez pour démarrer une dictée privée."}
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              isListening
-                ? "Arrêter la capture vocale"
-                : "Démarrer la capture vocale"
-            }
-            onPress={isListening ? () => void stopCapture() : startCapture}
-            style={({ pressed }) => [
-              styles.micButton,
-              isListening && styles.micButtonActive,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text style={styles.micIcon}>{isListening ? "■" : "●"}</Text>
-            <Text style={styles.micLabel}>
-              {isListening ? "Terminer" : "Parler"}
-            </Text>
-          </Pressable>
-          {isListening ? (
-            <Pressable onPress={cancelCapture} style={styles.secondaryButton}>
-              <Text style={styles.secondaryButtonText}>Annuler</Text>
-            </Pressable>
-          ) : null}
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Actions de raffinement</Text>
-          <View style={styles.actionGrid}>
-            {REFINEMENT_ACTIONS.map((action) => (
-              <Pressable
-                key={action.id}
-                disabled={!latest}
-                onPress={() => void refineLast(action.id)}
-                style={({ pressed }) => [
-                  styles.actionCard,
-                  !latest && styles.disabledCard,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={styles.actionLabel}>{action.label}</Text>
-                <Text style={styles.actionHelper}>{action.helper}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Historique</Text>
-            <Pressable
-              onPress={() => void clearHistory()}
-              disabled={history.length === 0}
-            >
-              <Text
-                style={[
-                  styles.linkText,
-                  history.length === 0 && styles.disabledText,
-                ]}
-              >
-                Effacer
+    <SafeAreaView style={styles.safe} edges={["top"]}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.container}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.header}>
+            <View>
+              <Text style={styles.brand}>
+                sono<Text style={{ color: colors.lime }}>lect</Text>
               </Text>
-            </Pressable>
+              <Label>{t.brandTag}</Label>
+            </View>
+            <View style={styles.modePill} accessibilityLabel={modeBadge.label}>
+              <Icon name={modeBadge.icon} size={14} color={colors.lime} />
+              <Text style={styles.modePillText}>{modeBadge.label}</Text>
+            </View>
           </View>
-          {history.length === 0 ? (
-            <Text style={styles.emptyText}>
-              Aucune transcription sauvegardée. Le mode éphémère n'enregistre
-              rien.
-            </Text>
-          ) : (
-            history.map((turn) => (
-              <View key={turn.id} style={styles.historyCard}>
-                <View style={styles.historyMetaRow}>
-                  <Text style={styles.historyMode}>{modeLabel(turn.mode)}</Text>
-                  <Text style={styles.historyMeta}>
-                    {syncStateLabel(turn.syncState)}
-                  </Text>
-                </View>
-                <Text style={styles.historyText}>{turn.refinedText}</Text>
-                <Text style={styles.historyRaw}>Brut: {turn.rawText}</Text>
-              </View>
-            ))
-          )}
-        </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Réglages & confidentialité</Text>
-          <SettingRow
-            label="Sauvegarder l'historique"
-            value={settings.saveHistory}
-            onValueChange={(value) =>
-              void updateSettings({ saveHistory: value })
-            }
-          />
-          <SettingRow
-            label="Notifications prêtes"
-            value={settings.notificationsEnabled}
-            onValueChange={(value) =>
-              void updateSettings({ notificationsEnabled: value })
-            }
-          />
-          <SettingRow
-            label="Synchronisation cloud"
-            value={settings.cloudSyncEnabled}
-            onValueChange={(value) =>
-              void updateSettings({ cloudSyncEnabled: value })
-            }
-          />
-          <View style={styles.apiConfigBox}>
-            <Text style={styles.apiConfigLabel}>API locale Sonolect</Text>
-            <TextInput
-              accessibilityLabel="URL de l'API locale Sonolect"
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              placeholder="http://localhost:8787"
-              placeholderTextColor={palette.textMuted}
-              defaultValue={settings.localApiUrl ?? ""}
-              onEndEditing={(event) =>
-                void updateSettings({
-                  localApiUrl: event.nativeEvent.text.trim(),
-                })
+          {showOnboarding ? (
+            <Card style={styles.onboarding}>
+              <Text style={styles.onboardingTitle}>{t.onboarding.title}</Text>
+              <Text style={styles.muted}>{t.onboarding.body}</Text>
+              <View style={styles.row}>
+                <Button
+                  variant="primary"
+                  icon="mic"
+                  label={t.onboarding.allow}
+                  onPress={async () => {
+                    await requestMicrophonePermission();
+                    await updateSettings({ onboarded: true });
+                  }}
+                />
+                <Button
+                  variant="ghost"
+                  label={t.onboarding.skip}
+                  onPress={() => void updateSettings({ onboarded: true })}
+                />
+              </View>
+            </Card>
+          ) : null}
+
+          <View style={styles.stage}>
+            <Label
+              color={listening ? colors.lime : colors.muted}
+              style={styles.status}
+            >
+              {statusLabel}
+            </Label>
+            <MicOrb
+              listening={listening}
+              busy={processing}
+              label={listening ? t.capture.done : t.capture.speak}
+              onPress={onOrbPress}
+              accessibilityLabel={
+                listening ? t.capture.done : t.capture.tapToSpeak
               }
-              style={styles.apiConfigInput}
             />
-            <Text style={styles.privacyNote}>
-              Renseignez une URL locale ou EXPO_PUBLIC_SONOLECT_API_URL pour
-              envoyer les éléments en attente, téléverser l'audio capturé vers
-              l'API locale et récupérer l'historique local.
+            <Waveform level={level} active={listening} />
+            <Text style={styles.live} accessibilityLiveRegion="polite">
+              {liveText || (listening ? "" : t.capture.hint)}
+              {listening ? <Text style={{ color: colors.lime }}>▍</Text> : null}
             </Text>
+            {listening ? (
+              <Button label={t.capture.cancel} onPress={cancelCapture} />
+            ) : (
+              <Button
+                icon="keyboard"
+                label={t.capture.typeInstead}
+                variant="ghost"
+                onPress={() => setTyping((value) => !value)}
+              />
+            )}
+            {settings.privacyLevel !== "standard" &&
+            availability.available &&
+            !availability.onDevice &&
+            !apiConnected ? (
+              <Text style={styles.noteSmall}>{t.capture.cloudFallback}</Text>
+            ) : null}
+            {settings.privacyLevel === "ephemeral" ? (
+              <Text style={styles.noteSmall}>{t.capture.ephemeralNote}</Text>
+            ) : null}
           </View>
-          <View style={styles.privacyRow}>
-            {(["standard", "local_first", "ephemeral"] as const).map(
-              (level) => (
-                <Pressable
-                  key={level}
-                  onPress={() => void updateSettings({ privacyLevel: level })}
-                  style={[
-                    styles.privacyPill,
-                    settings.privacyLevel === level && styles.privacyPillActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.privacyText,
-                      settings.privacyLevel === level &&
-                        styles.privacyTextActive,
-                    ]}
-                  >
-                    {privacyLabel(level)}
-                  </Text>
-                </Pressable>
-              ),
+
+          {noticeText ? (
+            <View style={styles.notice} accessibilityRole="alert">
+              <Text style={styles.noticeText}>{noticeText}</Text>
+            </View>
+          ) : null}
+
+          {typing && !listening ? (
+            <Card>
+              <TextInput
+                accessibilityLabel={t.capture.typePlaceholder}
+                multiline
+                value={draft}
+                onChangeText={setDraft}
+                placeholder={t.capture.typePlaceholder}
+                placeholderTextColor={colors.muted}
+                style={styles.input}
+              />
+              <Button
+                variant="primary"
+                label={t.capture.saveTyped}
+                disabled={!draft.trim()}
+                onPress={async () => {
+                  await saveTyped(draft);
+                  setDraft("");
+                  setTyping(false);
+                }}
+              />
+            </Card>
+          ) : null}
+
+          <View style={styles.section}>
+            <Label>{t.capture.afterCapture}</Label>
+            {latest ? (
+              <Card>
+                <View style={styles.metaRow}>
+                  <Label color={modeColor(latest.mode)}>
+                    {t.modeTag[latest.mode] ?? latest.mode}
+                  </Label>
+                  <Label>
+                    {refining
+                      ? t.capture.refining
+                      : latest.source === "typed"
+                        ? t.library.typed
+                        : formatDuration(latest.durationMs)}
+                  </Label>
+                </View>
+                <Text selectable style={styles.latestText}>
+                  {latest.refinedText}
+                </Text>
+                <View style={styles.row}>
+                  <Button
+                    compact
+                    icon="copy"
+                    label={copied ? t.capture.copied : t.capture.copy}
+                    onPress={() => void copyLatest()}
+                  />
+                  <Button
+                    compact
+                    icon="share"
+                    label={t.capture.share}
+                    onPress={() =>
+                      void Share.share({ message: latest.refinedText }).catch(
+                        () => undefined,
+                      )
+                    }
+                  />
+                </View>
+                <View style={styles.chips}>
+                  {REFINEMENT_MODES.map((mode) => (
+                    <Chip
+                      key={mode}
+                      label={t.modes[mode]}
+                      selected={latest.mode === mode}
+                      disabled={refining}
+                      onPress={() => void refine(latest.id, mode)}
+                    />
+                  ))}
+                </View>
+              </Card>
+            ) : (
+              <Text style={styles.muted}>{t.capture.noCaptureYet}</Text>
             )}
           </View>
-          <Text style={styles.privacyNote}>
-            Par défaut: {privacyLabel(DEFAULT_SETTINGS.privacyLevel)}. Les
-            jetons et préférences sont isolés dans SecureStore; l'adaptateur
-            notifications est prêt pour expo-notifications.
-          </Text>
-          <Pressable
-            onPress={() => void markAuthReady()}
-            style={styles.authButton}
-          >
-            <Text style={styles.authButtonText}>
-              {auth.status === "ready"
-                ? "Session locale prête"
-                : "Préparer l'auth"}
-            </Text>
-          </Pressable>
-        </View>
-
-        {!hydrated ? (
-          <Text style={styles.loading}>Chargement sécurisé…</Text>
-        ) : null}
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-function SettingRow({
-  label,
-  value,
-  onValueChange,
-}: {
-  label: string;
-  value: boolean;
-  onValueChange: (value: boolean) => void;
-}) {
-  return (
-    <View style={styles.settingRow}>
-      <Text style={styles.settingLabel}>{label}</Text>
-      <Switch
-        value={value}
-        onValueChange={onValueChange}
-        trackColor={{ false: palette.border, true: palette.primary }}
-      />
-    </View>
-  );
-}
-
-function statusCopy(status: string): string {
-  switch (status) {
-    case "listening":
-      return "Écoute active";
-    case "processing":
-      return "Traitement";
-    case "ready":
-      return "Prêt à agir";
-    case "error":
-      return "Action requise";
-    case "idle":
-    default:
-      return "Prêt pour une dictée";
-  }
-}
-
-function modeLabel(mode: string): string {
-  return mode.replace("_", " ");
-}
-
-function syncStateLabel(syncState: string): string {
-  switch (syncState) {
-    case "queued":
-      return "Sync en attente";
-    case "synced":
-      return "Synchronisé";
-    case "local":
-    default:
-      return "Local";
-  }
-}
-
-function privacyLabel(level: string): string {
-  switch (level) {
-    case "standard":
-      return "Standard";
-    case "ephemeral":
-      return "Éphémère";
-    case "local_first":
-    default:
-      return "Local d'abord";
-  }
-}
-
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: palette.background },
-  container: { padding: 20, gap: 18, paddingBottom: 44 },
-  hero: { gap: 12, paddingTop: 8 },
-  badgeRow: { flexDirection: "row", gap: 8 },
-  badge: {
-    color: palette.background,
-    backgroundColor: palette.primarySoft,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    fontWeight: "700",
-  },
-  badgeMuted: {
-    color: palette.text,
-    backgroundColor: palette.surfaceMuted,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-  },
-  title: {
-    color: palette.text,
-    fontSize: 38,
-    fontWeight: "800",
-    letterSpacing: -1,
-  },
-  subtitle: { color: palette.textMuted, fontSize: 16, lineHeight: 24 },
-  captureCard: {
-    backgroundColor: palette.surface,
-    borderColor: palette.border,
-    borderWidth: 1,
-    borderRadius: 28,
-    padding: 20,
+  safe: { flex: 1, backgroundColor: colors.bg },
+  flex: { flex: 1 },
+  container: { padding: space.xl, paddingBottom: 40, gap: space.xl },
+  header: {
+    flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    justifyContent: "space-between",
   },
-  sectionEyebrow: {
-    color: palette.primarySoft,
-    textTransform: "uppercase",
-    fontWeight: "800",
-    fontSize: 12,
-    letterSpacing: 1.2,
+  brand: {
+    fontFamily: fonts.display,
+    fontSize: 22,
+    letterSpacing: -0.5,
+    color: colors.text,
   },
-  captureStatus: { color: palette.text, fontSize: 24, fontWeight: "800" },
-  captureHint: {
-    color: palette.textMuted,
-    textAlign: "center",
-    minHeight: 44,
-    lineHeight: 22,
-  },
-  micButton: {
-    width: 138,
-    height: 138,
-    borderRadius: 69,
-    backgroundColor: palette.primary,
-    justifyContent: "center",
+  modePill: {
+    flexDirection: "row",
     alignItems: "center",
-    shadowColor: palette.primary,
-    shadowOpacity: 0.35,
-    shadowRadius: 20,
-  },
-  micButtonActive: { backgroundColor: palette.warning },
-  micIcon: { color: palette.text, fontSize: 34, fontWeight: "900" },
-  micLabel: {
-    color: palette.text,
-    fontSize: 17,
-    fontWeight: "800",
-    marginTop: 4,
-  },
-  pressed: { opacity: 0.78, transform: [{ scale: 0.99 }] },
-  secondaryButton: {
+    gap: 8,
+    minHeight: 40,
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderColor: palette.border,
+    borderRadius: radius.pill,
     borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
   },
-  secondaryButtonText: { color: palette.text },
-  section: {
-    backgroundColor: palette.surface,
-    borderColor: palette.border,
+  modePillText: {
+    fontFamily: fonts.bodyMedium,
+    fontSize: 13,
+    color: colors.text,
+  },
+  onboarding: { gap: space.md },
+  onboardingTitle: {
+    fontFamily: fonts.display,
+    fontSize: 24,
+    color: colors.text,
+    letterSpacing: -0.5,
+  },
+  stage: { alignItems: "center", gap: space.lg, paddingVertical: space.sm },
+  status: { fontSize: 12, letterSpacing: 2 },
+  live: {
+    fontFamily: fonts.body,
+    fontSize: 17,
+    lineHeight: 26,
+    color: colors.text,
+    textAlign: "center",
+    minHeight: 52,
+    maxWidth: 330,
+  },
+  noteSmall: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.muted,
+    textAlign: "center",
+    maxWidth: 320,
+  },
+  notice: {
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderRadius: 24,
-    padding: 16,
-    gap: 12,
+    borderColor: colors.lineStrong,
+    backgroundColor: colors.surfaceStrong,
+    padding: space.md,
   },
-  sectionHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+  noticeText: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.text,
+    lineHeight: 20,
   },
-  sectionTitle: { color: palette.text, fontSize: 20, fontWeight: "800" },
-  actionGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  actionCard: {
-    width: "48%",
-    minHeight: 92,
-    backgroundColor: palette.surfaceMuted,
-    borderColor: palette.border,
-    borderWidth: 1,
-    borderRadius: 18,
-    padding: 12,
-    gap: 6,
+  input: {
+    minHeight: 110,
+    color: colors.text,
+    fontFamily: fonts.body,
+    fontSize: 16,
+    lineHeight: 24,
+    textAlignVertical: "top",
   },
-  disabledCard: { opacity: 0.4 },
-  actionLabel: { color: palette.text, fontSize: 16, fontWeight: "800" },
-  actionHelper: { color: palette.textMuted, lineHeight: 18 },
-  linkText: { color: palette.primarySoft, fontWeight: "700" },
-  disabledText: { color: palette.border },
-  emptyText: { color: palette.textMuted, lineHeight: 22 },
-  historyCard: {
-    backgroundColor: palette.surfaceMuted,
-    borderRadius: 18,
-    padding: 14,
-    gap: 8,
+  section: { gap: space.md },
+  metaRow: { flexDirection: "row", justifyContent: "space-between" },
+  latestText: {
+    fontFamily: fonts.body,
+    fontSize: 16,
+    lineHeight: 24,
+    color: colors.text,
   },
-  historyMetaRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 8,
+  row: { flexDirection: "row", gap: space.sm, flexWrap: "wrap" },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
+  muted: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    lineHeight: 21,
+    color: colors.muted,
   },
-  historyMode: {
-    color: palette.success,
-    fontWeight: "800",
-    textTransform: "capitalize",
-  },
-  historyMeta: { color: palette.textMuted },
-  historyText: { color: palette.text, lineHeight: 22, fontSize: 15 },
-  historyRaw: { color: palette.textMuted, fontSize: 12, lineHeight: 18 },
-  settingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 8,
-  },
-  settingLabel: { color: palette.text, fontSize: 16 },
-  apiConfigBox: {
-    backgroundColor: palette.surfaceMuted,
-    borderColor: palette.border,
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: 12,
-    gap: 8,
-  },
-  apiConfigLabel: { color: palette.text, fontWeight: "800" },
-  apiConfigInput: {
-    color: palette.text,
-    borderColor: palette.border,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  privacyRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  privacyPill: {
-    borderColor: palette.border,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-  },
-  privacyPillActive: {
-    backgroundColor: palette.primary,
-    borderColor: palette.primary,
-  },
-  privacyText: { color: palette.textMuted, fontWeight: "700" },
-  privacyTextActive: { color: palette.text },
-  privacyNote: { color: palette.textMuted, lineHeight: 20, fontSize: 13 },
-  authButton: {
-    backgroundColor: palette.surfaceMuted,
-    borderRadius: 16,
-    padding: 14,
-    alignItems: "center",
-    borderColor: palette.border,
-    borderWidth: 1,
-  },
-  authButtonText: { color: palette.text, fontWeight: "800" },
-  loading: { color: palette.textMuted, textAlign: "center" },
 });

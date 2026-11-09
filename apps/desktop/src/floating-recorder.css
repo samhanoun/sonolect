@@ -1,0 +1,189 @@
+/*
+ * Floating recorder window (?window=recorder), night studio theme.
+ * The Tauri window is transparent and undecorated, 320×80 as a pill and
+ * 320×280 expanded, so the component draws its own surface.
+ */
+.floating-recorder {
+  --fr-surface: #131815;
+  --fr-raised: #19201c;
+  --fr-hover: #1f2823;
+  --fr-line: rgba(214, 236, 214, 0.14);
+  --fr-text: #e7eee5;
+  --fr-text-2: #a6b3a4;
+  --fr-text-3: #75827a;
+  --fr-accent: #d4f27a;
+  --fr-accent-ink: #10160f;
+  --fr-danger: #ef957e;
+  --fr-mono:
+    "Cascadia Mono", "JetBrains Mono", ui-monospace, Consolas, monospace;
+  --fr-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  box-sizing: border-box;
+  margin: 8px;
+  color: var(--fr-text);
+  background: var(--fr-surface);
+  border: 1px solid var(--fr-line);
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font:
+    13px/1.4 "Segoe UI Variable Text",
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.floating-recorder * {
+  box-sizing: border-box;
+}
+html:has(.floating-recorder),
+html:has(.floating-recorder) body,
+html:has(.floating-recorder) #root {
+  background: transparent !important;
+  margin: 0;
+}
+
+/* Pill */
+.floating-recorder--pill {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  cursor: pointer;
+}
+.floating-recorder--pill .floating-recorder__label {
+  color: var(--fr-text-2);
+}
+.floating-recorder--pill .floating-recorder__timer {
+  margin-left: auto;
+}
+
+/* Expanded */
+.floating-recorder--expanded {
+  height: 264px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+.floating-recorder__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.floating-recorder__label {
+  font-weight: 500;
+}
+.floating-recorder__timer {
+  margin-left: auto;
+  font: 400 12px var(--fr-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--fr-text-2);
+}
+
+.floating-recorder__status-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--fr-text-3);
+}
+.floating-recorder__status-dot.is-live {
+  background: var(--fr-danger);
+}
+
+.floating-recorder__waveform {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: #0d110f;
+  border: 1px solid var(--fr-line);
+  border-radius: 12px;
+  padding: 0 12px;
+}
+.floating-recorder__waveform-bar {
+  flex: 1;
+  max-width: 6px;
+  min-height: 2px;
+  border-radius: 2px;
+  background: var(--fr-accent);
+  transition: height 80ms linear;
+}
+.floating-recorder__waveform--idle .floating-recorder__waveform-bar {
+  background: rgba(212, 242, 122, 0.28);
+}
+
+.floating-recorder__preview {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+  background: #0d110f;
+  border: 1px solid var(--fr-line);
+  border-radius: 12px;
+  color: var(--fr-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-app-region: no-drag;
+}
+
+.floating-recorder__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.floating-recorder__btn {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--fr-line);
+  border-radius: 8px;
+  background: var(--fr-raised);
+  color: var(--fr-text-2);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background-color 120ms var(--fr-ease),
+    color 120ms var(--fr-ease);
+}
+.floating-recorder__btn:hover {
+  background: var(--fr-hover);
+  color: var(--fr-text);
+}
+.floating-recorder__btn:focus-visible {
+  outline: 2px solid var(--fr-accent);
+  outline-offset: 2px;
+}
+.floating-recorder__btn--minimize {
+  height: 28px;
+  min-width: 28px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+.floating-recorder__btn--finish,
+.floating-recorder__btn--insert {
+  background: var(--fr-accent);
+  border-color: transparent;
+  color: var(--fr-accent-ink);
+}
+.floating-recorder__btn--finish:hover,
+.floating-recorder__btn--insert:hover {
+  background: #def78f;
+  color: var(--fr-accent-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .floating-recorder * {
+    transition: none !important;
+  }
+}

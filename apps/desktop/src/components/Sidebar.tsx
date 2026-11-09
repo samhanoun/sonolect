@@ -75,7 +75,7 @@ export default function Sidebar() {
           />
           {isRecording ? "Stop" : "Record"}
         </span>
-        <span className="text-[9px] font-mono opacity-60">Ctrl+Win</span>
+        <span className="text-[9px] font-mono opacity-60">Ctrl+Shift+M</span>
       </button>
 
       <nav className="flex flex-col gap-1" aria-label="Main navigation">

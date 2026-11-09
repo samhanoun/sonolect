@@ -1,9 +1,11 @@
 import type { SonolectMode, Transcript } from "@sonolect/types";
 
 import type { CompanionSettings, TranscriptTurn } from "./domain";
+import { HISTORY_LIMIT } from "./domain";
 
 export type MobileLocalApiConfig = {
   apiUrl?: string;
+  apiToken?: string;
   fetchImpl?: typeof fetch;
   limit?: number;
 };
@@ -33,7 +35,7 @@ type AudioJobResponse = {
 };
 
 type SubmitCapturedMobileAudioOptions = {
-  language?: TranscriptTurn["language"];
+  language?: string;
   source?: "mobile";
   pollAttempts?: number;
 };
@@ -54,13 +56,109 @@ export function resolveMobileLocalApiConfig(
   settings: Pick<
     CompanionSettings,
     "cloudSyncEnabled" | "localApiUrl" | "privacyLevel" | "saveHistory"
-  >,
+  > & { apiToken?: string | undefined },
 ): MobileLocalApiConfig {
   if (!settings.cloudSyncEnabled) return {};
   if (!settings.saveHistory || settings.privacyLevel === "ephemeral") return {};
 
   const apiUrl = settings.localApiUrl?.trim() || envLocalApiUrl();
-  return apiUrl ? { apiUrl } : {};
+  if (!apiUrl || !isAllowedApiUrl(apiUrl)) return {};
+  const apiToken = settings.apiToken?.trim();
+  return apiToken ? { apiUrl, apiToken } : { apiUrl };
+}
+
+/**
+ * Only https endpoints, or plain http on loopback / private LAN addresses
+ * (a desktop running the local API), may receive transcripts and audio.
+ */
+export function isAllowedApiUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (url.username || url.password) return false;
+  if (url.protocol === "https:") return true;
+  if (url.protocol !== "http:") return false;
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  return (
+    host === "localhost" ||
+    host === "::1" ||
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+    host.endsWith(".local")
+  );
+}
+
+export type PolishResult =
+  | { status: "completed"; text: string; model?: string }
+  | { status: "unavailable"; message: string };
+
+/** Asks the Sonolect API (Vertex Gemini) to refine text. Never throws. */
+export async function refineWithApi(
+  transcript: string,
+  stylePreset: string,
+  config: MobileLocalApiConfig,
+  options: {
+    locale?: string;
+    dictionary?: { spoken: string; written: string }[];
+  } = {},
+): Promise<PolishResult> {
+  const apiUrl = config.apiUrl?.trim();
+  if (!apiUrl) {
+    return {
+      status: "unavailable",
+      message: "Sonolect API is not configured.",
+    };
+  }
+  try {
+    const response = await (config.fetchImpl ?? fetch)(
+      new URL("/v1/polish", apiUrl).toString(),
+      {
+        method: "POST",
+        headers: createJsonHeaders({
+          contentType: true,
+          token: config.apiToken,
+        }),
+        body: JSON.stringify({
+          transcript,
+          stylePreset,
+          ...(options.locale ? { locale: options.locale } : {}),
+          ...(options.dictionary?.length
+            ? { dictionary: options.dictionary }
+            : {}),
+        }),
+      },
+    );
+    const payload = (await response.json().catch(() => ({}))) as {
+      polished?: unknown;
+      model?: unknown;
+      error?: { message?: unknown };
+    };
+    if (!response.ok || typeof payload.polished !== "string") {
+      const message =
+        typeof payload.error?.message === "string"
+          ? payload.error.message
+          : `Sonolect API returned ${response.status}.`;
+      return { status: "unavailable", message };
+    }
+    return {
+      status: "completed",
+      text: payload.polished,
+      ...(typeof payload.model === "string" ? { model: payload.model } : {}),
+    };
+  } catch (error) {
+    return {
+      status: "unavailable",
+      message:
+        error instanceof Error
+          ? `Sonolect API unreachable: ${error.message}`
+          : "Sonolect API unreachable.",
+    };
+  }
 }
 
 export function isLocalApiConfigured(config: MobileLocalApiConfig): boolean {
@@ -74,10 +172,10 @@ export async function fetchLocalTranscriptHistory(
   if (!apiUrl) return [];
 
   const endpoint = new URL("/transcripts", apiUrl);
-  endpoint.searchParams.set("limit", String(config.limit ?? 25));
+  endpoint.searchParams.set("limit", String(config.limit ?? HISTORY_LIMIT));
 
   const response = await (config.fetchImpl ?? fetch)(endpoint.toString(), {
-    headers: createJsonHeaders(),
+    headers: createJsonHeaders({ token: config.apiToken }),
   });
   if (!response.ok) {
     throw new Error(
@@ -103,7 +201,7 @@ export async function fetchLocalTranscriptById(
       `/transcripts/${encodeURIComponent(transcriptId)}`,
       apiUrl,
     ).toString(),
-    { headers: createJsonHeaders() },
+    { headers: createJsonHeaders({ token: config.apiToken }) },
   );
   if (!response.ok) {
     throw new Error(`Mobile transcript fetch failed (${response.status})`);
@@ -122,7 +220,7 @@ export async function submitCapturedMobileAudio(
   if (!apiUrl) {
     return {
       status: "offline",
-      message: "API locale Sonolect non configurée.",
+      message: "Sonolect API is not configured.",
     };
   }
 
@@ -132,7 +230,10 @@ export async function submitCapturedMobileAudio(
       new URL("/audio/jobs", apiUrl).toString(),
       {
         method: "POST",
-        headers: createJsonHeaders({ contentType: true }),
+        headers: createJsonHeaders({
+          contentType: true,
+          token: config.apiToken,
+        }),
         body: JSON.stringify(
           createCapturedAudioJobPayload(audio, options.language),
         ),
@@ -150,8 +251,7 @@ export async function submitCapturedMobileAudio(
       return withOptionalTranscriptId(
         {
           status: "submitted",
-          message:
-            jobPayload.message ?? "Capture audio envoyée à l'API locale.",
+          message: jobPayload.message ?? "Audio sent to the Sonolect API.",
         },
         jobPayload.transcriptId,
       );
@@ -164,7 +264,12 @@ export async function submitCapturedMobileAudio(
       ).toString(),
       {
         method: "POST",
-        headers: { "content-type": audio.mimeType || "audio/wav" },
+        headers: {
+          "content-type": audio.mimeType || "audio/wav",
+          ...(config.apiToken
+            ? { authorization: `Bearer ${config.apiToken}` }
+            : {}),
+        },
         body: audio.bytes as BodyInit,
       },
     );
@@ -179,6 +284,7 @@ export async function submitCapturedMobileAudio(
     const turn = transcriptId
       ? await tryFetchCompletedTranscript(transcriptId, {
           apiUrl,
+          ...(config.apiToken ? { apiToken: config.apiToken } : {}),
           fetchImpl,
           attempts: options.pollAttempts ?? 1,
         })
@@ -195,8 +301,7 @@ export async function submitCapturedMobileAudio(
       {
         status: "submitted",
         jobId,
-        message:
-          uploadPayload.message ?? "Capture audio envoyée à l'API locale.",
+        message: uploadPayload.message ?? "Audio sent to the Sonolect API.",
       },
       transcriptId,
     );
@@ -205,8 +310,8 @@ export async function submitCapturedMobileAudio(
       status: "offline",
       message:
         error instanceof Error
-          ? `API locale indisponible: ${error.message}`
-          : "API locale indisponible.",
+          ? `Sonolect API unreachable: ${error.message}`
+          : "Sonolect API unreachable.",
     };
   }
 }
@@ -255,7 +360,7 @@ export function mergeTranscriptHistory(
     .sort(
       (left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt),
     )
-    .slice(0, 25);
+    .slice(0, HISTORY_LIMIT);
 }
 
 function withOptionalTranscriptId<T extends MobileAudioUploadResult>(
@@ -274,7 +379,7 @@ async function postTranscriptTurn(
     new URL("/transcripts", config.apiUrl).toString(),
     {
       method: "POST",
-      headers: createJsonHeaders({ contentType: true }),
+      headers: createJsonHeaders({ contentType: true, token: config.apiToken }),
       body: JSON.stringify(turnToCreateBody(turn)),
     },
   );
@@ -294,14 +399,14 @@ function transcriptToTurn(transcript: Transcript): TranscriptTurn {
     privacyMode: transcript.privacyMode,
     createdAt: transcript.createdAt,
     durationMs: transcript.durationMs ?? 0,
-    source: "sample",
+    source: "remote",
     syncState: "synced",
   };
 }
 
 function createCapturedAudioJobPayload(
   audio: MobileCapturedAudio,
-  language?: TranscriptTurn["language"],
+  language?: string,
 ) {
   return {
     fileName:
@@ -364,20 +469,19 @@ function turnToCreateBody(turn: TranscriptTurn): TranscriptCreateBody {
   };
 }
 
-function createJsonHeaders(options: { contentType?: boolean } = {}) {
+function createJsonHeaders(
+  options: { contentType?: boolean; token?: string | undefined } = {},
+): Record<string, string> {
   return {
     accept: "application/json",
     ...(options.contentType ? { "content-type": "application/json" } : {}),
+    ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
   };
 }
 
-function normalizeLanguage(language: string): TranscriptTurn["language"] {
-  if (language === "fr-FR" || language === "en-US" || language === "auto") {
-    return language;
-  }
-  if (language.startsWith("fr")) return "fr-FR";
-  if (language.startsWith("en")) return "en-US";
-  return "auto";
+function normalizeLanguage(language: string | undefined): string {
+  const trimmed = language?.trim();
+  return trimmed ? trimmed : "auto";
 }
 
 function truncateTitle(value: string) {

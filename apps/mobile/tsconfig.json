@@ -1,5 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@sonolect/types": ["packages/types/src/index.ts"],
+      "react": ["apps/mobile/node_modules/@types/react"],
+      "react/*": ["apps/mobile/node_modules/@types/react/*"]
+    }
+  },
   "include": [
     "app/**/*.ts",
     "app/**/*.tsx",
