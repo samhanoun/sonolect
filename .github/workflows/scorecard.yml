@@ -14,7 +14,7 @@ jobs:
     name: Scorecard analysis
     # Results upload to code scanning; see ENABLE_CODE_SCANNING in codeql.yml.
     if: vars.ENABLE_CODE_SCANNING == 'true'
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     timeout-minutes: 15
     permissions:
       security-events: write
