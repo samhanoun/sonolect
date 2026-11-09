@@ -22,7 +22,7 @@ export const en = {
   "topbar.eyebrow": "Premium desktop shell",
   "topbar.headline": "Voice capture → text → actions",
   "topbar.searchCommand": "Search a command",
-  "topbar.localFirst": "Local-first",
+  "topbar.localFirst": "Local only",
   "topbar.cloudAssisted": "Cloud-assisted",
   "topbar.apiReady": "API ready",
   "topbar.offline": "Offline",
@@ -176,7 +176,7 @@ export const en = {
   "palette.agentCenter": "Agent center",
   "palette.agentCenterHint": "View connected actions",
   "palette.privacySettings": "Privacy settings",
-  "palette.privacySettingsHint": "Local-first, cloud, retention",
+  "palette.privacySettingsHint": "Local only, cloud, retention",
 
   // Errors
   "error.micUnavailable":

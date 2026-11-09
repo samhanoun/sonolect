@@ -1,0 +1,581 @@
+/*
+ * Sonolect "night studio" theme.
+ * Direction: a recording control room after hours. Quiet graphite-green
+ * chrome, one lime accent for the primary action and live signal, mono
+ * readouts for figures and shortcuts. Loaded after studio.css.
+ */
+:root {
+  --n-bg: #0d110f;
+  --n-surface: #131815;
+  --n-raised: #19201c;
+  --n-hover: #1f2823;
+  --n-line: rgba(214, 236, 214, 0.08);
+  --n-line-strong: rgba(214, 236, 214, 0.14);
+  --n-text: #e7eee5;
+  --n-text-2: #a6b3a4;
+  --n-text-3: #75827a;
+  --n-accent: #d4f27a;
+  --n-accent-ink: #10160f;
+  --n-accent-soft: rgba(212, 242, 122, 0.1);
+  --n-warn: #e6c27a;
+  --n-danger: #ef957e;
+  --n-mono:
+    "Cascadia Mono", "JetBrains Mono", ui-monospace, Consolas, monospace;
+  --n-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Remap the original tokens so untouched rules inherit the theme. */
+  --studio-paper: var(--n-bg);
+  --studio-forest: var(--n-surface);
+  --studio-ink: var(--n-text);
+  --studio-muted: var(--n-text-3);
+  --studio-line: var(--n-line);
+  --studio-lime: var(--n-accent);
+  color-scheme: dark;
+}
+
+body,
+.studio-shell {
+  background: var(--n-bg);
+  color: var(--n-text);
+}
+.studio-shell {
+  font:
+    14px/1.5 "Segoe UI Variable Text",
+    "Segoe UI",
+    system-ui,
+    sans-serif;
+}
+.studio-shell h1,
+.studio-shell h2,
+.studio-shell h3 {
+  font-weight: 500;
+}
+.studio-shell kbd {
+  font: 500 10px var(--n-mono);
+  color: var(--n-text-3);
+  border: 1px solid var(--n-line-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.studio-shell button:focus-visible,
+.studio-shell a:focus-visible,
+.studio-shell input:focus-visible,
+.studio-shell select:focus-visible,
+.studio-shell textarea:focus-visible {
+  outline: 2px solid var(--n-accent);
+  outline-offset: 2px;
+}
+.studio-shell button,
+.studio-shell a {
+  transition:
+    background-color 120ms var(--n-ease),
+    border-color 120ms var(--n-ease),
+    color 120ms var(--n-ease);
+}
+
+/* Sidebar */
+.studio-sidebar {
+  background: var(--n-surface);
+  border-right: 1px solid var(--n-line);
+  color: var(--n-text-2);
+  padding: 24px 16px 16px;
+}
+.studio-brand {
+  color: var(--n-text);
+  font-weight: 600;
+  letter-spacing: -0.8px;
+  padding: 0 12px;
+}
+.studio-brand small {
+  font: 400 11px var(--n-mono);
+  letter-spacing: 0;
+  color: var(--n-text-3);
+}
+.studio-new-recording {
+  background: var(--n-accent);
+  color: var(--n-accent-ink);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 28px 0 24px;
+}
+.studio-new-recording:hover {
+  background: #def78f;
+}
+.studio-new-recording kbd {
+  color: var(--n-accent-ink);
+  border-color: rgba(16, 22, 15, 0.25);
+  opacity: 0.7;
+}
+.studio-nav-group > p {
+  font-size: 11px;
+  letter-spacing: 0;
+  color: var(--n-text-3);
+  margin-bottom: 8px;
+}
+.studio-nav-group nav {
+  gap: 2px;
+}
+.studio-nav-group nav button {
+  color: var(--n-text-2);
+  padding: 8px 12px;
+  min-height: 36px;
+  border-radius: 8px;
+}
+.studio-nav-group nav button:hover {
+  background: var(--n-hover);
+  color: var(--n-text);
+}
+.studio-nav-group nav button.active {
+  background: var(--n-raised);
+  color: var(--n-text);
+  box-shadow: inset 0 0 0 1px var(--n-line-strong);
+}
+.studio-nav-group nav button.active svg {
+  color: var(--n-accent);
+}
+.studio-nav-group nav button span {
+  color: var(--n-accent);
+}
+.studio-sidebar-policy {
+  border-color: var(--n-line-strong);
+  background: var(--n-bg);
+}
+.studio-sidebar-policy > span {
+  color: var(--n-text);
+}
+.studio-sidebar-policy p,
+.studio-version {
+  color: var(--n-text-3);
+}
+.studio-version {
+  font-family: var(--n-mono);
+}
+
+/* Top bar */
+.studio-topbar {
+  height: 64px;
+  background: rgba(13, 17, 15, 0.92);
+  border-bottom-color: var(--n-line);
+  color: var(--n-text-3);
+  padding: 0 32px;
+}
+.studio-topbar > div:first-child > span {
+  color: var(--n-text-3);
+}
+.studio-topbar strong {
+  color: var(--n-text);
+}
+.studio-mode-control {
+  border-color: var(--n-line-strong);
+  color: var(--n-text-2);
+  background: var(--n-surface);
+}
+.studio-mode-control select {
+  color: var(--n-text) !important;
+}
+.studio-search-button {
+  color: var(--n-text-2);
+}
+
+/* Page */
+.studio-page {
+  padding: 32px 32px 80px;
+}
+.studio-eyebrow {
+  font: 400 12px var(--n-mono) !important;
+  letter-spacing: 0;
+  color: var(--n-accent);
+  margin-bottom: 8px !important;
+}
+.studio-page h1 {
+  font-size: 36px;
+  letter-spacing: -1px;
+  color: var(--n-text);
+}
+.studio-page-heading p:not(.studio-eyebrow) {
+  color: var(--n-text-2);
+}
+.studio-chip {
+  border-color: var(--n-line-strong);
+  color: var(--n-text-2);
+}
+.studio-tabs {
+  border-bottom-color: var(--n-line);
+}
+.studio-tabs button {
+  color: var(--n-text-3);
+}
+.studio-tabs button:hover {
+  color: var(--n-text);
+}
+.studio-tabs button.active {
+  border-color: var(--n-accent);
+  color: var(--n-text);
+  font-weight: 500;
+}
+
+/* Surfaces */
+.studio-card,
+.studio-action-card,
+.studio-stat-grid {
+  background: var(--n-surface);
+  border-color: var(--n-line);
+  color: var(--n-text);
+}
+.studio-action-card:hover {
+  border-color: var(--n-line-strong);
+  background: var(--n-raised);
+}
+.studio-card-heading p,
+.studio-action-card p,
+.studio-local-callout p {
+  color: var(--n-text-2);
+}
+.studio-action-card > span {
+  color: var(--n-accent);
+}
+.studio-icon {
+  background: var(--n-raised);
+  color: var(--n-text-2);
+  border: 1px solid var(--n-line);
+}
+.studio-tag {
+  font: 400 11px var(--n-mono);
+  letter-spacing: 0;
+  color: var(--n-text-3);
+  background: transparent;
+  border-color: var(--n-line-strong);
+}
+.studio-tag.green {
+  color: var(--n-accent);
+  background: var(--n-accent-soft);
+  border-color: rgba(212, 242, 122, 0.2);
+}
+.studio-tag.amber {
+  color: var(--n-warn);
+  background: rgba(230, 194, 122, 0.08);
+  border-color: rgba(230, 194, 122, 0.2);
+}
+.provider-card > .studio-card-heading > .studio-tag {
+  font-size: 10px;
+}
+.studio-shell label {
+  font-weight: 500;
+  color: var(--n-text-2);
+}
+.studio-shell input:not([type="file"]),
+.studio-shell textarea,
+.studio-shell select {
+  background: var(--n-bg);
+  border-color: var(--n-line-strong);
+  color: var(--n-text);
+}
+.studio-shell input::placeholder,
+.studio-shell textarea::placeholder {
+  color: var(--n-text-3);
+}
+.studio-shell select option {
+  background: var(--n-surface);
+  color: var(--n-text);
+}
+
+/* Buttons */
+.studio-button {
+  background: var(--n-accent);
+  color: var(--n-accent-ink);
+}
+.studio-button:hover {
+  filter: none;
+  background: #def78f;
+}
+.studio-button.secondary {
+  background: var(--n-raised);
+  color: var(--n-text);
+  border-color: var(--n-line-strong);
+}
+.studio-button.secondary:hover {
+  background: var(--n-hover);
+}
+.studio-button.ghost {
+  color: var(--n-text-2);
+}
+.studio-button.ghost:hover {
+  background: var(--n-hover);
+  color: var(--n-text);
+}
+.studio-button:active {
+  transform: scale(0.98);
+}
+.studio-link {
+  color: var(--n-accent);
+}
+.studio-link.muted,
+.studio-key-note {
+  color: var(--n-text-3);
+}
+.studio-icon-button {
+  border-color: var(--n-line-strong);
+  color: var(--n-text-2);
+}
+.studio-icon-button:hover {
+  background: var(--n-hover);
+  color: var(--n-text);
+}
+
+/* Callouts and notices */
+.studio-local-callout {
+  background: var(--n-surface);
+  border-color: var(--n-line);
+}
+.studio-local-callout .studio-icon {
+  background: var(--n-raised);
+}
+.studio-privacy-card {
+  background: var(--n-raised);
+  border: 1px solid var(--n-line);
+  color: var(--n-text);
+}
+.studio-privacy-card p {
+  color: var(--n-text-2);
+}
+.studio-privacy-card > span {
+  font: 400 11px var(--n-mono);
+  letter-spacing: 0;
+}
+.studio-workflow-row {
+  color: var(--n-text);
+  border-bottom-color: var(--n-line);
+}
+.studio-workflow-row:hover > span:last-child {
+  color: var(--n-accent);
+}
+.studio-workflow-row > span:last-child {
+  color: var(--n-text-3);
+}
+.studio-notice {
+  background: var(--n-accent-soft);
+  border-color: rgba(212, 242, 122, 0.18);
+  color: var(--n-text);
+}
+.studio-inline-status {
+  color: var(--n-text-2);
+}
+.studio-hint {
+  background: var(--n-raised);
+  color: var(--n-text-2);
+}
+
+/* Overview hero */
+.studio-hero {
+  background: var(--n-surface);
+  border: 1px solid var(--n-line);
+  color: var(--n-text);
+  border-radius: 16px;
+  padding: 36px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 32px;
+}
+.studio-hero .studio-eyebrow {
+  color: var(--n-accent);
+}
+.studio-hero h2 {
+  font-size: 44px;
+  letter-spacing: -1.6px;
+}
+.studio-hero p {
+  color: var(--n-text-2);
+}
+.studio-hero kbd {
+  opacity: 1;
+}
+
+/* The signature: a live signal meter */
+.studio-signal {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--n-bg);
+  border: 1px solid var(--n-line);
+  border-radius: 12px;
+  padding: 16px 20px;
+  font: 400 11px var(--n-mono);
+  color: var(--n-text-3);
+}
+.studio-signal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--n-text-2);
+}
+.studio-signal-meta {
+  margin-left: auto;
+  color: var(--n-text-3);
+}
+.studio-signal-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--n-text-3);
+}
+.studio-signal.live .studio-signal-dot {
+  background: var(--n-danger);
+}
+.studio-signal-bars {
+  flex: 1;
+  min-height: 140px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.studio-signal-bars i {
+  flex: 1;
+  border-radius: 2px;
+  background: rgba(212, 242, 122, 0.28);
+  transform: scaleY(0.35);
+  transition:
+    transform 300ms var(--n-ease),
+    background-color 300ms var(--n-ease);
+}
+.studio-signal.live .studio-signal-bars i {
+  background: var(--n-accent);
+  animation: studio-signal 900ms var(--n-ease) infinite alternate;
+}
+.studio-signal-scale {
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid var(--n-line);
+  padding-top: 8px;
+  font-variant-numeric: tabular-nums;
+}
+@keyframes studio-signal {
+  from {
+    transform: scaleY(0.3);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+/* Stats */
+.studio-stat-grid > div {
+  border-right-color: var(--n-line);
+}
+.studio-stat-grid span,
+.studio-stat-grid small {
+  color: var(--n-text-3);
+}
+.studio-stat-grid strong {
+  font-family: var(--n-mono);
+  font-weight: 400;
+  letter-spacing: -0.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--n-text);
+}
+
+/* Lists, editor, library */
+.studio-empty {
+  background: var(--n-surface);
+  border-color: var(--n-line-strong);
+  color: var(--n-text-3);
+}
+.studio-empty h3 {
+  color: var(--n-text);
+}
+.studio-empty p {
+  color: var(--n-text-2);
+}
+.studio-recent-row,
+.studio-vocabulary-row {
+  color: var(--n-text);
+  border-bottom-color: var(--n-line);
+}
+.studio-recent-row small,
+.studio-vocabulary-row > span {
+  color: var(--n-text-3);
+  font-family: var(--n-mono);
+}
+.studio-editor textarea {
+  background: transparent !important;
+  color: var(--n-text);
+}
+.studio-editor-footer {
+  border-top-color: var(--n-line);
+  color: var(--n-text-3);
+  font: 400 11px var(--n-mono);
+  font-variant-numeric: tabular-nums;
+}
+.studio-details {
+  border-top-color: var(--n-line);
+  color: var(--n-text-2);
+}
+.studio-search {
+  background: var(--n-surface) !important;
+}
+.studio-progress {
+  accent-color: var(--n-accent);
+}
+.studio-audio {
+  color-scheme: dark;
+}
+
+/* Recording dock and quick navigation */
+.studio-recording-dock {
+  background: var(--n-raised);
+  color: var(--n-text);
+  border-color: var(--n-line-strong);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+.studio-recording-dock small {
+  color: var(--n-text-2);
+}
+.studio-recording-dock button {
+  background: var(--n-accent);
+  color: var(--n-accent-ink);
+}
+.studio-live-dot {
+  background: var(--n-text-3);
+}
+.studio-live-dot.live {
+  background: var(--n-danger);
+}
+.studio-command {
+  background: var(--n-surface);
+  color: var(--n-text);
+  border-color: var(--n-line-strong);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+.studio-command::backdrop {
+  background: rgba(5, 8, 6, 0.6);
+  backdrop-filter: none;
+}
+.studio-command > div {
+  border-bottom-color: var(--n-line);
+}
+.studio-command input,
+.studio-command input:focus-visible {
+  outline: none !important;
+  color: var(--n-text);
+}
+.studio-command nav button {
+  color: var(--n-text-2);
+}
+.studio-command nav button:hover,
+.studio-command nav button:focus-visible {
+  background: var(--n-hover);
+  color: var(--n-text);
+}
+.studio-command nav span {
+  color: var(--n-text-3);
+  font-family: var(--n-mono);
+}
+
+@media (max-width: 920px) {
+  .studio-hero {
+    grid-template-columns: 1fr;
+  }
+  .studio-signal {
+    display: none;
+  }
+}

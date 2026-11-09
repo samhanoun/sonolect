@@ -1,0 +1,185 @@
+name: Security (SAST + SCA)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Daily so newly published advisories surface without a code change.
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  semgrep:
+    name: Semgrep SAST (code, Dockerfiles, Terraform, workflows)
+    runs-on: instabox-medium
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    container:
+      image: semgrep/semgrep:1.184.0
+    # Dependabot PRs cannot upload SARIF; they are covered by the SCA jobs.
+    if: github.actor != 'dependabot[bot]'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Scan (report all findings)
+        run: >-
+          semgrep scan --metrics=off --sarif --output semgrep.sarif
+          --config p/default --config p/typescript --config p/react
+          --config p/nodejs --config p/rust --config p/secrets
+          --config p/dockerfile --config p/terraform --config p/github-actions
+
+      - name: Upload SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        # Code scanning must be enabled in repo settings (needs GitHub Advanced
+        # Security on private repos); the SARIF is also kept as an artifact.
+        continue-on-error: true
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+      - name: Keep SARIF as artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: semgrep-sarif
+          path: semgrep.sarif
+          retention-days: 14
+
+      - name: Gate on ERROR-severity findings
+        run: >-
+          semgrep scan --metrics=off --error --severity ERROR
+          --config p/default --config p/typescript --config p/react
+          --config p/nodejs --config p/rust --config p/secrets
+          --config p/dockerfile --config p/terraform --config p/github-actions
+
+  osv-scanner:
+    name: OSV-Scanner SCA (pnpm + Cargo lockfiles)
+    runs-on: instabox-medium
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install OSV-Scanner
+        # Downloads through the API (gh) rather than the github.com download
+        # URL, which has been timing out from some networks.
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v2.3.8 --repo google/osv-scanner \
+            --pattern osv-scanner_linux_amd64 --output osv-scanner --clobber
+          chmod +x osv-scanner
+
+      - name: Scan lockfiles
+        # Reports every known vulnerability to code scanning. Blocking is done
+        # by dependency-review (new deps) and the audit jobs below.
+        run: ./osv-scanner scan source --recursive --format sarif --output osv.sarif . || true
+
+      - name: Upload SARIF to code scanning
+        if: github.actor != 'dependabot[bot]'
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        # Code scanning must be enabled in repo settings (needs GitHub Advanced
+        # Security on private repos); the SARIF is also kept as an artifact.
+        continue-on-error: true
+        with:
+          sarif_file: osv.sarif
+          category: osv-scanner
+
+      - name: Keep SARIF as artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: osv-sarif
+          path: osv.sarif
+          retention-days: 14
+
+  cargo-audit:
+    name: cargo-audit (desktop Rust crates)
+    runs-on: instabox-medium
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/desktop/src-tauri
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit Cargo.lock
+        # Fails on vulnerabilities. "Unmaintained"/"unsound" notices for
+        # Tauri's transitive GTK and unic crates are reported as warnings only.
+        run: cargo audit
+
+  npm-audit:
+    name: pnpm audit gate
+    runs-on: instabox-medium
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 9.15.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Gate on high/critical advisories (desktop, services, packages)
+        # apps/mobile is excluded because its Expo/React Native toolchain is
+        # being replaced; the CI security job still gates it on critical.
+        # Accepted advisories are listed in scripts/audit-gate.mjs and
+        # docs/security-scan-triage.md.
+        run: node scripts/audit-gate.mjs
+
+  dependency-review:
+    name: Dependency review (new deps in this PR)
+    # Needs the Dependency graph (and, on private repos, GitHub Advanced
+    # Security). Set the repository variable ENABLE_DEPENDENCY_REVIEW=true
+    # once it is enabled in Settings > Code security.
+    if: github.event_name == 'pull_request' && vars.ENABLE_DEPENDENCY_REVIEW == 'true'
+    runs-on: instabox-medium
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
+        with:
+          fail-on-severity: high
+          deny-licenses: AGPL-3.0-only, AGPL-3.0-or-later, GPL-3.0-only, GPL-3.0-or-later, SSPL-1.0
+          comment-summary-in-pr: on-failure

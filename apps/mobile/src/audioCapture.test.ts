@@ -2,9 +2,8 @@ import * as assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { CompanionSettings } from "./domain";
-import { DEFAULT_SETTINGS, SAMPLE_TRANSCRIPTS } from "./domain";
+import { DEFAULT_SETTINGS } from "./domain";
 import {
-  buildTurnFromCapture,
   shouldUploadCapturedAudio,
   stopCaptureWithAudio,
 } from "./audioCapture";
@@ -110,20 +109,18 @@ describe("mobile audio capture/upload", () => {
     assert.equal(requests[1]?.init?.body, wavBytes);
   });
 
-  it("builds a synced transcript turn from a completed local API audio transcript", async () => {
+  const wavAudio = () => ({
+    bytes: generatedWavBytes(),
+    mimeType: "audio/wav",
+    durationMs: 1000,
+  });
+
+  it("prefers the API transcript when uploaded audio completes", async () => {
     const turn = await stopCaptureWithAudio({
       captureStartedAt: new Date(Date.now() - 1500).toISOString(),
       settings: uploadSettings,
-      historyLength: 0,
-      captureAdapter: {
-        start: async () => undefined,
-        stop: async () => ({
-          bytes: generatedWavBytes(),
-          mimeType: "audio/wav",
-          durationMs: 1000,
-        }),
-        cancel: async () => undefined,
-      },
+      recognizedText: "on device text",
+      audio: wavAudio(),
       uploadAudio: async () => ({
         status: "completed",
         turn: {
@@ -135,64 +132,84 @@ describe("mobile audio capture/upload", () => {
           privacyMode: false,
           createdAt: "2026-05-05T08:00:00.000Z",
           durationMs: 1000,
-          source: "microphone",
+          source: "remote",
           syncState: "synced",
         },
       }),
     });
 
+    assert.ok(turn);
     assert.equal(turn.rawText, "audio brut");
     assert.equal(turn.refinedText, "Audio propre.");
+    assert.equal(turn.source, "microphone");
     assert.equal(turn.syncState, "synced");
   });
 
-  it("keeps submitted audio jobs in history without replacing them with sample transcripts", async () => {
+  it("keeps the API transcript id for submitted jobs so later pulls do not duplicate it", async () => {
     const turn = await stopCaptureWithAudio({
-      captureStartedAt: new Date(Date.now() - 1500).toISOString(),
       settings: uploadSettings,
-      historyLength: 1,
-      captureAdapter: {
-        start: async () => undefined,
-        stop: async () => ({
-          bytes: generatedWavBytes(),
-          mimeType: "audio/wav",
-          durationMs: 1000,
-        }),
-        cancel: async () => undefined,
-      },
+      recognizedText: "um send the deck to the team",
+      audio: wavAudio(),
       uploadAudio: async () => ({
         status: "submitted",
         jobId: "job-processing-1",
         transcriptId: "transcript-processing-1",
-        message: "Capture audio envoyée à l'API locale.",
       }),
     });
 
-    assert.equal(turn.rawText, "Capture audio envoyée à l'API locale.");
-    assert.equal(turn.refinedText, "Transcription locale en cours…");
+    assert.ok(turn);
     assert.equal(turn.id, "transcript-processing-1");
+    assert.equal(turn.refinedText, "Send the deck to the team.");
     assert.equal(turn.syncState, "synced");
   });
 
-  it("falls back to sample/local transcription when the local API upload is unavailable", async () => {
+  it("shows an honest pending state for submitted jobs with no on-device text", async () => {
     const turn = await stopCaptureWithAudio({
-      captureStartedAt: new Date(Date.now() - 1500).toISOString(),
       settings: uploadSettings,
-      historyLength: 1,
-      captureAdapter: {
-        start: async () => undefined,
-        stop: async () => ({
-          bytes: generatedWavBytes(),
-          mimeType: "audio/wav",
-          durationMs: 1000,
-        }),
-        cancel: async () => undefined,
-      },
+      audio: wavAudio(),
+      uploadAudio: async () => ({ status: "submitted", jobId: "job-2" }),
+    });
+
+    assert.ok(turn);
+    assert.equal(turn.id, "job-2");
+    assert.equal(turn.refinedText, "Transcribing on the Sonolect API…");
+  });
+
+  it("falls back to the on-device transcript when the API is unreachable, queued for sync", async () => {
+    const turn = await stopCaptureWithAudio({
+      settings: uploadSettings,
+      recognizedText: "remind me to call Sam",
+      audio: wavAudio(),
       uploadAudio: async () => ({ status: "offline", message: "offline" }),
     });
 
-    assert.equal(turn.rawText, SAMPLE_TRANSCRIPTS[1]);
+    assert.ok(turn);
+    assert.equal(turn.rawText, "remind me to call Sam");
+    assert.equal(turn.refinedText, "Remind me to call Sam.");
     assert.equal(turn.syncState, "queued");
+  });
+
+  it("returns nothing instead of inventing a transcript when no speech was heard", async () => {
+    const turn = await stopCaptureWithAudio({
+      settings: { ...DEFAULT_SETTINGS },
+      recognizedText: "   ",
+    });
+    assert.equal(turn, undefined);
+  });
+
+  it("keeps offline captures local and applies the user's dictionary and snippets", async () => {
+    const turn = await stopCaptureWithAudio({
+      settings: { ...DEFAULT_SETTINGS },
+      recognizedText: "uh email sono lect about my address",
+      dictionary: [{ id: "d1", spoken: "sono lect", replacement: "Sonolect" }],
+      snippets: [
+        { id: "s1", trigger: "my address", body: "12 Rue de la Paix" },
+      ],
+    });
+    assert.ok(turn);
+    assert.equal(turn.refinedText, "Email Sonolect about 12 Rue de la Paix.");
+    assert.equal(turn.syncState, "local");
+    assert.equal(turn.source, "microphone");
   });
 
   it("does not upload audio when privacy is ephemeral or history saving is disabled", async () => {
@@ -202,18 +219,9 @@ describe("mobile audio capture/upload", () => {
     ]) {
       let uploaded = false;
       const turn = await stopCaptureWithAudio({
-        captureStartedAt: new Date(Date.now() - 1500).toISOString(),
         settings,
-        historyLength: 0,
-        captureAdapter: {
-          start: async () => undefined,
-          stop: async () => ({
-            bytes: generatedWavBytes(),
-            mimeType: "audio/wav",
-            durationMs: 1000,
-          }),
-          cancel: async () => undefined,
-        },
+        recognizedText: "private note",
+        audio: wavAudio(),
         uploadAudio: async () => {
           uploaded = true;
           return { status: "completed" };
@@ -222,18 +230,7 @@ describe("mobile audio capture/upload", () => {
 
       assert.equal(uploaded, false);
       assert.equal(shouldUploadCapturedAudio(settings), false);
-      assert.equal(turn.syncState, "local");
+      assert.equal(turn?.syncState, "local");
     }
-  });
-
-  it("builds sample fallback turns when the adapter has no captured bytes yet", async () => {
-    const turn = buildTurnFromCapture({
-      settings: uploadSettings,
-      historyLength: 2,
-      startedAtMs: Date.now() - 1500,
-    });
-
-    assert.equal(turn.rawText, SAMPLE_TRANSCRIPTS[2]);
-    assert.equal(turn.source, "microphone");
   });
 });
