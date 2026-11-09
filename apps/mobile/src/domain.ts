@@ -1,11 +1,7 @@
 import type { SonolectMode } from "@sonolect/types";
 
 export type CaptureStatus =
-  | "idle"
-  | "listening"
-  | "processing"
-  | "ready"
-  | "error";
+  "idle" | "listening" | "processing" | "ready" | "error";
 export type PrivacyLevel = "standard" | "local_first" | "ephemeral";
 
 /** BCP-47 tags the capture screen offers for dictation. */

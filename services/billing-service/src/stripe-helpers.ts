@@ -8,11 +8,7 @@ export type StripeEvent = {
 };
 
 export type SubscriptionStatus =
-  | "active"
-  | "past_due"
-  | "canceled"
-  | "trialing"
-  | "incomplete";
+  "active" | "past_due" | "canceled" | "trialing" | "incomplete";
 
 export const verifyStripeSignature = (
   payload: string | Buffer,

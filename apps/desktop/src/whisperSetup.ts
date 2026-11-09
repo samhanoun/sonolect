@@ -35,10 +35,7 @@ export type WhisperInstallPlan = {
 };
 
 export type WhisperAssetStatusState =
-  | "not-installed"
-  | "downloading"
-  | "ready"
-  | "invalid";
+  "not-installed" | "downloading" | "ready" | "invalid";
 
 export type WhisperAssetStatusInput = {
   binaryExists?: boolean;

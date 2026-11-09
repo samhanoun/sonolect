@@ -1,9 +1,5 @@
 export type AudioCaptureStatus =
-  | "unavailable"
-  | "available"
-  | "capturing"
-  | "stopped"
-  | "error";
+  "unavailable" | "available" | "capturing" | "stopped" | "error";
 
 export interface SystemAudioState {
   status: AudioCaptureStatus;

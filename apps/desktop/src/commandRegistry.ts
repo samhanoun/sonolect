@@ -1,10 +1,5 @@
 export type CommandCategory =
-  | "recording"
-  | "editing"
-  | "navigation"
-  | "export"
-  | "settings"
-  | "data";
+  "recording" | "editing" | "navigation" | "export" | "settings" | "data";
 
 export type CommandContext = {
   isRecording?: boolean;
