@@ -1,12 +1,7 @@
 import type { VoiceEntry } from "./voiceCatalog";
 
 export type TtsStatus =
-  | "idle"
-  | "loading"
-  | "speaking"
-  | "paused"
-  | "stopped"
-  | "error";
+  "idle" | "loading" | "speaking" | "paused" | "stopped" | "error";
 
 export type TtsPlaybackState = {
   status: TtsStatus;

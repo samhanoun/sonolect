@@ -8,11 +8,7 @@
 import type { TranscriptSegment } from "./segmentEditor";
 
 export type MeetingStatus =
-  | "idle"
-  | "active"
-  | "paused"
-  | "ending"
-  | "completed";
+  "idle" | "active" | "paused" | "ending" | "completed";
 
 export type MeetingConfig = {
   title: string;

@@ -3,16 +3,10 @@ import { isTauriRuntime } from "./desktopNative";
 // ── Types ─────────────────────────────────────────────────────────────
 
 export type PlatformPermission =
-  | "accessibility"
-  | "microphone"
-  | "screen-recording"
-  | "system-audio";
+  "accessibility" | "microphone" | "screen-recording" | "system-audio";
 
 export type PermissionStatus =
-  | "granted"
-  | "denied"
-  | "not-determined"
-  | "unsupported";
+  "granted" | "denied" | "not-determined" | "unsupported";
 
 export type PermissionCheckResult = {
   permission: PlatformPermission;
