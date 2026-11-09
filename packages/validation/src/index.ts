@@ -46,21 +46,39 @@ export const audioUploadSourceSchema = z.enum([
   "api",
 ]);
 
+// Field rules shared by create and update. Defaults are applied only on create:
+// zod 4 applies defaults inside optional/partial fields, so an update schema
+// built with createTranscriptSchema.partial() would reset unspecified fields.
+const transcriptFields = {
+  title: z.string().min(1).max(200),
+  rawText: z.string(),
+  finalText: z.string(),
+  language: z.string().min(2),
+  mode: sonolectModeSchema,
+  workspaceId: z.string().min(1),
+  agentUsed: z.string().min(1),
+  privacyMode: z.boolean(),
+  durationMs: z.number().int().nonnegative(),
+  tags: z.array(z.string().min(1).max(64)),
+  status: transcriptStatusSchema,
+};
+
 export const createTranscriptSchema = z.object({
-  title: z.string().min(1).max(200).optional(),
-  rawText: z.string().optional(),
-  finalText: z.string().optional(),
-  language: z.string().min(2).default("en"),
-  mode: sonolectModeSchema.default("dictate"),
-  workspaceId: z.string().min(1).optional(),
-  agentUsed: z.string().min(1).optional(),
-  privacyMode: z.boolean().default(false),
-  durationMs: z.number().int().nonnegative().optional(),
-  tags: z.array(z.string().min(1).max(64)).default([]),
-  status: transcriptStatusSchema.default("completed"),
+  title: transcriptFields.title.optional(),
+  rawText: transcriptFields.rawText.optional(),
+  finalText: transcriptFields.finalText.optional(),
+  language: transcriptFields.language.default("en"),
+  mode: transcriptFields.mode.default("dictate"),
+  workspaceId: transcriptFields.workspaceId.optional(),
+  agentUsed: transcriptFields.agentUsed.optional(),
+  privacyMode: transcriptFields.privacyMode.default(false),
+  durationMs: transcriptFields.durationMs.optional(),
+  tags: transcriptFields.tags.default([]),
+  status: transcriptFields.status.default("completed"),
 });
 
-export const updateTranscriptSchema = createTranscriptSchema
+export const updateTranscriptSchema = z
+  .object(transcriptFields)
   .partial()
   .refine(
     (value) => Object.keys(value).length > 0,
@@ -114,7 +132,7 @@ export const transcriptionJobRequestSchema = z.object({
   enableAutomaticPunctuation: z.boolean().default(true),
   enableSpeakerDiarization: z.boolean().default(false),
   callbackUrl: z.string().url().optional(),
-  metadata: z.record(z.string()).default({}),
+  metadata: z.record(z.string(), z.string()).default({}),
 });
 
 export const refinementRequestSchema = z
@@ -139,7 +157,7 @@ export const agentCommandExecutionRequestSchema = z.object({
   type: agentCommandTypeSchema.default("custom"),
   selectedText: z.string().optional(),
   context: z.string().optional(),
-  arguments: z.record(z.unknown()).default({}),
+  arguments: z.record(z.string(), z.unknown()).default({}),
   dryRun: z.boolean().default(true),
 });
 
@@ -170,7 +188,9 @@ export const trackUsageSchema = z.object({
   quantity: z.number().positive(),
   source: usageSourceSchema,
   occurredAt: z.string().datetime().optional(),
-  metadata: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+  metadata: z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+    .optional(),
 });
 
 export const syncPullSchema = z.object({
