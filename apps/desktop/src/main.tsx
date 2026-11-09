@@ -96,6 +96,7 @@ import {
 } from "./contextSpelling";
 import { preprocessAudio, AUDIO_PRESETS } from "./audioPreprocessing";
 import "./tailwind.css";
+import "./floating-recorder.css";
 import DictionaryPanel from "./components/DictionaryPanel";
 import SnippetsPanel from "./components/SnippetsPanel";
 import SettingsPanel from "./components/LocalSettingsPanel";
