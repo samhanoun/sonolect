@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   KeyboardAvoidingView,
+  Linking,
   Platform,
   ScrollView,
   Share,
@@ -16,10 +17,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { apiConfig, availableRefinementModes } from "../src/features";
 import { strings } from "../src/i18n";
 import { formatDuration } from "../src/library";
-import {
-  getSpeechAvailability,
-  requestMicrophonePermission,
-} from "../src/speech";
+import { actionLabel, noticeText, type NoticeAction } from "../src/notices";
+import { requestDictationPermission } from "../src/speech";
 import { useCompanionStore } from "../src/store";
 import {
   Button,
@@ -31,6 +30,13 @@ import {
   Waveform,
 } from "../src/ui/components";
 import { colors, fonts, modeColor, radius, space } from "../src/ui/theme";
+import { useRecognitionPlan } from "../src/useRecognitionPlan";
+
+/** Settings > Sonolect; react-native-web has no app settings to open. */
+function openAppSettings() {
+  if (typeof Linking.openSettings !== "function") return;
+  void Linking.openSettings().catch(() => undefined);
+}
 
 export default function CaptureScreen() {
   const settings = useCompanionStore((s) => s.settings);
@@ -39,7 +45,8 @@ export default function CaptureScreen() {
   const level = useCompanionStore((s) => s.level);
   const latest = useCompanionStore((s) => s.latest);
   const notice = useCompanionStore((s) => s.notice);
-  const noticeDetail = useCompanionStore((s) => s.noticeDetail);
+  const storePlan = useCompanionStore((s) => s.plan);
+  const downloading = useCompanionStore((s) => s.downloading);
   const refining = useCompanionStore((s) => s.refining);
   const startCapture = useCompanionStore((s) => s.startCapture);
   const stopCapture = useCompanionStore((s) => s.stopCapture);
@@ -47,16 +54,29 @@ export default function CaptureScreen() {
   const saveTyped = useCompanionStore((s) => s.saveTyped);
   const refine = useCompanionStore((s) => s.refine);
   const updateSettings = useCompanionStore((s) => s.updateSettings);
+  const downloadModel = useCompanionStore((s) => s.downloadModel);
+  const allowSystemServiceAlways = useCompanionStore(
+    (s) => s.allowSystemServiceAlways,
+  );
+  const showPermissionOutcome = useCompanionStore(
+    (s) => s.showPermissionOutcome,
+  );
+  const dismissNotice = useCompanionStore((s) => s.dismissNotice);
   const t = strings(settings.uiLanguage);
 
   const [typing, setTyping] = useState(false);
   const [draft, setDraft] = useState("");
   const [copied, setCopied] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [asking, setAsking] = useState(false);
 
   const listening = capture.status === "listening";
   const processing = capture.status === "processing";
-  const availability = useMemo(() => getSpeechAvailability(), []);
+  const capturing = listening || processing;
+  // The plan in use while dictating (it can switch to the speech service
+  // after consent), otherwise the plan the next dictation would follow.
+  const idlePlan = useRecognitionPlan(settings, capturing);
+  const plan = capturing ? (storePlan ?? idlePlan) : idlePlan;
   const apiConnected = Boolean(apiConfig(settings, apiToken).apiUrl);
 
   useEffect(() => {
@@ -70,7 +90,7 @@ export default function CaptureScreen() {
   }, [listening, capture.startedAt]);
 
   useEffect(() => {
-    if (notice === "unavailable") setTyping(true);
+    if (notice?.kind === "unavailable") setTyping(true);
   }, [notice]);
 
   const haptic = () => {
@@ -97,24 +117,68 @@ export default function CaptureScreen() {
           ? t.capture.error
           : t.capture.idle;
 
+  // No badge until the plan is known, nor when this phone can't dictate.
   const modeBadge = apiConnected
     ? { icon: "cloud" as const, label: t.mode.api }
-    : availability.available && availability.onDevice
-      ? { icon: "lock" as const, label: t.mode.onDevice }
-      : { icon: "cloud" as const, label: t.mode.deviceService };
+    : !plan || plan.blockedReason === "unavailable"
+      ? null
+      : plan.badge === "on-device"
+        ? { icon: "lock" as const, label: t.mode.onDevice }
+        : {
+            icon: "cloud" as const,
+            label:
+              plan.badge === "apple-service"
+                ? t.mode.appleService
+                : t.mode.deviceService,
+          };
 
-  const noticeText =
-    notice === "noSpeech"
-      ? t.capture.noSpeech
-      : notice === "unavailable"
-        ? t.capture.unavailable
-        : notice === "permissionDenied"
-          ? t.capture.permissionDenied
-          : notice === "needsModel"
-            ? t.capture.needsModel
-            : notice === "error"
-              ? (noticeDetail ?? t.capture.noSpeech)
-              : null;
+  const serviceNote =
+    !apiConnected && plan?.route === "system-service"
+      ? plan.badge === "apple-service"
+        ? t.capture.appleServiceNote
+        : t.capture.systemServiceNote
+      : null;
+
+  const onNoticeAction = (action: NoticeAction) => {
+    switch (action) {
+      case "downloadModel":
+        void downloadModel();
+        break;
+      case "useServiceOnce":
+        void startCapture({ allowSystemServiceOnce: true });
+        break;
+      case "alwaysAllow":
+        void allowSystemServiceAlways();
+        break;
+      case "openSettings":
+        openAppSettings();
+        break;
+      case "typeInstead":
+        setTyping(true);
+        dismissNotice();
+        break;
+      case "dismiss":
+        dismissNotice();
+        break;
+    }
+  };
+
+  // iOS shows its own permission prompts, so onboarding always goes on to
+  // them; the on-device route there needs the microphone only.
+  const onOnboardingAllow = async () => {
+    if (asking) return;
+    setAsking(true);
+    try {
+      const outcome = await requestDictationPermission({
+        needsSpeechRecognizer:
+          Platform.OS === "ios" && plan?.route !== "on-device",
+      });
+      await updateSettings({ onboarded: true });
+      showPermissionOutcome(outcome);
+    } finally {
+      setAsking(false);
+    }
+  };
 
   const liveText = listening || processing ? capture.partialTranscript : "";
 
@@ -144,10 +208,15 @@ export default function CaptureScreen() {
               </Text>
               <Label>{t.brandTag}</Label>
             </View>
-            <View style={styles.modePill} accessibilityLabel={modeBadge.label}>
-              <Icon name={modeBadge.icon} size={14} color={colors.lime} />
-              <Text style={styles.modePillText}>{modeBadge.label}</Text>
-            </View>
+            {modeBadge ? (
+              <View
+                style={styles.modePill}
+                accessibilityLabel={modeBadge.label}
+              >
+                <Icon name={modeBadge.icon} size={14} color={colors.lime} />
+                <Text style={styles.modePillText}>{modeBadge.label}</Text>
+              </View>
+            ) : null}
           </View>
 
           {showOnboarding ? (
@@ -158,17 +227,22 @@ export default function CaptureScreen() {
                 <Button
                   variant="primary"
                   icon="mic"
-                  label={t.onboarding.allow}
-                  onPress={async () => {
-                    await requestMicrophonePermission();
-                    await updateSettings({ onboarded: true });
-                  }}
+                  label={
+                    Platform.OS === "ios"
+                      ? t.onboarding.continue
+                      : t.onboarding.allow
+                  }
+                  disabled={asking}
+                  onPress={() => void onOnboardingAllow()}
                 />
-                <Button
-                  variant="ghost"
-                  label={t.onboarding.skip}
-                  onPress={() => void updateSettings({ onboarded: true })}
-                />
+                {Platform.OS === "ios" ? null : (
+                  <Button
+                    variant="ghost"
+                    label={t.onboarding.skip}
+                    disabled={asking}
+                    onPress={() => void updateSettings({ onboarded: true })}
+                  />
+                )}
               </View>
             </Card>
           ) : null}
@@ -180,6 +254,27 @@ export default function CaptureScreen() {
             >
               {statusLabel}
             </Label>
+            {notice ? (
+              <View style={styles.notice} accessibilityRole="alert">
+                <Text style={styles.noticeText}>{noticeText(t, notice)}</Text>
+                <View style={styles.noticeActions}>
+                  {notice.actions.map((action) => {
+                    const busy = action === "downloadModel" && downloading;
+                    return (
+                      <Button
+                        key={action}
+                        compact
+                        label={
+                          busy ? t.capture.downloading : actionLabel(t, action)
+                        }
+                        disabled={busy}
+                        onPress={() => onNoticeAction(action)}
+                      />
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
             <MicOrb
               listening={listening}
               busy={processing}
@@ -204,22 +299,13 @@ export default function CaptureScreen() {
                 onPress={() => setTyping((value) => !value)}
               />
             )}
-            {settings.privacyLevel !== "standard" &&
-            availability.available &&
-            !availability.onDevice &&
-            !apiConnected ? (
-              <Text style={styles.noteSmall}>{t.capture.cloudFallback}</Text>
+            {serviceNote ? (
+              <Text style={styles.noteSmall}>{serviceNote}</Text>
             ) : null}
             {settings.privacyLevel === "ephemeral" ? (
               <Text style={styles.noteSmall}>{t.capture.ephemeralNote}</Text>
             ) : null}
           </View>
-
-          {noticeText ? (
-            <View style={styles.notice} accessibilityRole="alert">
-              <Text style={styles.noticeText}>{noticeText}</Text>
-            </View>
-          ) : null}
 
           {typing && !listening ? (
             <Card>
@@ -361,6 +447,8 @@ const styles = StyleSheet.create({
     maxWidth: 320,
   },
   notice: {
+    alignSelf: "stretch",
+    gap: space.sm,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.lineStrong,
@@ -373,6 +461,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     lineHeight: 20,
   },
+  noticeActions: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
   input: {
     minHeight: 110,
     color: colors.text,

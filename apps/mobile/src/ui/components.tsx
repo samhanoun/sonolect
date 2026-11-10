@@ -300,7 +300,7 @@ export function ToggleRow({
 }) {
   return (
     <View style={[styles.toggleRow, !last && styles.toggleRowBorder]}>
-      <Text style={styles.body}>{label}</Text>
+      <Text style={[styles.body, styles.toggleLabel]}>{label}</Text>
       <Switch
         accessibilityLabel={label}
         value={value}
@@ -550,7 +550,10 @@ export const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: space.md,
   },
+  // A long label wraps instead of pushing the switch off the screen.
+  toggleLabel: { flexShrink: 1 },
   toggleRowBorder: { borderBottomWidth: 1, borderBottomColor: colors.line },
   segmented: {
     flexDirection: "row",

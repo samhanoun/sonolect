@@ -11,7 +11,7 @@ import {
   sortHistory,
 } from "./library";
 import { isAllowedApiUrl } from "./localApi";
-import { TranscriptAccumulator, levelFromVolume } from "./speech";
+import { TranscriptAccumulator, levelFromVolume } from "./speechPolicy";
 
 const turn = (overrides: Partial<TranscriptTurn>): TranscriptTurn => ({
   id: "t",

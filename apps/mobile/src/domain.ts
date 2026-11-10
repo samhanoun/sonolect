@@ -56,6 +56,12 @@ export interface CompanionSettings {
   language: DictationLanguage;
   uiLanguage: UiLanguage;
   privacyLevel: PrivacyLevel;
+  /**
+   * Local first and Ephemeral: use the system speech service, which may send
+   * audio to Google or Apple, when on-device dictation isn't available. Off by
+   * default: the app then asks before each such dictation.
+   */
+  allowSystemService: boolean;
   saveHistory: boolean;
   cloudSyncEnabled: boolean;
   localApiUrl?: string | undefined;
@@ -80,6 +86,7 @@ export const DEFAULT_SETTINGS: CompanionSettings = {
   language: "en-US",
   uiLanguage: "en",
   privacyLevel: "local_first",
+  allowSystemService: false,
   saveHistory: true,
   cloudSyncEnabled: false,
   hapticsEnabled: true,
@@ -106,6 +113,9 @@ export function normalizeSettings(
   }
   if (merged.uiLanguage !== "en" && merged.uiLanguage !== "fr") {
     merged.uiLanguage = DEFAULT_SETTINGS.uiLanguage;
+  }
+  if (typeof merged.allowSystemService !== "boolean") {
+    merged.allowSystemService = false;
   }
   if (
     typeof merged.speechRate !== "number" ||

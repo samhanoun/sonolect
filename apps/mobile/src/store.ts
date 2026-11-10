@@ -1,3 +1,4 @@
+import { AppState } from "react-native";
 import { create } from "zustand";
 
 import { stopCaptureWithAudio, buildTurn } from "./audioCapture";
@@ -23,6 +24,8 @@ import {
   refineWithApi,
   syncQueuedTranscriptTurns,
 } from "./localApi";
+import type { Notice } from "./notices";
+import { noticeFor } from "./notices";
 import {
   cleanTranscript,
   modeNeedsModel,
@@ -31,19 +34,27 @@ import {
 } from "./refine";
 import type { SpeechSession } from "./speech";
 import {
-  getSpeechAvailability,
-  requestMicrophonePermission,
+  downloadLanguageModel,
+  getRecognitionEnvironment,
+  invalidateRecognitionEnvironment,
+  readDictationPermission,
+  requestDictationPermission,
   startSpeechSession,
 } from "./speech";
+import type {
+  PermissionOutcome,
+  RecognitionPlan,
+  RecognitionPlatform,
+} from "./speechPolicy";
+import {
+  blockedNoticeKind,
+  classifySpeechError,
+  downloadNoticeKind,
+  permissionNoticeKind,
+  planRecognition,
+  systemServicePlan,
+} from "./speechPolicy";
 import { mobileStorage } from "./storage";
-
-export type CaptureNotice =
-  | "none"
-  | "noSpeech"
-  | "unavailable"
-  | "permissionDenied"
-  | "needsModel"
-  | "error";
 
 interface CompanionState {
   hydrated: boolean;
@@ -56,11 +67,21 @@ interface CompanionState {
   snippets: Snippet[];
   capture: CaptureSession;
   level: number;
-  notice: CaptureNotice;
-  noticeDetail?: string | undefined;
+  /** What the Capture screen tells the user, with the actions it offers. */
+  notice: Notice | null;
+  /** The plan of the current or last dictation; see speechPolicy.ts. */
+  plan: RecognitionPlan | null;
+  /** A language pack download is in progress. */
+  downloading: boolean;
   refining: boolean;
   hydrate: () => Promise<void>;
-  startCapture: () => Promise<void>;
+  /**
+   * Starts a dictation. allowSystemServiceOnce: the user allowed the system
+   * speech service for this dictation only.
+   */
+  startCapture: (options?: {
+    allowSystemServiceOnce?: boolean;
+  }) => Promise<void>;
   stopCapture: () => void;
   cancelCapture: () => void;
   saveTyped: (text: string) => Promise<void>;
@@ -75,6 +96,12 @@ interface CompanionState {
   removeDictionaryEntry: (id: string) => Promise<void>;
   addSnippet: (trigger: string, body: string) => Promise<boolean>;
   removeSnippet: (id: string) => Promise<void>;
+  /** Asks Android to download the language pack; never starts dictating. */
+  downloadModel: () => Promise<void>;
+  /** Turns on the system speech service setting, then dictates. */
+  allowSystemServiceAlways: () => Promise<void>;
+  /** Shows the notice for a permission answer, such as onboarding's. */
+  showPermissionOutcome: (outcome: PermissionOutcome) => void;
   dismissNotice: () => void;
 }
 
@@ -86,6 +113,14 @@ const idleCapture: CaptureSession = {
 };
 
 let activeSession: SpeechSession | null = null;
+/** Set while a start reads the device and asks for permissions. */
+let starting = false;
+
+// A language pack installed in the system settings, or a recognizer changed
+// there, shows up when the app comes back to the foreground.
+AppState.addEventListener("change", (state) => {
+  if (state === "active") invalidateRecognitionEnvironment();
+});
 
 function keepsHistory(settings: CompanionSettings): boolean {
   return settings.saveHistory && settings.privacyLevel !== "ephemeral";
@@ -162,6 +197,171 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     await persistHistory(history);
   };
 
+  /**
+   * After a 'not-allowed' error, reads the permissions again to tell a denial
+   * the user can still answer from one only Settings can lift. When both are
+   * granted, the speech service itself refused.
+   */
+  const explainNotAllowed = async (
+    shown: Notice,
+    needsSpeechRecognizer: boolean,
+  ) => {
+    const outcome = await readDictationPermission({ needsSpeechRecognizer });
+    if (!outcome || get().notice !== shown) return;
+    const kind = permissionNoticeKind(outcome) ?? "serviceNotAllowed";
+    if (kind !== shown.kind) {
+      set({ notice: noticeFor(kind, get().settings.language) });
+    }
+  };
+
+  const beginCapture = async (consentOnce: boolean) => {
+    set({ notice: null });
+    const { settings, apiToken } = get();
+    const { language } = settings;
+    const environment = await getRecognitionEnvironment(language);
+    const platform: RecognitionPlatform = environment.platform;
+    const plan = planRecognition({
+      ...environment,
+      privacyLevel: settings.privacyLevel,
+      language,
+      allowSystemService: settings.allowSystemService,
+      consentOnce,
+    });
+    if (plan.route === "blocked") {
+      set({
+        capture: idleCapture,
+        level: 0,
+        notice: noticeFor(
+          blockedNoticeKind(plan.blockedReason ?? "unavailable"),
+          language,
+        ),
+      });
+      return;
+    }
+
+    const permission = await requestDictationPermission({
+      needsSpeechRecognizer: platform === "ios" && plan.route !== "on-device",
+    });
+    const deniedKind = permissionNoticeKind(permission);
+    if (deniedKind) {
+      set({
+        capture: { ...idleCapture, status: "error" },
+        level: 0,
+        notice: noticeFor(deniedKind, language),
+      });
+      return;
+    }
+
+    const startedAt = new Date().toISOString();
+    const captureId = createId("capture");
+    set({
+      notice: null,
+      level: 0,
+      plan,
+      capture: {
+        id: captureId,
+        status: "listening",
+        startedAt,
+        elapsedMs: 0,
+        partialTranscript: "",
+      },
+    });
+
+    const session = startSpeechSession(
+      {
+        language,
+        plan,
+        fallbackToSystemService: settings.allowSystemService || consentOnce,
+        persistAudio: Boolean(apiConfig(settings, apiToken).apiUrl),
+      },
+      {
+        onTranscript: (text) => {
+          const capture = get().capture;
+          if (capture.id !== captureId) return;
+          set({ capture: { ...capture, partialTranscript: text } });
+        },
+        onLevel: (level) => {
+          if (get().capture.id === captureId) set({ level });
+        },
+        onError: (code) => {
+          if (get().capture.id !== captureId) return;
+          const current = get().plan;
+          const kind = classifySpeechError(code, {
+            requiresOnDevice: current?.requiresOnDevice ?? false,
+            platform,
+          });
+          if (kind === "benign" || kind === "aborted") return;
+          // Never a switch to the system speech service here: that needs
+          // the user's consent (the notice offers it).
+          const notice = noticeFor(kind, language);
+          set({ notice });
+          if (kind === "modelMissing") invalidateRecognitionEnvironment();
+          if (kind === "micDenied") {
+            void explainNotAllowed(
+              notice,
+              platform === "ios" && current?.route !== "on-device",
+            );
+          }
+        },
+        onRouteChange: () => {
+          if (get().capture.id === captureId) {
+            set({ plan: systemServicePlan(platform) });
+          }
+        },
+        onEnd: async ({ text, audio }) => {
+          if (activeSession === session) activeSession = null;
+          const capture = get().capture;
+          if (capture.id !== captureId) return;
+          set({
+            level: 0,
+            capture: { ...capture, status: "processing" },
+          });
+          const state = get();
+          const turn = await stopCaptureWithAudio({
+            captureStartedAt: startedAt,
+            settings: {
+              ...effectiveSettings(state.settings),
+              ...(API_FEATURES_ENABLED && state.apiToken
+                ? { apiToken: state.apiToken }
+                : {}),
+            },
+            recognizedText: text,
+            audio,
+            dictionary: state.dictionary,
+            snippets: state.snippets,
+          });
+          if (get().capture.id !== captureId) return;
+          if (!turn) {
+            // An error notice reads ATTENTION; an empty dictation is no error.
+            set(
+              get().notice
+                ? { capture: { ...idleCapture, status: "error" } }
+                : { capture: idleCapture, notice: noticeFor("noSpeech") },
+            );
+            return;
+          }
+          set({
+            capture: {
+              ...idleCapture,
+              status: "ready",
+              partialTranscript: turn.refinedText,
+            },
+          });
+          await addTurn(turn);
+        },
+      },
+    );
+    activeSession = session;
+
+    if (!session && get().capture.id === captureId) {
+      set({
+        capture: { ...idleCapture, status: "error" },
+        level: 0,
+        notice: get().notice ?? noticeFor("startFailed"),
+      });
+    }
+  };
+
   return {
     hydrated: false,
     settings: DEFAULT_SETTINGS,
@@ -170,7 +370,9 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     snippets: [],
     capture: idleCapture,
     level: 0,
-    notice: "none",
+    notice: null,
+    plan: null,
+    downloading: false,
     refining: false,
 
     hydrate: async () => {
@@ -231,109 +433,16 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       }
     },
 
-    startCapture: async () => {
-      if (get().capture.status === "listening") return;
-      const availability = getSpeechAvailability();
-      if (!availability.available) {
-        set({
-          notice: "unavailable",
-          capture: { ...idleCapture, status: "error" },
-        });
+    startCapture: async (options) => {
+      const { status } = get().capture;
+      if (starting || status === "listening" || status === "processing") {
         return;
       }
-      const permission = await requestMicrophonePermission();
-      if (permission !== "granted") {
-        set({
-          notice:
-            permission === "unsupported" ? "unavailable" : "permissionDenied",
-          capture: { ...idleCapture, status: "error" },
-        });
-        return;
-      }
-
-      const { settings, apiToken } = get();
-      const startedAt = new Date().toISOString();
-      const captureId = createId("capture");
-      set({
-        notice: "none",
-        level: 0,
-        capture: {
-          id: captureId,
-          status: "listening",
-          startedAt,
-          elapsedMs: 0,
-          partialTranscript: "",
-        },
-      });
-
-      activeSession = startSpeechSession(
-        {
-          language: settings.language,
-          requireOnDevice: settings.privacyLevel !== "standard",
-          persistAudio: Boolean(apiConfig(settings, apiToken).apiUrl),
-        },
-        {
-          onTranscript: (text) => {
-            const capture = get().capture;
-            if (capture.id !== captureId) return;
-            set({ capture: { ...capture, partialTranscript: text } });
-          },
-          onLevel: (level) => {
-            if (get().capture.id === captureId) set({ level });
-          },
-          onError: (code, message) => {
-            if (get().capture.id !== captureId) return;
-            const notice: CaptureNotice =
-              code === "not-allowed" ? "permissionDenied" : "error";
-            set({ notice, noticeDetail: message });
-          },
-          onEnd: async ({ text, audio }) => {
-            activeSession = null;
-            const capture = get().capture;
-            if (capture.id !== captureId) return;
-            set({
-              level: 0,
-              capture: { ...capture, status: "processing" },
-            });
-            const state = get();
-            const turn = await stopCaptureWithAudio({
-              captureStartedAt: startedAt,
-              settings: {
-                ...effectiveSettings(state.settings),
-                ...(API_FEATURES_ENABLED && state.apiToken
-                  ? { apiToken: state.apiToken }
-                  : {}),
-              },
-              recognizedText: text,
-              audio,
-              dictionary: state.dictionary,
-              snippets: state.snippets,
-            });
-            if (get().capture.id !== captureId) return;
-            if (!turn) {
-              set({
-                capture: { ...idleCapture },
-                notice: get().notice === "none" ? "noSpeech" : get().notice,
-              });
-              return;
-            }
-            set({
-              capture: {
-                ...idleCapture,
-                status: "ready",
-                partialTranscript: turn.refinedText,
-              },
-            });
-            await addTurn(turn);
-          },
-        },
-      );
-
-      if (!activeSession) {
-        set({
-          capture: { ...idleCapture, status: "error" },
-          notice: "unavailable",
-        });
+      starting = true;
+      try {
+        await beginCapture(options?.allowSystemServiceOnce === true);
+      } finally {
+        starting = false;
       }
     },
 
@@ -366,7 +475,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         source: "typed",
       });
       set({
-        notice: "none",
+        notice: null,
         capture: {
           ...idleCapture,
           status: "ready",
@@ -386,11 +495,11 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         history.find((turn) => turn.id === turnId) ??
         (latest?.id === turnId ? latest : undefined);
       if (!source) return;
-      set({ refining: true, notice: "none" });
+      set({ refining: true, notice: null });
 
       const context = { language: source.language, dictionary, snippets };
       let refinedText = refineLocally(source.rawText, mode, context);
-      let notice: CaptureNotice = "none";
+      let notice: Notice | null = null;
 
       const config = apiConfig(settings, apiToken);
       if (config.apiUrl) {
@@ -407,9 +516,9 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
           },
         );
         if (result.status === "completed") refinedText = result.text;
-        else if (modeNeedsModel(mode)) notice = "needsModel";
+        else if (modeNeedsModel(mode)) notice = noticeFor("needsModel");
       } else if (modeNeedsModel(mode)) {
-        notice = "needsModel";
+        notice = noticeFor("needsModel");
       }
 
       const refined: TranscriptTurn = {
@@ -458,7 +567,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         snippets: [],
         apiToken: undefined,
         capture: idleCapture,
-        notice: "none",
+        notice: null,
       });
     },
 
@@ -544,6 +653,35 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       await mobileStorage.saveSnippets(snippets);
     },
 
-    dismissNotice: () => set({ notice: "none", noticeDetail: undefined }),
+    downloadModel: async () => {
+      if (get().downloading) return;
+      const { language } = get().settings;
+      set({ downloading: true });
+      try {
+        const outcome = await downloadLanguageModel(language);
+        set({ notice: noticeFor(downloadNoticeKind(outcome), language) });
+      } finally {
+        set({ downloading: false });
+      }
+    },
+
+    allowSystemServiceAlways: async () => {
+      await get().updateSettings({ allowSystemService: true });
+      await get().startCapture();
+    },
+
+    showPermissionOutcome: (outcome: PermissionOutcome) => {
+      const kind = permissionNoticeKind(outcome);
+      if (kind) set({ notice: noticeFor(kind, get().settings.language) });
+    },
+
+    dismissNotice: () => {
+      // Without its notice, an error status would read ATTENTION for nothing.
+      set(
+        get().capture.status === "error"
+          ? { notice: null, capture: idleCapture }
+          : { notice: null },
+      );
+    },
   };
 });

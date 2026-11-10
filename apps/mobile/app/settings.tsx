@@ -133,6 +133,23 @@ export default function SettingsScreen() {
             <Text style={styles.help}>
               {t.settings.privacyHelp[settings.privacyLevel]}
             </Text>
+            {settings.privacyLevel !== "standard" ? (
+              <>
+                <Card style={styles.toggles}>
+                  <ToggleRow
+                    label={t.settings.allowSystemService}
+                    value={settings.allowSystemService}
+                    onChange={(allowSystemService) =>
+                      void updateSettings({ allowSystemService })
+                    }
+                    last
+                  />
+                </Card>
+                <Text style={styles.help}>
+                  {t.settings.allowSystemServiceHelp}
+                </Text>
+              </>
+            ) : null}
           </View>
 
           <Card style={styles.toggles}>
