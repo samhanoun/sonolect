@@ -13,10 +13,9 @@ import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { REFINEMENT_MODES } from "../src/domain";
+import { apiConfig, availableRefinementModes } from "../src/features";
 import { strings } from "../src/i18n";
 import { formatDuration } from "../src/library";
-import { resolveMobileLocalApiConfig } from "../src/localApi";
 import {
   getSpeechAvailability,
   requestMicrophonePermission,
@@ -58,9 +57,7 @@ export default function CaptureScreen() {
   const listening = capture.status === "listening";
   const processing = capture.status === "processing";
   const availability = useMemo(() => getSpeechAvailability(), []);
-  const apiConnected = Boolean(
-    resolveMobileLocalApiConfig({ ...settings, apiToken }).apiUrl,
-  );
+  const apiConnected = Boolean(apiConfig(settings, apiToken).apiUrl);
 
   useEffect(() => {
     if (!listening || !capture.startedAt) {
@@ -286,7 +283,7 @@ export default function CaptureScreen() {
                   />
                 </View>
                 <View style={styles.chips}>
-                  {REFINEMENT_MODES.map((mode) => (
+                  {availableRefinementModes().map((mode) => (
                     <Chip
                       key={mode}
                       label={t.modes[mode]}

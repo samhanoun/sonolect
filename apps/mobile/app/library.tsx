@@ -14,6 +14,7 @@ import * as Speech from "expo-speech";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { TranscriptTurn } from "../src/domain";
+import { API_FEATURES_ENABLED } from "../src/features";
 import { strings } from "../src/i18n";
 import {
   exportAsMarkdown,
@@ -88,8 +89,10 @@ export default function LibraryScreen() {
             {timeLabel(item.createdAt, locale)} ·{" "}
             {item.source === "typed"
               ? t.library.typed
-              : formatDuration(item.durationMs)}{" "}
-            · {t.library.sync[item.syncState]}
+              : formatDuration(item.durationMs)}
+            {API_FEATURES_ENABLED
+              ? ` · ${t.library.sync[item.syncState]}`
+              : null}
           </Label>
         </View>
         <Text

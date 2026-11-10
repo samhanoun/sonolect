@@ -11,10 +11,16 @@ import type {
 } from "./domain";
 import { DEFAULT_SETTINGS, HISTORY_LIMIT, createId } from "./domain";
 import {
+  API_FEATURES_ENABLED,
+  apiConfig,
+  availableRefinementModes,
+  effectiveSettings,
+  phoneOnlyMigration,
+} from "./features";
+import {
   fetchLocalTranscriptHistory,
   mergeTranscriptHistory,
   refineWithApi,
-  resolveMobileLocalApiConfig,
   syncQueuedTranscriptTurns,
 } from "./localApi";
 import {
@@ -83,10 +89,6 @@ let activeSession: SpeechSession | null = null;
 
 function keepsHistory(settings: CompanionSettings): boolean {
   return settings.saveHistory && settings.privacyLevel !== "ephemeral";
-}
-
-function apiConfig(settings: CompanionSettings, apiToken?: string) {
-  return resolveMobileLocalApiConfig({ ...settings, apiToken });
 }
 
 export const useCompanionStore = create<CompanionState>((set, get) => {
@@ -172,7 +174,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     refining: false,
 
     hydrate: async () => {
-      const [settings, history, dictionary, snippets, apiToken] =
+      const [loadedSettings, loadedHistory, dictionary, snippets, storedToken] =
         await Promise.all([
           mobileStorage.loadSettings(),
           mobileStorage.loadHistory(),
@@ -180,6 +182,30 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
           mobileStorage.loadSnippets(),
           mobileStorage.loadApiToken(),
         ]);
+      let settings = loadedSettings;
+      let history = loadedHistory;
+      let apiToken = storedToken;
+      if (!API_FEATURES_ENABLED) {
+        // Phone-only build: data from a build with the API (sync on, an API
+        // URL, queued notes) becomes local before anything else runs. A
+        // failed write is retried at the next launch; it must not keep the
+        // app on the splash screen.
+        const migrated = phoneOnlyMigration(settings, history);
+        settings = migrated.settings;
+        history = migrated.history;
+        if (migrated.changed) {
+          await Promise.all([
+            mobileStorage.saveSettings(settings),
+            mobileStorage.saveHistory(history),
+          ]).catch(() => undefined);
+        }
+        // No dormant credential stays on the phone, including one that
+        // survived a reinstall in the iOS keychain.
+        if (apiToken) {
+          apiToken = undefined;
+          await mobileStorage.saveApiToken(undefined).catch(() => undefined);
+        }
+      }
       set({
         settings,
         history,
@@ -272,7 +298,12 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
             const state = get();
             const turn = await stopCaptureWithAudio({
               captureStartedAt: startedAt,
-              settings: { ...state.settings, apiToken: state.apiToken },
+              settings: {
+                ...effectiveSettings(state.settings),
+                ...(API_FEATURES_ENABLED && state.apiToken
+                  ? { apiToken: state.apiToken }
+                  : {}),
+              },
               recognizedText: text,
               audio,
               dictionary: state.dictionary,
@@ -346,6 +377,9 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     },
 
     refine: async (turnId: string, mode: RefinementMode) => {
+      // Rewrite and Reply need the API; the phone-only build does not offer
+      // them.
+      if (!availableRefinementModes().includes(mode)) return;
       const { history, latest, settings, apiToken, dictionary, snippets } =
         get();
       const source =
@@ -430,7 +464,8 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
 
     updateSettings: async (patch: Partial<CompanionSettings>) => {
       const previous = get().settings;
-      const settings = { ...previous, ...patch };
+      // While the API is off, no screen can turn sync on or set an API URL.
+      const settings = effectiveSettings({ ...previous, ...patch });
       set({ settings });
       await mobileStorage.saveSettings(settings);
       if (!keepsHistory(settings) && keepsHistory(previous)) {
@@ -451,6 +486,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     },
 
     setApiToken: async (token: string) => {
+      if (!API_FEATURES_ENABLED) return;
       const trimmed = token.trim();
       await mobileStorage.saveApiToken(trimmed || undefined);
       set(trimmed ? { apiToken: trimmed } : { apiToken: undefined });

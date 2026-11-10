@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { DICTATION_LANGUAGES, type PrivacyLevel } from "../src/domain";
+import { API_FEATURES_ENABLED } from "../src/features";
 import { LANGUAGE_NAMES, strings } from "../src/i18n";
 import { isAllowedApiUrl } from "../src/localApi";
 import { useCompanionStore } from "../src/store";
@@ -148,15 +149,18 @@ export default function SettingsScreen() {
               onChange={(hapticsEnabled) =>
                 void updateSettings({ hapticsEnabled })
               }
+              last={!API_FEATURES_ENABLED}
             />
-            <ToggleRow
-              label={t.settings.sync}
-              value={settings.cloudSyncEnabled}
-              onChange={(cloudSyncEnabled) =>
-                void updateSettings({ cloudSyncEnabled })
-              }
-              last
-            />
+            {API_FEATURES_ENABLED ? (
+              <ToggleRow
+                label={t.settings.sync}
+                value={settings.cloudSyncEnabled}
+                onChange={(cloudSyncEnabled) =>
+                  void updateSettings({ cloudSyncEnabled })
+                }
+                last
+              />
+            ) : null}
           </Card>
 
           <View style={styles.section}>
@@ -186,70 +190,72 @@ export default function SettingsScreen() {
             />
           </View>
 
-          <View style={styles.section}>
-            <Label>{t.settings.api}</Label>
-            <Card>
-              <Text style={styles.fieldLabel} nativeID="api-url-label">
-                {t.settings.apiUrl}
-              </Text>
-              <TextInput
-                accessibilityLabelledBy="api-url-label"
-                accessibilityLabel={t.settings.apiUrl}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="url"
-                placeholder="https://api.example.com"
-                placeholderTextColor={colors.muted}
-                value={url}
-                onChangeText={(value) => {
-                  setUrl(value);
-                  setApiMessage(null);
-                }}
-                style={[styles.input, !urlValid && styles.inputError]}
-              />
-              <Text style={styles.fieldLabel}>{t.settings.apiToken}</Text>
-              <TextInput
-                accessibilityLabel={t.settings.apiToken}
-                autoCapitalize="none"
-                autoCorrect={false}
-                secureTextEntry
-                placeholder="••••••••"
-                placeholderTextColor={colors.muted}
-                value={token}
-                onChangeText={setToken}
-                style={styles.input}
-              />
-              <Text
-                style={[styles.help, !urlValid && { color: colors.danger }]}
-              >
-                {!urlValid
-                  ? t.settings.apiInvalid
-                  : (apiMessage ??
-                    (test === "ok"
-                      ? t.settings.testOk
-                      : test === "fail"
-                        ? t.settings.testFail
-                        : settings.localApiUrl
-                          ? settings.localApiUrl
-                          : t.settings.apiNotSet))}
-              </Text>
-              <View style={styles.row}>
-                <Button
-                  variant="primary"
-                  label={t.settings.save}
-                  disabled={!urlValid}
-                  onPress={() => void saveApi()}
+          {API_FEATURES_ENABLED ? (
+            <View style={styles.section}>
+              <Label>{t.settings.api}</Label>
+              <Card>
+                <Text style={styles.fieldLabel} nativeID="api-url-label">
+                  {t.settings.apiUrl}
+                </Text>
+                <TextInput
+                  accessibilityLabelledBy="api-url-label"
+                  accessibilityLabel={t.settings.apiUrl}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                  placeholder="https://api.example.com"
+                  placeholderTextColor={colors.muted}
+                  value={url}
+                  onChangeText={(value) => {
+                    setUrl(value);
+                    setApiMessage(null);
+                  }}
+                  style={[styles.input, !urlValid && styles.inputError]}
                 />
-                <Button
-                  label={
-                    test === "testing" ? t.settings.testing : t.settings.test
-                  }
-                  disabled={!url.trim() || !urlValid || test === "testing"}
-                  onPress={() => void testApi()}
+                <Text style={styles.fieldLabel}>{t.settings.apiToken}</Text>
+                <TextInput
+                  accessibilityLabel={t.settings.apiToken}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  secureTextEntry
+                  placeholder="••••••••"
+                  placeholderTextColor={colors.muted}
+                  value={token}
+                  onChangeText={setToken}
+                  style={styles.input}
                 />
-              </View>
-            </Card>
-          </View>
+                <Text
+                  style={[styles.help, !urlValid && { color: colors.danger }]}
+                >
+                  {!urlValid
+                    ? t.settings.apiInvalid
+                    : (apiMessage ??
+                      (test === "ok"
+                        ? t.settings.testOk
+                        : test === "fail"
+                          ? t.settings.testFail
+                          : settings.localApiUrl
+                            ? settings.localApiUrl
+                            : t.settings.apiNotSet))}
+                </Text>
+                <View style={styles.row}>
+                  <Button
+                    variant="primary"
+                    label={t.settings.save}
+                    disabled={!urlValid}
+                    onPress={() => void saveApi()}
+                  />
+                  <Button
+                    label={
+                      test === "testing" ? t.settings.testing : t.settings.test
+                    }
+                    disabled={!url.trim() || !urlValid || test === "testing"}
+                    onPress={() => void testApi()}
+                  />
+                </View>
+              </Card>
+            </View>
+          ) : null}
 
           <View style={styles.section}>
             <Label>{t.settings.dictionary}</Label>

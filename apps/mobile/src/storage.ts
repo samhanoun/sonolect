@@ -170,8 +170,15 @@ export const mobileStorage = {
       else webSecrets.delete(KEYS.apiToken);
       return;
     }
-    if (trimmed) await SecureStore.setItemAsync(KEYS.apiToken, trimmed);
-    else await SecureStore.deleteItemAsync(KEYS.apiToken);
+    // Delete first: an existing keychain item otherwise keeps the access
+    // class it was created with. WHEN_UNLOCKED_THIS_DEVICE_ONLY keeps the
+    // token out of backups, so it never moves to another device.
+    await SecureStore.deleteItemAsync(KEYS.apiToken);
+    if (trimmed) {
+      await SecureStore.setItemAsync(KEYS.apiToken, trimmed, {
+        keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+      });
+    }
   },
 
   /** Removes everything Sonolect stored on this device. */
