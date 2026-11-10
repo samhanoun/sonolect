@@ -44,6 +44,9 @@
       "@expo/plist>@xmldom/xmldom": "^0.8.13",
       "react-native-drawer-layout>react-native-reanimated": "-",
       "react-native-drawer-layout>react-native-gesture-handler": "-"
+    },
+    "patchedDependencies": {
+      "expo-speech-recognition@58.0.1": "patches/expo-speech-recognition@58.0.1.patch"
     }
   }
 }
