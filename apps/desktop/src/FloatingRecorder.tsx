@@ -1,4 +1,5 @@
 import React from "react";
+import { Check, Minus, X } from "lucide-react";
 import type { RecordingState } from "./recordingStateMachine";
 import { formatDuration } from "./recordingStateMachine";
 
@@ -94,7 +95,10 @@ export function FloatingRecorderOverlay({
         aria-label="Floating recorder (minimized)"
         onClick={onMinimize}
       >
-        <span className="floating-recorder__status-dot" />
+        <span
+          className={`floating-recorder__status-dot ${recordingState === "recording" ? "is-live" : ""}`}
+        />
+        <span className="floating-recorder__label">{label}</span>
         <span className="floating-recorder__timer">{timer}</span>
       </div>
     );
@@ -107,6 +111,9 @@ export function FloatingRecorderOverlay({
       aria-label="Floating recorder"
     >
       <div className="floating-recorder__header">
+        <span
+          className={`floating-recorder__status-dot ${recordingState === "recording" ? "is-live" : ""}`}
+        />
         <span className="floating-recorder__label">{label}</span>
         <span className="floating-recorder__timer">{timer}</span>
         <button
@@ -114,13 +121,15 @@ export function FloatingRecorderOverlay({
           aria-label="Minimize recorder"
           onClick={onMinimize}
         >
-          &ndash;
+          <Minus size={16} strokeWidth={1.5} />
         </button>
       </div>
 
-      {recordingState === "recording" && (
+      {(recordingState === "recording" ||
+        recordingState === "countdown" ||
+        recordingState === "processing") && (
         <div
-          className="floating-recorder__waveform"
+          className={`floating-recorder__waveform ${recordingState === "recording" ? "" : "floating-recorder__waveform--idle"}`}
           aria-label="Waveform visualization"
         >
           {barHeights.map((height, index) => (
@@ -152,7 +161,7 @@ export function FloatingRecorderOverlay({
               aria-label="Cancel recording"
               onClick={onCancel}
             >
-              ✕
+              <X size={16} strokeWidth={1.5} />
             </button>
             {recordingState === "recording" && (
               <button
@@ -160,7 +169,8 @@ export function FloatingRecorderOverlay({
                 aria-label="Finish recording"
                 onClick={onFinish}
               >
-                ✓
+                <Check size={16} strokeWidth={1.5} />
+                Done
               </button>
             )}
           </>
@@ -172,13 +182,14 @@ export function FloatingRecorderOverlay({
               aria-label="Cancel recording"
               onClick={onCancel}
             >
-              ✕
+              <X size={16} strokeWidth={1.5} />
             </button>
             <button
               className="floating-recorder__btn floating-recorder__btn--insert"
               aria-label="Insert text"
               onClick={onInsert}
             >
+              <Check size={16} strokeWidth={1.5} />
               Insert
             </button>
           </>

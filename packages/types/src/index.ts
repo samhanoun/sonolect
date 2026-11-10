@@ -13,40 +13,21 @@ export type SonolectMode =
 export type TranscriptStatus = "draft" | "processing" | "completed" | "failed";
 export type SyncEntityType = "user" | "transcript" | "command" | "usage";
 export type AudioUploadJobStatus =
-  | "queued"
-  | "processing"
-  | "completed"
-  | "failed";
+  "queued" | "processing" | "completed" | "failed";
 export type AudioUploadSource = "desktop" | "web" | "mobile" | "api";
 export type AudioUploadStrategy = "inline-metadata" | "binary-local";
 export type AudioUploadStorage = "local-placeholder" | "local-file";
 
 export type SttProviderName = "mock" | "google";
 export type TranscriptionJobStatus =
-  | "queued"
-  | "processing"
-  | "completed"
-  | "failed"
-  | "cancelled";
+  "queued" | "processing" | "completed" | "failed" | "cancelled";
 export type RefinementAction = "clean" | "rewrite" | "summarize" | "translate";
 export type AgentCommandStatus =
-  | "queued"
-  | "running"
-  | "completed"
-  | "failed"
-  | "blocked";
+  "queued" | "running" | "completed" | "failed" | "blocked";
 export type AgentCommandType =
-  | "copy_to_clipboard"
-  | "open_url"
-  | "create_task"
-  | "insert_text"
-  | "custom";
+  "copy_to_clipboard" | "open_url" | "create_task" | "insert_text" | "custom";
 export type UsageMetric =
-  | "transcripts"
-  | "commands"
-  | "minutes"
-  | "storageMb"
-  | "agentRuns";
+  "transcripts" | "commands" | "minutes" | "storageMb" | "agentRuns";
 export type WorkerTaskKind = "audio" | "agent" | "billing";
 export type WorkerTaskStatus = "queued" | "processing" | "completed" | "failed";
 
