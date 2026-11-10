@@ -13,14 +13,14 @@
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
+    "types": ["node"],
     "paths": {
-      "@sonolect/types": ["packages/types/src/index.ts"],
-      "@sonolect/validation": ["packages/validation/src/index.ts"],
-      "@sonolect/config": ["packages/config/src/index.ts"],
-      "@sonolect/prompts": ["packages/prompts/src/index.ts"],
-      "@sonolect/sdk": ["packages/sdk/src/index.ts"],
-      "@sonolect/ui": ["packages/ui/src/index.ts"]
+      "@sonolect/types": ["./packages/types/src/index.ts"],
+      "@sonolect/validation": ["./packages/validation/src/index.ts"],
+      "@sonolect/config": ["./packages/config/src/index.ts"],
+      "@sonolect/prompts": ["./packages/prompts/src/index.ts"],
+      "@sonolect/sdk": ["./packages/sdk/src/index.ts"],
+      "@sonolect/ui": ["./packages/ui/src/index.ts"]
     }
   }
 }
