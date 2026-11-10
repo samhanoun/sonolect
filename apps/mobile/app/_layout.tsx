@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import type { ColorValue } from "react-native";
 import { Tabs } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
@@ -13,7 +14,10 @@ import {
   Inter_600SemiBold,
 } from "@expo-google-fonts/inter";
 import { JetBrainsMono_500Medium } from "@expo-google-fonts/jetbrains-mono";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import {
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
 import { strings } from "../src/i18n";
 import { useCompanionStore } from "../src/store";
@@ -23,12 +27,18 @@ import { colors, fonts } from "../src/ui/theme";
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 function tabIcon(name: IconName) {
-  return ({ color }: { color: string }) => (
+  return ({ color }: { color: ColorValue }) => (
     <Icon name={name} size={22} color={color} />
   );
 }
 
+/** Tab bar height above the system navigation area (icon, label, padding). */
+const TAB_BAR_HEIGHT = 62;
+
 export default function RootLayout() {
+  // Android draws edge to edge, so the bar must grow by the navigation bar
+  // inset (gesture pill or 3-button bar) instead of using a fixed height.
+  const insets = useSafeAreaInsets();
   const [fontsLoaded, fontError] = useFonts({
     SpaceGrotesk_600SemiBold,
     SpaceGrotesk_700Bold,
@@ -64,7 +74,7 @@ export default function RootLayout() {
             backgroundColor: colors.bgRaised,
             borderTopColor: colors.line,
             borderTopWidth: 1,
-            height: 84,
+            height: TAB_BAR_HEIGHT + insets.bottom,
             paddingTop: 8,
           },
           tabBarActiveTintColor: colors.lime,

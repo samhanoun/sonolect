@@ -1,8 +1,9 @@
 # Sonolect mobile
 
-Expo (SDK 52) app for iOS and Android: capture → refine → library, plus a
-text-to-speech reader, dictionary, snippets and privacy controls. Design: the
-"Night" variant of the desktop Studio palette (forest `#1F3429`, lime `#DDF39A`).
+Expo SDK 58 app (React Native 0.88, React 19.3, New Architecture) for iOS and
+Android: capture → refine → library, plus a text-to-speech reader, dictionary,
+snippets and privacy controls. Design: the "Night" variant of the desktop
+Studio palette (forest `#1F3429`, lime `#DDF39A`).
 
 ## How it works
 
@@ -37,3 +38,24 @@ pnpm --filter @sonolect/mobile web
 ```
 
 Checks: `pnpm --filter @sonolect/mobile typecheck` and `pnpm --filter @sonolect/mobile test`.
+
+## Upgrading Expo
+
+Expo pins the versions of `expo-*`, `react-native*` and React for each SDK, so
+Dependabot ignores them (see `.github/dependabot.yml`). Upgrade them together:
+
+```bash
+cd apps/mobile
+pnpm add expo@~<sdk>.0.0
+pnpm exec expo install --fix
+```
+
+Then keep the desktop app on the same React version, and run the typecheck,
+tests, `expo prebuild --no-install --clean` and a release bundle before opening
+the PR. CI installs the Android SDK, build-tools and NDK versions that React
+Native's `gradle/libs.versions.toml` asks for, so it needs no edit.
+
+`expo-router` depends on `react-native-drawer-layout`, which asks for
+Reanimated and Gesture Handler. The app uses neither, so the root
+`package.json` removes them with pnpm overrides. Without that, pnpm installs
+an old Reanimated that Expo autolinks into the Android build.
