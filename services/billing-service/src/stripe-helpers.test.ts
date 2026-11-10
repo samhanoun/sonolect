@@ -77,6 +77,34 @@ describe("verifyStripeSignature", () => {
   it("returns false for a malformed header", () => {
     assert.equal(verifyStripeSignature('{"id":"evt_1"}', "", SECRET), false);
   });
+
+  it("returns false for an old timestamp (exceeds tolerance)", () => {
+    const payload = '{"id":"evt_1"}';
+    const oldTimestamp = (Math.floor(Date.now() / 1000) - 400).toString(); // 400 seconds ago (tolerance is 300)
+    const header = makeSignature(payload, SECRET, oldTimestamp);
+    assert.equal(verifyStripeSignature(payload, header, SECRET, 300), false);
+  });
+
+  it("returns false for a future timestamp (exceeds tolerance)", () => {
+    const payload = '{"id":"evt_1"}';
+    const futureTimestamp = (Math.floor(Date.now() / 1000) + 400).toString(); // 400 seconds in the future
+    const header = makeSignature(payload, SECRET, futureTimestamp);
+    assert.equal(verifyStripeSignature(payload, header, SECRET, 300), false);
+  });
+
+  it("returns true for a timestamp within tolerance", () => {
+    const payload = '{"id":"evt_1"}';
+    const recentTimestamp = (Math.floor(Date.now() / 1000) - 200).toString(); // 200 seconds ago
+    const header = makeSignature(payload, SECRET, recentTimestamp);
+    assert.equal(verifyStripeSignature(payload, header, SECRET, 300), true);
+  });
+
+  it("returns true for an old timestamp when tolerance is 0 (disabled)", () => {
+    const payload = '{"id":"evt_1"}';
+    const oldTimestamp = (Math.floor(Date.now() / 1000) - 1000).toString();
+    const header = makeSignature(payload, SECRET, oldTimestamp);
+    assert.equal(verifyStripeSignature(payload, header, SECRET, 0), true);
+  });
 });
 
 describe("parseStripeEvent", () => {

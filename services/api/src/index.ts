@@ -21,6 +21,7 @@ import {
 } from "./repositories.js";
 import {
   registerAuthMiddleware,
+  createAuthConfig,
   type AuthOptions,
   type AuthenticatedActor,
 } from "./auth.js";
@@ -342,6 +343,7 @@ const toManifestItems = async (
 };
 
 export interface CreateAppOptions extends AuthOptions {
+  allowedOrigins?: string[];
   stores?: InMemoryStores;
   transcriptRepository?: TranscriptRepository;
   storePath?: string;
@@ -356,6 +358,36 @@ export async function createApp(
   const resolvedLocalUserId = getLocalUserId(options);
   const stores = options.stores ?? createStores(resolvedLocalUserId);
   const authOptions = { ...options, localUserId: resolvedLocalUserId };
+  const authConfig = createAuthConfig(authOptions);
+  const origins =
+    options.allowedOrigins ??
+    process.env.SONOLECT_ALLOWED_ORIGINS?.split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean) ??
+    (authConfig.nodeEnv === "production"
+      ? []
+      : [
+          "http://localhost:5173",
+          "http://127.0.0.1:5173",
+          "http://tauri.localhost",
+          "https://tauri.localhost",
+          "tauri://localhost",
+        ]);
+  for (const origin of origins) {
+    const parsed = new URL(origin);
+    if (
+      !["http:", "https:", "tauri:"].includes(parsed.protocol) ||
+      parsed.username ||
+      parsed.password ||
+      parsed.search ||
+      parsed.hash ||
+      (parsed.pathname && parsed.pathname !== "/") ||
+      origin.includes("*")
+    )
+      throw new Error(
+        "Allowed origins must be exact origins without paths, credentials, or wildcards",
+      );
+  }
   const storePath = options.storePath ?? process.env.SONOLECT_API_STORE_PATH;
   const audioDir = await ensureAudioStorageRoot(getAudioDir(options.audioDir));
   const audioMaxBytes = getAudioMaxBytes(options.audioMaxBytes);
@@ -405,8 +437,13 @@ export async function createApp(
   );
 
   await app.register(helmet);
-  await app.register(cors, { origin: false });
-  registerAuthMiddleware(app, authOptions);
+  await app.register(cors, {
+    origin: origins,
+    methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["content-type", "authorization"],
+    maxAge: 600,
+  });
+  registerAuthMiddleware(app, authConfig);
 
   app.get("/health", async () => ({ status: "ok", service: serviceName }));
 
@@ -782,7 +819,11 @@ export async function createApp(
 const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isDirectRun) {
-  const app = await createApp();
+  const nodeEnv = process.env.NODE_ENV ?? "production";
+  const app = await createApp({ nodeEnv });
   const port = Number(process.env.PORT ?? 8080);
-  await app.listen({ host: "0.0.0.0", port });
+  await app.listen({
+    host: nodeEnv === "production" ? "0.0.0.0" : "127.0.0.1",
+    port,
+  });
 }

@@ -8,7 +8,6 @@ import {
 export interface LocalAudioWorkerDaemonConfig {
   storePath: string;
   pollIntervalMs: number;
-  localSttCommand?: string;
   localSttCommandArgs?: string[];
 }
 
@@ -92,9 +91,6 @@ export function parseLocalAudioWorkerDaemonConfig(
     takeFlagValue(argv, "--interval-ms") ??
     env[intervalEnvName] ??
     `${defaultPollIntervalMs}`;
-  const localSttCommand =
-    takeFlagValue(argv, "--local-stt-command") ??
-    env.SONOLECT_LOCAL_STT_COMMAND;
   const localSttCommandArgsValue =
     takeFlagValue(argv, "--local-stt-command-args") ??
     env.SONOLECT_LOCAL_STT_COMMAND_ARGS;
@@ -113,7 +109,6 @@ export function parseLocalAudioWorkerDaemonConfig(
   return {
     storePath,
     pollIntervalMs: parsePositiveInteger(intervalValue, "poll interval"),
-    ...(localSttCommand?.trim() ? { localSttCommand } : {}),
     ...(localSttCommandArgs ? { localSttCommandArgs } : {}),
   };
 }
@@ -164,9 +159,6 @@ export async function runLocalAudioWorkerDaemon(
   while (!options.signal?.aborted) {
     const result = await processNextQueuedAudioJob({
       storePath: options.config.storePath,
-      ...(options.config.localSttCommand
-        ? { localSttCommand: options.config.localSttCommand }
-        : {}),
       ...(options.config.localSttCommandArgs
         ? { localSttCommandArgs: options.config.localSttCommandArgs }
         : {}),

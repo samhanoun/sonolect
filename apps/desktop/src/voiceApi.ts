@@ -4,6 +4,16 @@ import {
   type DesktopWhisperResult,
 } from "./desktopWhisper";
 import type { TranscriptSegment } from "./segmentEditor";
+import { isTauriRuntime } from "./desktopNative";
+
+/** Explains why local transcription could not run, without blaming the model in the browser preview. */
+export function localUnavailableMessage(
+  inDesktopApp = isTauriRuntime(),
+): string {
+  return inDesktopApp
+    ? "Local transcription unavailable. Check your installed model in Settings. No audio was uploaded."
+    : "Local transcription runs in the Windows app. This browser preview did not upload any audio.";
+}
 
 export type VoiceCaptureMetadata = {
   durationMs: number;
@@ -29,7 +39,15 @@ export type TranscriptJobResult = {
   message?: string;
 };
 
-type SubmitCapturedAudioOptions = {
+export type SubmitCapturedAudioOptions = {
+  processingMode?: "local" | "cloud" | undefined;
+  modelPath?: string;
+  canUseCloud?: () => boolean;
+  signal?: AbortSignal | undefined;
+  cloudTranscriber?: (
+    audio: Blob,
+    metadata: VoiceCaptureMetadata,
+  ) => Promise<DesktopWhisperResult>;
   apiUrl?: string;
   fetchImpl?: typeof fetch;
   language?: string;
@@ -37,11 +55,35 @@ type SubmitCapturedAudioOptions = {
     audio: Blob,
     metadata: VoiceCaptureMetadata,
     language?: string,
+    modelPath?: string,
   ) => Promise<DesktopWhisperResult | undefined>;
 };
 
 const API_URL = import.meta.env?.VITE_SONOLECT_API_URL?.trim();
 const AUDIO_JOBS_PATH = "/audio/jobs";
+
+function cloudAllowed(options: SubmitCapturedAudioOptions): boolean {
+  return (
+    options.processingMode === "cloud" &&
+    !options.signal?.aborted &&
+    (options.canUseCloud?.() ?? true)
+  );
+}
+
+function guardedFetch(options: SubmitCapturedAudioOptions): typeof fetch {
+  const request = options.fetchImpl ?? fetch;
+  return (input, init) => {
+    if (!cloudAllowed(options))
+      throw new Error("Local only: cloud processing is disabled.");
+    const timeout = AbortSignal.timeout(60_000);
+    return request(input, {
+      ...init,
+      signal: options.signal
+        ? AbortSignal.any([options.signal, timeout])
+        : timeout,
+    });
+  };
+}
 
 export function isVoiceApiConfigured() {
   return Boolean(API_URL);
@@ -73,24 +115,29 @@ export async function submitCapturedAudio(
 ): Promise<TranscriptJobResult> {
   const desktopResult = await (
     options.desktopTranscriber ?? transcribeWithDesktopWhisper
-  )(audio, metadata, options.language).catch(() => undefined);
+  )(audio, metadata, options.language, options.modelPath).catch(
+    () => undefined,
+  );
   if (desktopResult) {
     return {
       status: "completed",
       transcript: desktopResult.text.trim(),
       segments: desktopResult.segments,
-      message: "Capture transcrite localement avec Whisper desktop.",
+      message: "Transcribed on this device with local Whisper.",
     };
   }
 
+  if (!cloudAllowed(options)) {
+    return offlineResult(localUnavailableMessage());
+  }
   const apiUrl = options.apiUrl ?? API_URL;
   if (!apiUrl) {
     return offlineResult(
-      "VITE_SONOLECT_API_URL absent : capture conservée localement sans envoi backend.",
+      "Online transcription is not configured. Your recording stayed on this device.",
     );
   }
 
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl = guardedFetch(options);
 
   try {
     const endpoint = new URL(AUDIO_JOBS_PATH, apiUrl).toString();
@@ -128,8 +175,8 @@ export async function submitCapturedAudio(
     const result: TranscriptJobResult = {
       status: payload.status === "completed" ? "completed" : "submitted",
       message: jobId
-        ? "Capture envoyée au backend Sonolect avec audio local."
-        : (payload.message ?? "Capture envoyée au backend Sonolect."),
+        ? "Recording sent to Sonolect for transcription."
+        : (payload.message ?? "Recording sent to Sonolect for transcription."),
     };
 
     const transcript = payload.transcriptId;
@@ -140,8 +187,8 @@ export async function submitCapturedAudio(
   } catch (error) {
     return offlineResult(
       error instanceof Error
-        ? `Backend local indisponible : capture conservée localement (${error.message}).`
-        : "Backend local indisponible : capture conservée localement.",
+        ? `Sonolect could not be reached, so your recording stayed on this device (${error.message}).`
+        : "Sonolect could not be reached, so your recording stayed on this device.",
     );
   }
 }
@@ -157,7 +204,7 @@ async function cloudTranscribe(
   apiUrl: string,
   options: SubmitCapturedAudioOptions,
 ): Promise<string> {
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl = guardedFetch(options);
   const url = new URL(TRANSCRIBE_PATH, apiUrl);
   if (options.language && options.language !== "auto") {
     url.searchParams.set("language", options.language);
@@ -184,7 +231,7 @@ async function cloudPolish(
   apiUrl: string,
   options: SubmitCapturedAudioOptions,
 ): Promise<string> {
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl = guardedFetch(options);
   const url = new URL(POLISH_PATH, apiUrl).toString();
   const response = await fetchImpl(url, {
     method: "POST",
@@ -210,18 +257,38 @@ export async function submitCapturedAudioCloud(
   metadata: VoiceCaptureMetadata,
   options: SubmitCapturedAudioOptions = {},
 ): Promise<TranscriptJobResult> {
+  if (options.cloudTranscriber && cloudAllowed(options)) {
+    try {
+      const result = await options.cloudTranscriber(audio, metadata);
+      return {
+        status: "completed",
+        transcript: result.text,
+        segments: result.segments,
+        message: "Transcribed with your selected online model.",
+      };
+    } catch (error) {
+      return offlineResult(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
   const desktopResult = await (
     options.desktopTranscriber ?? transcribeWithDesktopWhisper
-  )(audio, metadata, options.language).catch(() => undefined);
+  )(audio, metadata, options.language, options.modelPath).catch(
+    () => undefined,
+  );
   if (desktopResult) {
     return {
       status: "completed",
       transcript: desktopResult.text.trim(),
       segments: desktopResult.segments,
-      message: "Capture transcrite localement avec Whisper desktop.",
+      message: "Transcribed on this device with local Whisper.",
     };
   }
 
+  if (!cloudAllowed(options)) {
+    return offlineResult(localUnavailableMessage());
+  }
   const apiUrl = options.apiUrl ?? API_URL;
   if (apiUrl) {
     try {

@@ -10,7 +10,7 @@ const BLOCKING = new Set(["high", "critical"]);
 const EXCLUDED_IMPORTERS = ["apps/mobile"];
 
 const ACCEPTED = new Map([
-  ["GHSA-mrhx-c7xc-m3w5", "zod 3 memory exhaustion; fixed only in zod 4"],
+  // ["GHSA-xxxx-xxxx-xxxx", "reason; tracked in docs/security-scan-triage.md"],
 ]);
 
 function runAudit() {

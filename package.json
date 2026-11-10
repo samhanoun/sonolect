@@ -17,9 +17,10 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
-    "prettier": "^3.4.2",
+    "prettier": "^3.9.10",
     "turbo": "^2.11.10",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "yaml": "^2.9.1"
   },
   "pnpm": {
     "overrides": {
@@ -39,7 +40,11 @@
       "protobufjs@>=7.0.0 <7.6.5": "^7.6.5",
       "brace-expansion@>=2.0.0 <2.1.7": "^2.1.7",
       "brace-expansion@<1.1.21": "^1.1.21",
-      "fast-uri@>=3.0.0 <3.1.9": "^3.1.9"
+      "fast-uri@>=3.0.0 <3.1.9": "^3.1.9",
+      "@expo/plist>@xmldom/xmldom": "^0.8.13"
+    },
+    "patchedDependencies": {
+      "@expo/cli@0.22.28": "patches/@expo__cli@0.22.28.patch"
     }
   }
 }

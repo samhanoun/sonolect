@@ -1,9 +1,5 @@
 export type SummaryStyle =
-  | "brief"
-  | "detailed"
-  | "bullets"
-  | "action-items"
-  | "meeting-notes";
+  "brief" | "detailed" | "bullets" | "action-items" | "meeting-notes";
 
 export type SummaryResult = {
   style: SummaryStyle;

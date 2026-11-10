@@ -39,7 +39,7 @@ describe("desktop futuristic design shell", () => {
       "Transcription éditable",
       "Transformer avec Sonolect",
       "Confidentialité",
-      "Local-first",
+      "Local uniquement",
     ]) {
       assert.match(frSource, new RegExp(requiredText));
     }
@@ -52,7 +52,7 @@ describe("desktop futuristic design shell", () => {
       "Editable transcription",
       "Transform with Sonolect",
       "Privacy",
-      "Local-first",
+      "Local only",
     ]) {
       assert.match(enSource, new RegExp(requiredText));
     }

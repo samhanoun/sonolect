@@ -13,28 +13,33 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Runner selection: GitHub-hosted by default. Set the repository variable
+# LINUX_RUNNER (e.g. ["self-hosted","Linux","laptop"]) and/or WINDOWS_RUNNER
+# to a JSON label list to route jobs to self-hosted runners; delete the
+# variable to switch back. Fork PRs always stay on GitHub-hosted runners.
+
 env:
   PNPM_VERSION: 9.15.0
 
 jobs:
   quality:
     name: Quality (${{ matrix.node-version }})
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     strategy:
       fail-fast: false
       matrix:
         node-version: [22, 24]
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: ${{ env.PNPM_VERSION }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
@@ -53,18 +58,18 @@ jobs:
 
   mobile-bundle:
     name: Mobile web bundle
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: ${{ env.PNPM_VERSION }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -75,21 +80,84 @@ jobs:
       - name: Bundle the mobile app (catches Metro resolution errors)
         run: pnpm --filter @sonolect/mobile exec expo export --platform web --output-dir dist-web
 
-  desktop-e2e:
-    name: Desktop Playwright E2E
-    # Playwright 1.59 cannot install browser deps on ubuntu-latest (26.04) yet.
-    runs-on: ubuntu-24.04
+      - name: Generate native projects (catches config plugin errors)
+        run: pnpm --filter @sonolect/mobile exec expo prebuild --no-install --clean
+
+  mobile-android:
+    name: Mobile Android build
+    runs-on: instabox-medium
+    timeout-minutes: 60
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: ${{ env.PNPM_VERSION }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Java
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        # GitHub images ship the SDK; self-hosted runners may not. The action's
+        # default list includes the obsolete "tools" package, which a fresh SDK
+        # cannot install, so list what this build needs (Expo SDK 52 / RN 0.76).
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          log-accepted-android-sdk-licenses: false
+          packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;26.1.10909125 cmake;3.22.1
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate the Android project
+        run: pnpm --filter @sonolect/mobile exec expo prebuild --no-install --clean --platform android
+
+      - name: Build an installable APK
+        # The template signs release builds with the debug keystore, so this
+        # APK installs on any Android phone for testing (not for the store).
+        # arm64-v8a covers current phones and halves native compile time.
+        working-directory: apps/mobile/android
+        run: |
+          # Point Gradle at the SDK that setup-android installed (a fresh
+          # self-hosted SDK lives under $HOME), and fail early if it is missing.
+          test -d "$ANDROID_HOME/platforms/android-35" || { echo "::error::No Android SDK platform 35 under $ANDROID_HOME"; exit 1; }
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Upload the test APK
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sonolect-android-test-apk
+          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 14
+          if-no-files-found: error
+
+  desktop-e2e:
+    name: Desktop Playwright E2E
+    # Playwright 1.59 cannot install browser deps on ubuntu-latest (26.04) yet.
+    runs-on: instabox-medium
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -105,14 +173,14 @@ jobs:
 
   desktop-rust:
     name: Desktop Rust (fmt, clippy, test)
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     timeout-minutes: 30
     defaults:
       run:
         working-directory: apps/desktop/src-tauri
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -136,18 +204,18 @@ jobs:
 
   config-validation:
     name: Config validation
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: ${{ env.PNPM_VERSION }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -160,11 +228,7 @@ jobs:
           node -e "const fs=require('fs'); const cp=require('child_process'); const files=cp.execSync('git ls-files \"*.json\"',{encoding:'utf8'}).trim().split(/\n/).filter(Boolean); for (const file of files) { JSON.parse(fs.readFileSync(file,'utf8')); console.log('ok', file); }"
 
       - name: Validate YAML files
-        run: |
-          for file in $(git ls-files "*.yml" "*.yaml"); do
-            echo "validating ${file}"
-            npx --yes yaml valid < "${file}"
-          done
+        run: node scripts/validate-yaml.mjs
 
       - name: Check release readiness
         run: pnpm test:release-readiness
@@ -177,7 +241,7 @@ jobs:
 
   release-package-validation:
     name: Release package validation (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'windows-latest' && vars.WINDOWS_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.WINDOWS_RUNNER) || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -192,15 +256,15 @@ jobs:
               apps/desktop/src-tauri/target/release/bundle/**/*.exe
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: ${{ env.PNPM_VERSION }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -240,7 +304,7 @@ jobs:
           }
 
       - name: Upload package artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-${{ matrix.os }}-packages
           path: ${{ matrix.artifact_glob }}
@@ -249,16 +313,16 @@ jobs:
 
   terraform:
     name: Terraform formatting
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     defaults:
       run:
         working-directory: infra/terraform
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: 1.7.5
 
@@ -267,20 +331,20 @@ jobs:
 
   security:
     name: Dependency and secret scanning
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     steps:
       - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: ${{ env.PNPM_VERSION }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -296,6 +360,10 @@ jobs:
         run: pnpm audit --audit-level critical
 
       - name: Secret scan
-        uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # gitleaks-action downloads to $TMPDIR/gitleaks.tmp and never removes
+          # it, so on a reused (self-hosted) runner the next run fails with
+          # "already exists". The per-job runner temp dir is wiped every job.
+          TMPDIR: ${{ runner.temp }}

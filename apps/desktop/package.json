@@ -9,7 +9,7 @@
     "tauri": "tauri",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "pnpm dlx tsx@4.19.2 --test src/localDevAuth.test.ts src/transcriptHistory.test.ts src/voiceApi.test.ts src/desktopWhisper.test.ts src/whisperSetup.test.ts src/segmentEditor.test.ts src/segmentEditorUi.test.ts src/transcriptExport.test.ts src/transcriptUndo.test.ts src/persistence.test.ts src/desktopDesign.test.ts src/sttLanguage.test.ts src/features.test.ts src/waveform.test.ts src/audioPlaybackUi.test.ts src/wisprWorkflow.test.ts src/desktopNative.test.ts src/recordingStateMachine.test.ts src/floatingRecorder.test.ts src/trayIntegration.test.ts src/stylePresets.test.ts src/polishPreview.test.ts src/dictionaryCrud.test.ts src/snippetCrud.test.ts src/commandRegistry.test.ts src/onboardingWizard.test.ts src/searchAndFilter.test.ts src/retentionControls.test.ts src/tauriWindowManager.test.ts src/platformPermissions.test.ts src/audioFixtures.test.ts src/streamingTranscription.test.ts src/realtimeMeetingController.test.ts src/documentParser.test.ts src/voiceCatalog.test.ts src/ttsEngine.test.ts src/aiSummary.test.ts src/voiceCommands.test.ts src/voiceCommandIntegration.test.ts src/contextSpelling.test.ts src/audioPreprocessing.test.ts src/teamCollaboration.test.ts src/systemAudioCapture.test.ts src/liveMeetingPipeline.test.ts src/meetingExport.test.ts src/speakerDiarization.test.ts src/readerStore.test.ts src/sttLanguages.test.ts src/meetingMode.test.ts src/vad.test.ts src/i18n.test.ts src/voicePipeline.test.ts src/meetingPipeline.test.ts src/voiceApiCloud.test.ts",
+    "test": "tsx --test src/*.test.ts",
     "e2e": "playwright test -c playwright.config.ts"
   },
   "dependencies": {
@@ -18,8 +18,8 @@
     "@supabase/supabase-js": "^2.105.4",
     "@tailwindcss/vite": "^4",
     "@tanstack/react-query": "^5.62.7",
-    "@tauri-apps/api": "^2.2.0",
-    "@tauri-apps/plugin-global-shortcut": "^2.2.0",
+    "@tauri-apps/api": "^2.12.0",
+    "@tauri-apps/plugin-global-shortcut": "^2.4.1",
     "framer-motion": "^11.15.0",
     "lucide-react": "^0.546",
     "mammoth": "^1.13.0",
@@ -30,12 +30,13 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
-    "@playwright/test": "^1.49.1",
-    "@tauri-apps/cli": "^2.2.0",
+    "@playwright/test": "^1.64.1",
+    "@tauri-apps/cli": "^2.12.4",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^4.3.4",
-    "tailwindcss": "^4.3.1",
+    "tailwindcss": "^4.3.4",
+    "tsx": "4.23.15",
     "vite": "^6.4.5"
   }
 }

@@ -96,13 +96,18 @@ await writeFile(
   "utf8",
 );
 
-const successCommand = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(
+const successCommandArgs = [
+  process.execPath,
+  "-e",
   "const path = require('node:path'); const [audioPath, mimeType, language] = process.argv.slice(1); console.log('Offline transcript for ' + path.basename(audioPath) + ' in ' + language + ' from ' + mimeType + '.');",
-)} {audioPath} {mimeType} {language}`;
+  "{audioPath}",
+  "{mimeType}",
+  "{language}",
+];
 
 const processed = await processNextQueuedAudioJob({
   storePath,
-  localSttCommand: successCommand,
+  localSttCommandArgs: successCommandArgs,
 });
 assert.equal(processed?.job.id, "job-queued");
 assert.equal(processed?.job.status, "completed");
@@ -197,12 +202,15 @@ afterFailure.audioJobs.push(commandFailureJob);
 afterFailure.transcripts.push(commandFailureTranscript);
 await writeFile(storePath, JSON.stringify(afterFailure, null, 2), "utf8");
 
-const failureCommand = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(
+const failureCommandArgs = [
+  process.execPath,
+  "-e",
   "console.error('offline stt exploded'); process.exit(7);",
-)} {audioPath}`;
+  "{audioPath}",
+];
 const commandFailed = await processNextQueuedAudioJob({
   storePath,
-  localSttCommand: failureCommand,
+  localSttCommandArgs: failureCommandArgs,
 });
 assert.equal(commandFailed?.job.id, "job-command-failure");
 assert.equal(commandFailed?.job.status, "failed");
@@ -359,7 +367,7 @@ await writeFile(
 
 const none = await processNextQueuedAudioJob({
   storePath,
-  localSttCommand: successCommand,
+  localSttCommandArgs: successCommandArgs,
 });
 assert.equal(none, undefined);
 
