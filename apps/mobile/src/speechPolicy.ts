@@ -46,6 +46,11 @@ export interface RecognitionPlan {
   blockedReason?: BlockedReason;
   canDownloadModel: boolean;
   badge: RecognitionBadge;
+  /**
+   * The recognizer ends on its own before the user is done, so the capture
+   * loop starts it again (see captureLoop.ts and restartsOnEnd).
+   */
+  restartOnEnd: boolean;
 }
 
 /** getSupportedLocales has no timeout on Android, and some services hang. */
@@ -58,29 +63,58 @@ export const DOWNLOAD_TIMEOUT_MS = 120_000;
  * EXTRA_PREFER_OFFLINE, which the service may ignore.
  */
 export const ANDROID_ON_DEVICE_MIN_API = 33;
+/**
+ * expo-speech-recognition runs continuous Android sessions only from API 33
+ * (supportsRecording()). Below it 'continuous' is ignored and the recognizer
+ * ends at the first pause.
+ */
+export const ANDROID_CONTINUOUS_MIN_API = 33;
 
 export function serviceBadge(platform: RecognitionPlatform): RecognitionBadge {
   return platform === "ios" ? "apple-service" : "system-service";
 }
 
+/**
+ * Whether a session on this route ends before the user is done, so the
+ * capture loop starts it again: below Android 13 (no continuous mode), and
+ * with Apple's server recognizer, which ends after about a minute. On-device
+ * iOS sessions and Android 13+ sessions keep going on their own.
+ */
+export function restartsOnEnd(
+  platform: RecognitionPlatform,
+  osVersion: number,
+  route: RecognitionRoute,
+): boolean {
+  if (route === "blocked") return false;
+  if (platform === "android") return osVersion < ANDROID_CONTINUOUS_MIN_API;
+  if (platform === "ios") return route === "system-service";
+  return false;
+}
+
 /** The plan for a dictation that uses the system speech service. */
 export function systemServicePlan(
   platform: RecognitionPlatform,
+  osVersion: number,
 ): RecognitionPlan {
   return {
     route: "system-service",
     requiresOnDevice: false,
     canDownloadModel: false,
     badge: serviceBadge(platform),
+    restartOnEnd: restartsOnEnd(platform, osVersion, "system-service"),
   };
 }
 
-function onDevicePlan(): RecognitionPlan {
+function onDevicePlan(
+  platform: RecognitionPlatform,
+  osVersion: number,
+): RecognitionPlan {
   return {
     route: "on-device",
     requiresOnDevice: true,
     canDownloadModel: false,
     badge: "on-device",
+    restartOnEnd: restartsOnEnd(platform, osVersion, "on-device"),
   };
 }
 
@@ -99,6 +133,7 @@ function blockedPlan(
     blockedReason,
     canDownloadModel: blockedReason === "model-missing",
     badge: serviceBadge(platform),
+    restartOnEnd: false,
   };
 }
 
@@ -112,36 +147,38 @@ function blockedPlan(
  *    service with consent, or blocked so the pack can be downloaded;
  * 4. iOS when the dictation locale itself supports on-device recognition;
  * 5. anything else: the system service with consent, otherwise blocked.
+ * restartOnEnd follows the route (restartsOnEnd); a blocked plan never runs.
  */
 export function planRecognition(input: PlanInput): RecognitionPlan {
+  const { platform, osVersion } = input;
   const consented = input.allowSystemService || input.consentOnce;
   if (!input.recognitionAvailable) {
-    return blockedPlan(input.platform, "unavailable");
+    return blockedPlan(platform, "unavailable");
   }
   if (input.privacyLevel === "standard") {
-    return systemServicePlan(input.platform);
+    return systemServicePlan(platform, osVersion);
   }
   if (
-    input.platform === "android" &&
-    input.osVersion >= ANDROID_ON_DEVICE_MIN_API &&
+    platform === "android" &&
+    osVersion >= ANDROID_ON_DEVICE_MIN_API &&
     input.onDeviceService
   ) {
     if (
       input.installedLocales === null ||
       localeMatches(input.language, input.installedLocales)
     ) {
-      return onDevicePlan();
+      return onDevicePlan(platform, osVersion);
     }
     return consented
-      ? systemServicePlan(input.platform)
-      : blockedPlan(input.platform, "model-missing");
+      ? systemServicePlan(platform, osVersion)
+      : blockedPlan(platform, "model-missing");
   }
-  if (input.platform === "ios" && input.localeOnDevice === true) {
-    return onDevicePlan();
+  if (platform === "ios" && input.localeOnDevice === true) {
+    return onDevicePlan(platform, osVersion);
   }
   return consented
-    ? systemServicePlan(input.platform)
-    : blockedPlan(input.platform, "needs-consent");
+    ? systemServicePlan(platform, osVersion)
+    : blockedPlan(platform, "needs-consent");
 }
 
 function normalizeTag(tag: string): string {
@@ -333,6 +370,17 @@ export class TranscriptAccumulator {
     } else {
       this.interim = clean;
     }
+    return this.text();
+  }
+
+  /**
+   * Keeps the live text as a finalised segment. Called before the recognizer
+   * starts again: a session that ended without a final result would
+   * otherwise lose it to the next session's first result.
+   */
+  commitInterim(): string {
+    if (this.interim) this.committed.push(this.interim);
+    this.interim = "";
     return this.text();
   }
 

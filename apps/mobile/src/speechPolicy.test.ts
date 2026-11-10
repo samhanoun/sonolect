@@ -10,8 +10,10 @@ import type {
   RecognitionPlatform,
 } from "./speechPolicy";
 import {
+  ANDROID_CONTINUOUS_MIN_API,
   DOWNLOAD_TIMEOUT_MS,
   LOCALES_TIMEOUT_MS,
+  TranscriptAccumulator,
   blockedNoticeKind,
   classifySpeechError,
   downloadNoticeKind,
@@ -19,6 +21,7 @@ import {
   mapDownloadOutcome,
   permissionNoticeKind,
   planRecognition,
+  restartsOnEnd,
   shouldRetryWithSystemService,
   systemServicePlan,
 } from "./speechPolicy";
@@ -45,6 +48,7 @@ describe("planRecognition", () => {
       requiresOnDevice: false,
       canDownloadModel: false,
       badge: "system-service",
+      restartOnEnd: false,
     });
     const ios = planRecognition(
       input({ platform: "ios", osVersion: 17, privacyLevel: "standard" }),
@@ -71,6 +75,7 @@ describe("planRecognition", () => {
       requiresOnDevice: true,
       canDownloadModel: false,
       badge: "on-device",
+      restartOnEnd: false,
     });
     assert.equal(
       planRecognition(input({ installedLocales: ["fr_fr"] })).route,
@@ -252,23 +257,128 @@ describe("planRecognition", () => {
                         plan.route === "on-device",
                         label,
                       );
+                      // Restarts only where sessions end on their own.
+                      assert.equal(
+                        plan.restartOnEnd,
+                        plan.route !== "blocked" &&
+                          ((platform === "android" && osVersion < 33) ||
+                            (platform === "ios" &&
+                              plan.route === "system-service")),
+                        label,
+                      );
                     }
     assert.equal(cases, 3 * 8 * 3 * 3 * 2 * 2 * 2 * 3 * 2);
   });
 
   it("builds the plan a session switches to after consent", () => {
-    assert.deepEqual(systemServicePlan("ios"), {
+    assert.deepEqual(systemServicePlan("ios", 17), {
       route: "system-service",
       requiresOnDevice: false,
       canDownloadModel: false,
       badge: "apple-service",
+      restartOnEnd: true,
     });
-    assert.equal(systemServicePlan("android").badge, "system-service");
+    assert.equal(systemServicePlan("android", 34).badge, "system-service");
+    assert.equal(systemServicePlan("android", 34).restartOnEnd, false);
+  });
+
+  it("restarts on end below Android 13 and with Apple's server recognizer", () => {
+    // Android 32: no on-device route, so the service, in Standard or with
+    // consent.
+    for (const overrides of [
+      { privacyLevel: "standard" as const },
+      { consentOnce: true },
+    ]) {
+      const plan = planRecognition(
+        input({ osVersion: 32, installedLocales: null, ...overrides }),
+      );
+      assert.equal(plan.route, "system-service");
+      assert.equal(plan.restartOnEnd, true);
+    }
+    // Android 34, both routes: continuous mode is native.
+    const onDevice = planRecognition(input({ osVersion: 34 }));
+    assert.equal(onDevice.route, "on-device");
+    assert.equal(onDevice.restartOnEnd, false);
+    const service = planRecognition(
+      input({ osVersion: 34, privacyLevel: "standard" }),
+    );
+    assert.equal(service.route, "system-service");
+    assert.equal(service.restartOnEnd, false);
+    // iOS: Apple's server sessions end after about a minute; on-device
+    // sessions do not.
+    const iosService = planRecognition(
+      input({ platform: "ios", osVersion: 17, privacyLevel: "standard" }),
+    );
+    assert.equal(iosService.route, "system-service");
+    assert.equal(iosService.restartOnEnd, true);
+    const iosOnDevice = planRecognition(
+      input({ platform: "ios", osVersion: 17, localeOnDevice: true }),
+    );
+    assert.equal(iosOnDevice.route, "on-device");
+    assert.equal(iosOnDevice.restartOnEnd, false);
+    // A blocked plan never runs.
+    assert.equal(
+      planRecognition(input({ installedLocales: ["en-US"] })).restartOnEnd,
+      false,
+    );
+  });
+
+  it("follows expo-speech-recognition's continuous-mode threshold", () => {
+    assert.equal(ANDROID_CONTINUOUS_MIN_API, 33);
+    assert.equal(restartsOnEnd("android", 32, "system-service"), true);
+    assert.equal(restartsOnEnd("android", 33, "system-service"), false);
+    assert.equal(restartsOnEnd("android", 33, "on-device"), false);
+    assert.equal(restartsOnEnd("ios", 26, "system-service"), true);
+    assert.equal(restartsOnEnd("ios", 26, "on-device"), false);
+    assert.equal(restartsOnEnd("web", 0, "system-service"), false);
+    assert.equal(restartsOnEnd("android", 30, "blocked"), false);
   });
 
   it("caps the waits", () => {
     assert.equal(LOCALES_TIMEOUT_MS, 1_500);
     assert.equal(DOWNLOAD_TIMEOUT_MS, 120_000);
+  });
+});
+
+describe("TranscriptAccumulator", () => {
+  it("joins final segments and the live one", () => {
+    const accumulator = new TranscriptAccumulator();
+    assert.equal(accumulator.push("hello", false), "hello");
+    assert.equal(accumulator.push("hello world", true), "hello world");
+    assert.equal(accumulator.push("how", false), "hello world how");
+    assert.equal(
+      accumulator.push(" how are you ", true),
+      "hello world how are you",
+    );
+  });
+
+  it("commitInterim keeps the interim text across a simulated restart", () => {
+    const accumulator = new TranscriptAccumulator();
+    accumulator.push("first sentence", true);
+    accumulator.push("second sen", false);
+    // The session ends without a final result.
+    assert.equal(accumulator.commitInterim(), "first sentence second sen");
+    // The next session's results start from nothing.
+    assert.equal(
+      accumulator.push("third", false),
+      "first sentence second sen third",
+    );
+    // A later final result appends rather than replaces.
+    assert.equal(
+      accumulator.push("third part", true),
+      "first sentence second sen third part",
+    );
+    assert.equal(accumulator.text(), "first sentence second sen third part");
+  });
+
+  it("commitInterim adds nothing when there is no interim text", () => {
+    const accumulator = new TranscriptAccumulator();
+    assert.equal(accumulator.commitInterim(), "");
+    accumulator.push("only final", true);
+    assert.equal(accumulator.commitInterim(), "only final");
+    assert.equal(accumulator.commitInterim(), "only final");
+    accumulator.push("   ", false);
+    assert.equal(accumulator.commitInterim(), "only final");
   });
 });
 

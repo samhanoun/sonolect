@@ -24,6 +24,13 @@ const en = {
     speak: "Speak",
     done: "Done",
     cancel: "Cancel",
+    discardTitle: "Discard this dictation?",
+    discard: "Discard",
+    keepDictating: "Keep dictating",
+    a11yStarted: "Dictation started",
+    a11yStopped: "Dictation stopped",
+    a11yResult: "Transcript ready.",
+    liveTranscript: "Live transcript",
     hint: "Tap the mic and talk. Sonolect transcribes and cleans it up.",
     noSpeech: "No speech was detected. Try again a little closer to the mic.",
     unavailable:
@@ -80,6 +87,10 @@ const en = {
         "The speech service refused the request. Check that dictation is enabled in your phone's settings, then try again.",
       startFailed: "Sonolect couldn't start listening. Try again.",
       generic: "Speech recognition stopped unexpectedly. Try again.",
+      backgrounded:
+        "Dictation stopped when Sonolect left the screen. Your text so far was kept.",
+      maxDuration:
+        "Dictation stopped after 10 minutes. Tap the mic to continue.",
     },
     actions: {
       downloadModel: "Download language",
@@ -240,6 +251,13 @@ const fr: Strings = {
     speak: "Parler",
     done: "Terminer",
     cancel: "Annuler",
+    discardTitle: "Supprimer cette dictée ?",
+    discard: "Supprimer",
+    keepDictating: "Continuer la dictée",
+    a11yStarted: "Dictée démarrée",
+    a11yStopped: "Dictée arrêtée",
+    a11yResult: "Transcription prête.",
+    liveTranscript: "Transcription en direct",
     hint: "Touchez le micro et parlez. Sonolect transcrit et nettoie le texte.",
     noSpeech: "Aucune parole détectée. Réessayez plus près du micro.",
     unavailable:
@@ -298,6 +316,10 @@ const fr: Strings = {
       startFailed: "Sonolect n'a pas pu démarrer l'écoute. Réessayez.",
       generic:
         "La reconnaissance vocale s'est arrêtée de façon inattendue. Réessayez.",
+      backgrounded:
+        "La dictée s'est arrêtée quand Sonolect a quitté l'écran. Le texte déjà dicté a été conservé.",
+      maxDuration:
+        "La dictée s'est arrêtée après 10 minutes. Touchez le micro pour continuer.",
     },
     actions: {
       downloadModel: "Télécharger la langue",

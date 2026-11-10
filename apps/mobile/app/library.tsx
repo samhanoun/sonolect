@@ -1,8 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  Alert,
   FlatList,
-  Platform,
   Share,
   StyleSheet,
   Text,
@@ -25,31 +23,10 @@ import {
 } from "../src/library";
 import { useCompanionStore } from "../src/store";
 import { Button, Card, Chip, Icon, Label, Title } from "../src/ui/components";
+import { confirm } from "../src/ui/confirm";
 import { colors, fonts, modeColor, radius, space } from "../src/ui/theme";
 
 const FILTERS: LibraryFilter[] = ["all", "pinned", "summaries", "tasks"];
-
-function confirm(
-  message: string,
-  confirmLabel: string,
-  cancelLabel: string,
-): Promise<boolean> {
-  if (Platform.OS === "web") {
-    return Promise.resolve(
-      typeof window !== "undefined" ? window.confirm(message) : false,
-    );
-  }
-  return new Promise((resolve) => {
-    Alert.alert(message, undefined, [
-      { text: cancelLabel, style: "cancel", onPress: () => resolve(false) },
-      {
-        text: confirmLabel,
-        style: "destructive",
-        onPress: () => resolve(true),
-      },
-    ]);
-  });
-}
 
 function timeLabel(iso: string, locale: string): string {
   const date = new Date(iso);
@@ -156,11 +133,12 @@ export default function LibraryScreen() {
             accessibilityLabel={t.library.delete}
             onPress={async () => {
               if (
-                await confirm(
-                  t.library.deleteConfirm,
-                  t.library.delete,
-                  t.common.cancel,
-                )
+                await confirm({
+                  title: t.library.deleteConfirm,
+                  confirmLabel: t.library.delete,
+                  cancelLabel: t.common.cancel,
+                  destructive: true,
+                })
               ) {
                 await deleteTurn(item.id);
               }

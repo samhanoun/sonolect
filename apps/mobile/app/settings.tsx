@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -25,29 +24,8 @@ import {
   Title,
   ToggleRow,
 } from "../src/ui/components";
+import { confirm } from "../src/ui/confirm";
 import { colors, fonts, radius, space } from "../src/ui/theme";
-
-function confirm(
-  message: string,
-  confirmLabel: string,
-  cancelLabel: string,
-): Promise<boolean> {
-  if (Platform.OS === "web") {
-    return Promise.resolve(
-      typeof window !== "undefined" ? window.confirm(message) : false,
-    );
-  }
-  return new Promise((resolve) => {
-    Alert.alert(message, undefined, [
-      { text: cancelLabel, style: "cancel", onPress: () => resolve(false) },
-      {
-        text: confirmLabel,
-        style: "destructive",
-        onPress: () => resolve(true),
-      },
-    ]);
-  });
-}
 
 type TestState = "idle" | "testing" | "ok" | "fail";
 
@@ -384,11 +362,12 @@ export default function SettingsScreen() {
                 label={t.settings.clearHistory}
                 onPress={async () => {
                   if (
-                    await confirm(
-                      t.settings.clearHistory,
-                      t.common.confirm,
-                      t.common.cancel,
-                    )
+                    await confirm({
+                      title: t.settings.clearHistory,
+                      confirmLabel: t.common.confirm,
+                      cancelLabel: t.common.cancel,
+                      destructive: true,
+                    })
                   )
                     await clearHistory();
                 }}
@@ -398,11 +377,12 @@ export default function SettingsScreen() {
                 label={t.settings.eraseAll}
                 onPress={async () => {
                   if (
-                    await confirm(
-                      t.settings.eraseConfirm,
-                      t.common.confirm,
-                      t.common.cancel,
-                    )
+                    await confirm({
+                      title: t.settings.eraseConfirm,
+                      confirmLabel: t.common.confirm,
+                      cancelLabel: t.common.cancel,
+                      destructive: true,
+                    })
                   ) {
                     await eraseAll();
                     setUrl("");

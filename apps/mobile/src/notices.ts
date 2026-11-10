@@ -26,6 +26,9 @@ export const NOTICE_KINDS = [
   "audioCapture",
   "interrupted",
   "serviceNotAllowed",
+  // The capture loop's own ends (WP3).
+  "backgrounded",
+  "maxDuration",
   "startFailed",
   "generic",
   // Dormant API refine path (Rewrite/Reply without the API).
@@ -80,6 +83,8 @@ const DEFAULT_ACTIONS: Record<NoticeKind, readonly NoticeAction[]> = {
   audioCapture: ["dismiss"],
   interrupted: ["dismiss"],
   serviceNotAllowed: ["dismiss"],
+  backgrounded: ["dismiss"],
+  maxDuration: ["dismiss"],
   startFailed: ["dismiss"],
   generic: ["dismiss"],
   needsModel: ["dismiss"],
@@ -127,6 +132,8 @@ const TEXT: Record<NoticeKind, (t: Strings, language: string) => string> = {
   audioCapture: (t) => t.capture.notices.audioCapture,
   interrupted: (t) => t.capture.notices.interrupted,
   serviceNotAllowed: (t) => t.capture.notices.serviceNotAllowed,
+  backgrounded: (t) => t.capture.notices.backgrounded,
+  maxDuration: (t) => t.capture.notices.maxDuration,
   startFailed: (t) => t.capture.notices.startFailed,
   generic: (t) => t.capture.notices.generic,
   needsModel: (t) => t.capture.needsModel,

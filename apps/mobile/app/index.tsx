@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
+  BackHandler,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -9,9 +11,11 @@ import {
   Text,
   TextInput,
   View,
+  type ScrollViewInstance,
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
+import { useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { apiConfig, availableRefinementModes } from "../src/features";
@@ -29,6 +33,7 @@ import {
   MicOrb,
   Waveform,
 } from "../src/ui/components";
+import { confirm } from "../src/ui/confirm";
 import { colors, fonts, modeColor, radius, space } from "../src/ui/theme";
 import { useRecognitionPlan } from "../src/useRecognitionPlan";
 
@@ -37,6 +42,9 @@ function openAppSettings() {
   if (typeof Linking.openSettings !== "function") return;
   void Linking.openSettings().catch(() => undefined);
 }
+
+/** Cancel asks first once a dictation is longer than this. */
+const CONFIRM_CANCEL_AFTER_MS = 15_000;
 
 export default function CaptureScreen() {
   const settings = useCompanionStore((s) => s.settings);
@@ -69,9 +77,17 @@ export default function CaptureScreen() {
   const [copied, setCopied] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [asking, setAsking] = useState(false);
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const liveRef = useRef<ScrollViewInstance>(null);
+  /** The typing card's y in the screen's ScrollView, once laid out. */
+  const typingY = useRef<number | null>(null);
+  /** The typing card scrolls into view once it is laid out. */
+  const scrollToTyping = useRef(false);
+  const announcedStatus = useRef(capture.status);
 
   const listening = capture.status === "listening";
   const processing = capture.status === "processing";
+  const ready = capture.status === "ready";
   const capturing = listening || processing;
   // The plan in use while dictating (it can switch to the speech service
   // after consent), otherwise the plan the next dictation would follow.
@@ -89,9 +105,67 @@ export default function CaptureScreen() {
     return () => clearInterval(timer);
   }, [listening, capture.startedAt]);
 
+  /** Not scrollToEnd: REFINE LATEST comes after the typing card. */
+  const scrollToTypingCard = (): boolean => {
+    const y = typingY.current;
+    if (y === null) return false;
+    scrollRef.current?.scrollTo({
+      y: Math.max(0, y - space.md),
+      animated: true,
+    });
+    return true;
+  };
+
+  const openTyping = () => {
+    if (typing && scrollToTypingCard()) return;
+    scrollToTyping.current = true;
+    setTyping(true);
+  };
+
+  // This phone can't dictate: typing is the way in.
   useEffect(() => {
-    if (notice?.kind === "unavailable") setTyping(true);
+    if (notice?.kind === "unavailable") openTyping();
   }, [notice]);
+
+  // The typing card is hidden while dictating; closing it keeps its focus
+  // (and the keyboard) from coming back when the dictation ends.
+  useEffect(() => {
+    if (listening) setTyping(false);
+  }, [listening]);
+
+  // Screen readers hear each change once instead of every partial result.
+  useEffect(() => {
+    const previous = announcedStatus.current;
+    announcedStatus.current = capture.status;
+    if (previous === capture.status) return;
+    if (capture.status === "listening") {
+      AccessibilityInfo.announceForAccessibility(t.capture.a11yStarted);
+    } else if (capture.status === "processing") {
+      AccessibilityInfo.announceForAccessibility(t.capture.a11yStopped);
+    } else if (capture.status === "ready" && latest) {
+      AccessibilityInfo.announceForAccessibility(
+        `${t.capture.a11yResult} ${latest.refinedText.slice(0, 300)}`,
+      );
+    }
+  }, [capture.status, latest, t]);
+
+  // Android Back while dictating stops it and keeps the text, instead of
+  // leaving the screen with the microphone on.
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== "android") return undefined;
+      const subscription = BackHandler.addEventListener(
+        "hardwareBackPress",
+        () => {
+          const state = useCompanionStore.getState();
+          if (state.capture.status !== "listening") return false;
+          state.stopCapture();
+          return true;
+        },
+      );
+      return () => subscription.remove();
+    }, []),
+  );
 
   const haptic = () => {
     if (settings.hapticsEnabled && Platform.OS !== "web") {
@@ -105,6 +179,25 @@ export default function CaptureScreen() {
     haptic();
     if (listening) stopCapture();
     else void startCapture();
+  };
+
+  // Dictation keeps running while the dialog is open.
+  const onCancel = async () => {
+    const { id, startedAt } = capture;
+    const ranMs = startedAt ? Date.now() - Date.parse(startedAt) : 0;
+    if (ranMs > CONFIRM_CANCEL_AFTER_MS) {
+      const discard = await confirm({
+        title: t.capture.discardTitle,
+        confirmLabel: t.capture.discard,
+        cancelLabel: t.capture.keepDictating,
+        destructive: true,
+      });
+      if (!discard) return;
+      // It may have ended, and been saved, while the dialog was open.
+      const current = useCompanionStore.getState().capture;
+      if (current.id !== id || current.status !== "listening") return;
+    }
+    cancelCapture();
   };
 
   const statusLabel = listening
@@ -154,7 +247,7 @@ export default function CaptureScreen() {
         openAppSettings();
         break;
       case "typeInstead":
-        setTyping(true);
+        openTyping();
         dismissNotice();
         break;
       case "dismiss":
@@ -180,7 +273,12 @@ export default function CaptureScreen() {
     }
   };
 
-  const liveText = listening || processing ? capture.partialTranscript : "";
+  // partialTranscript goes stale after a refine, a delete or a clear.
+  const liveText = capturing
+    ? capture.partialTranscript
+    : ready && latest
+      ? latest.refinedText
+      : "";
 
   const copyLatest = async () => {
     if (!latest) return;
@@ -198,6 +296,7 @@ export default function CaptureScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={styles.container}
           keyboardShouldPersistTaps="handled"
         >
@@ -285,18 +384,42 @@ export default function CaptureScreen() {
               }
             />
             <Waveform level={level} active={listening} />
-            <Text style={styles.live} accessibilityLiveRegion="polite">
-              {liveText || (listening ? "" : t.capture.hint)}
-              {listening ? <Text style={{ color: colors.lime }}>▍</Text> : null}
-            </Text>
+            <ScrollView
+              ref={liveRef}
+              style={styles.liveScroll}
+              contentContainerStyle={styles.liveContent}
+              nestedScrollEnabled
+              accessibilityLabel={t.capture.liveTranscript}
+              onContentSizeChange={() =>
+                liveRef.current?.scrollToEnd({ animated: false })
+              }
+            >
+              <View style={styles.liveRow}>
+                <Text style={styles.live} numberOfLines={ready ? 4 : undefined}>
+                  {liveText || (listening ? "" : t.capture.hint)}
+                </Text>
+                {listening ? (
+                  // A nested Text would be read as part of the transcript.
+                  <View
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                  >
+                    <Text style={[styles.live, styles.cursor]}>▍</Text>
+                  </View>
+                ) : null}
+              </View>
+            </ScrollView>
             {listening ? (
-              <Button label={t.capture.cancel} onPress={cancelCapture} />
+              <Button
+                label={t.capture.cancel}
+                onPress={() => void onCancel()}
+              />
             ) : (
               <Button
                 icon="keyboard"
                 label={t.capture.typeInstead}
                 variant="ghost"
-                onPress={() => setTyping((value) => !value)}
+                onPress={() => (typing ? setTyping(false) : openTyping())}
               />
             )}
             {serviceNote ? (
@@ -308,27 +431,37 @@ export default function CaptureScreen() {
           </View>
 
           {typing && !listening ? (
-            <Card>
-              <TextInput
-                accessibilityLabel={t.capture.typePlaceholder}
-                multiline
-                value={draft}
-                onChangeText={setDraft}
-                placeholder={t.capture.typePlaceholder}
-                placeholderTextColor={colors.muted}
-                style={styles.input}
-              />
-              <Button
-                variant="primary"
-                label={t.capture.saveTyped}
-                disabled={!draft.trim()}
-                onPress={async () => {
-                  await saveTyped(draft);
-                  setDraft("");
-                  setTyping(false);
-                }}
-              />
-            </Card>
+            <View
+              onLayout={(event) => {
+                typingY.current = event.nativeEvent.layout.y;
+                if (!scrollToTyping.current) return;
+                scrollToTyping.current = false;
+                scrollToTypingCard();
+              }}
+            >
+              <Card>
+                <TextInput
+                  autoFocus
+                  accessibilityLabel={t.capture.typePlaceholder}
+                  multiline
+                  value={draft}
+                  onChangeText={setDraft}
+                  placeholder={t.capture.typePlaceholder}
+                  placeholderTextColor={colors.muted}
+                  style={styles.input}
+                />
+                <Button
+                  variant="primary"
+                  label={t.capture.saveTyped}
+                  disabled={!draft.trim()}
+                  onPress={async () => {
+                    await saveTyped(draft);
+                    setDraft("");
+                    setTyping(false);
+                  }}
+                />
+              </Card>
+            </View>
           ) : null}
 
           <View style={styles.section}>
@@ -430,15 +563,18 @@ const styles = StyleSheet.create({
   },
   stage: { alignItems: "center", gap: space.lg, paddingVertical: space.sm },
   status: { fontSize: 12, letterSpacing: 2 },
+  liveScroll: { alignSelf: "stretch", maxHeight: 160 },
+  liveContent: { alignItems: "center", minHeight: 52 },
+  liveRow: { flexDirection: "row", alignItems: "flex-end", maxWidth: 330 },
   live: {
+    flexShrink: 1,
     fontFamily: fonts.body,
     fontSize: 17,
     lineHeight: 26,
     color: colors.text,
     textAlign: "center",
-    minHeight: 52,
-    maxWidth: 330,
   },
+  cursor: { flexShrink: 0, color: colors.lime },
   noteSmall: {
     fontFamily: fonts.body,
     fontSize: 13,

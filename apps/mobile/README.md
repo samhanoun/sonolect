@@ -11,6 +11,14 @@ Studio palette (forest `#1F3429`, lime `#DDF39A`).
   Android SpeechRecognizer). With privacy set to _Local first_ or _Ephemeral_,
   the app asks for on-device recognition; when the phone can't do that, the
   capture screen says the system speech service is used.
+- **Long dictations**: below Android 13 the recognizer ends at every pause,
+  and Apple's server recognizer ends after about a minute. The capture loop
+  (`src/captureLoop.ts`) starts it again and keeps all the text, until Done,
+  an error, 10 minutes or about 9 seconds without speech. Below Android 13,
+  expect the system start and stop sound at each restart: the workaround in
+  the `expo-speech-recognition` README only works on Android 13+. The screen
+  stays on while dictating; leaving the app stops the dictation and keeps
+  its text.
 - **Refinement** runs locally (filler removal, casing, dictionary, snippets,
   summary, task list). _Rewrite_ and _Reply_ need a model on the Sonolect API
   (`/v1/polish`), so the phone-only build does not offer them. The app never

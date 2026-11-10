@@ -1,3 +1,4 @@
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { AppState } from "react-native";
 import { create } from "zustand";
 
@@ -24,7 +25,7 @@ import {
   refineWithApi,
   syncQueuedTranscriptTurns,
 } from "./localApi";
-import type { Notice } from "./notices";
+import type { Notice, NoticeKind } from "./notices";
 import { noticeFor } from "./notices";
 import {
   cleanTranscript,
@@ -115,12 +116,31 @@ const idleCapture: CaptureSession = {
 let activeSession: SpeechSession | null = null;
 /** Set while a start reads the device and asks for permissions. */
 let starting = false;
+/** hydrate registered the AppState listener. */
+let watchingAppState = false;
+/** The dictation that stopped because the app went to the background. */
+let backgroundStopId: string | null = null;
 
-// A language pack installed in the system settings, or a recognizer changed
-// there, shows up when the app comes back to the foreground.
-AppState.addEventListener("change", (state) => {
-  if (state === "active") invalidateRecognitionEnvironment();
-});
+const KEEP_AWAKE_TAG = "sonolect-dictation";
+let keptAwake = false;
+let keepAwakeQueue: Promise<void> = Promise.resolve();
+
+/**
+ * Keeps the screen on while dictating: a screen that turns off sends the app
+ * to the background, where the microphone stops. The calls are queued so a
+ * release never lands before the activation it follows.
+ */
+function keepScreenAwake(on: boolean): void {
+  if (keptAwake === on) return;
+  keptAwake = on;
+  keepAwakeQueue = keepAwakeQueue
+    .then(() =>
+      on
+        ? activateKeepAwakeAsync(KEEP_AWAKE_TAG)
+        : deactivateKeepAwake(KEEP_AWAKE_TAG),
+    )
+    .catch(() => undefined);
+}
 
 function keepsHistory(settings: CompanionSettings): boolean {
   return settings.saveHistory && settings.privacyLevel !== "ephemeral";
@@ -228,6 +248,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       consentOnce,
     });
     if (plan.route === "blocked") {
+      keepScreenAwake(false);
       set({
         capture: idleCapture,
         level: 0,
@@ -244,6 +265,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     });
     const deniedKind = permissionNoticeKind(permission);
     if (deniedKind) {
+      keepScreenAwake(false);
       set({
         capture: { ...idleCapture, status: "error" },
         level: 0,
@@ -254,6 +276,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
 
     const startedAt = new Date().toISOString();
     const captureId = createId("capture");
+    backgroundStopId = null;
     set({
       notice: null,
       level: 0,
@@ -266,8 +289,12 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         partialTranscript: "",
       },
     });
+    keepScreenAwake(true);
 
-    const session = startSpeechSession(
+    // Assigned once the session exists; its handlers only run after that.
+    let session: SpeechSession | null = null;
+    let ended = false;
+    session = startSpeechSession(
       {
         language,
         plan,
@@ -305,16 +332,30 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         },
         onRouteChange: () => {
           if (get().capture.id === captureId) {
-            set({ plan: systemServicePlan(platform) });
+            set({
+              plan: systemServicePlan(platform, environment.osVersion),
+            });
           }
         },
-        onEnd: async ({ text, audio }) => {
+        onEnd: async ({ text, audio, notice: endNotice }) => {
+          ended = true;
           if (activeSession === session) activeSession = null;
           const capture = get().capture;
           if (capture.id !== captureId) return;
+          keepScreenAwake(false);
+          const backgrounded = backgroundStopId === captureId;
+          if (backgrounded) backgroundStopId = null;
+          // Leaving the screen explains the end better than the error it
+          // may have caused, such as an iOS interruption.
+          const endKind: NoticeKind | undefined = backgrounded
+            ? "backgrounded"
+            : endNotice;
           set({
             level: 0,
             capture: { ...capture, status: "processing" },
+            ...(endKind && get().notice?.kind !== endKind
+              ? { notice: noticeFor(endKind, language) }
+              : {}),
           });
           const state = get();
           const turn = await stopCaptureWithAudio({
@@ -332,33 +373,54 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
           });
           if (get().capture.id !== captureId) return;
           if (!turn) {
-            // An error notice reads ATTENTION; an empty dictation is no error.
+            // An error notice reads ATTENTION; an empty dictation is no error,
+            // nor is one the app stopped when it left the screen.
             set(
-              get().notice
-                ? { capture: { ...idleCapture, status: "error" } }
-                : { capture: idleCapture, notice: noticeFor("noSpeech") },
+              backgrounded
+                ? { capture: idleCapture }
+                : get().notice
+                  ? { capture: { ...idleCapture, status: "error" } }
+                  : { capture: idleCapture, notice: noticeFor("noSpeech") },
             );
             return;
           }
+          // The Capture screen shows and announces `latest` once ready.
           set({
             capture: {
               ...idleCapture,
               status: "ready",
               partialTranscript: turn.refinedText,
             },
+            latest: turn,
           });
           await addTurn(turn);
         },
       },
     );
-    activeSession = session;
+    if (session && !ended) activeSession = session;
 
     if (!session && get().capture.id === captureId) {
+      keepScreenAwake(false);
       set({
         capture: { ...idleCapture, status: "error" },
         level: 0,
         notice: get().notice ?? noticeFor("startFailed"),
       });
+    }
+  };
+
+  /**
+   * The app went to the background while dictating: the microphone stops
+   * there, so the dictation ends and keeps its text.
+   */
+  const stopForBackground = () => {
+    const capture = get().capture;
+    if (capture.status !== "listening") return;
+    backgroundStopId = capture.id;
+    get().stopCapture();
+    keepScreenAwake(false);
+    if (get().notice?.kind !== "backgrounded") {
+      set({ notice: noticeFor("backgrounded") });
     }
   };
 
@@ -376,6 +438,17 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     refining: false,
 
     hydrate: async () => {
+      if (!watchingAppState) {
+        watchingAppState = true;
+        AppState.addEventListener("change", (state) => {
+          // A language pack installed in the system settings, or a
+          // recognizer changed there, shows up back in the foreground.
+          if (state === "active") invalidateRecognitionEnvironment();
+          // Never 'inactive': Control Center, Notification Center, Face ID,
+          // system alerts and app-switcher peeks pass through it too.
+          if (state === "background") stopForBackground();
+        });
+      }
       const [loadedSettings, loadedHistory, dictionary, snippets, storedToken] =
         await Promise.all([
           mobileStorage.loadSettings(),
@@ -455,6 +528,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     cancelCapture: () => {
       activeSession?.abort();
       activeSession = null;
+      keepScreenAwake(false);
       set({ capture: idleCapture, level: 0 });
     },
 
@@ -481,6 +555,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
           status: "ready",
           partialTranscript: turn.refinedText,
         },
+        latest: turn,
       });
       await addTurn(turn);
     },
@@ -558,6 +633,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       dataEpoch += 1;
       activeSession?.abort();
       activeSession = null;
+      keepScreenAwake(false);
       await mobileStorage.eraseAll();
       set({
         settings: DEFAULT_SETTINGS,

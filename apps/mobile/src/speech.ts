@@ -1,7 +1,10 @@
 import { Platform } from "react-native";
 
 import type { CapturedAudioPayload } from "./audioCapture";
+import type { LoopEnd } from "./captureLoop";
+import { createCaptureLoop } from "./captureLoop";
 import type { DictationLanguage } from "./domain";
+import type { NoticeKind } from "./notices";
 import type {
   DownloadAttempt,
   DownloadOutcome,
@@ -14,10 +17,8 @@ import {
   ANDROID_ON_DEVICE_MIN_API,
   DOWNLOAD_TIMEOUT_MS,
   LOCALES_TIMEOUT_MS,
-  TranscriptAccumulator,
   levelFromVolume,
   mapDownloadOutcome,
-  shouldRetryWithSystemService,
 } from "./speechPolicy";
 
 /**
@@ -350,11 +351,20 @@ export interface SpeechSessionHandlers {
   onError(code: string): void;
   /** The session moved to the system speech service, with consent. */
   onRouteChange(route: "system-service"): void;
-  onEnd(result: { text: string; audio?: CapturedAudioPayload }): void;
+  /**
+   * Called once when the dictation ends, never after abort(). notice: why
+   * the capture loop ended it, such as 'maxDuration'.
+   */
+  onEnd(result: {
+    text: string;
+    audio?: CapturedAudioPayload;
+    notice?: NoticeKind;
+  }): void;
 }
 
 export interface SpeechSessionOptions {
   language: DictationLanguage;
+  /** With restartOnEnd, the recognizer starts again when it ends early. */
   plan: RecognitionPlan;
   /**
    * The user allowed the system speech service for this dictation: when the
@@ -367,11 +377,11 @@ export interface SpeechSessionOptions {
 }
 
 export interface SpeechSession {
+  /** Done: ends with the text so far. */
   stop(): void;
+  /** Cancel: ends without onEnd. */
   abort(): void;
 }
-
-const BENIGN_ERRORS = new Set(["no-speech", "speech-timeout", "aborted"]);
 
 function mimeForUri(uri: string): string {
   if (uri.endsWith(".wav")) return "audio/wav";
@@ -399,6 +409,13 @@ async function readAudio(
   }
 }
 
+/**
+ * Runs a dictation through the capture loop (captureLoop.ts). With
+ * plan.restartOnEnd the recognizer starts again each time it ends before the
+ * user is done: below Android 13 at every pause, with Apple's server
+ * recognizer after about a minute. Otherwise the dictation ends with the
+ * recognizer's session.
+ */
 export function startSpeechSession(
   options: SpeechSessionOptions,
   handlers: SpeechSessionHandlers,
@@ -408,140 +425,110 @@ export function startSpeechSession(
     handlers.onError("unsupported");
     return null;
   }
+  const platform = currentPlatform();
+  const osVersion = currentOsVersion();
 
   // Below API 33 expo-speech-recognition has no strict on-device recognizer:
   // the flag would only ask the service to prefer offline.
   const requiresOnDevice =
     options.plan.requiresOnDevice &&
-    !(
-      currentPlatform() === "android" &&
-      currentOsVersion() < ANDROID_ON_DEVICE_MIN_API
-    );
+    !(platform === "android" && osVersion < ANDROID_ON_DEVICE_MIN_API);
   const startOptions = {
     lang: options.language,
     interimResults: true,
     continuous: true,
     addsPunctuation: true,
-    requiresOnDeviceRecognition: requiresOnDevice,
     volumeChangeEventOptions: { enabled: true, intervalMillis: 120 },
     ...(options.persistAudio ? { recordingOptions: { persist: true } } : {}),
   };
 
-  const startedAt = Date.now();
-  const accumulator = new TranscriptAccumulator();
-  let audioUri: string | null = null;
-  let finished = false;
-  let onDevice = requiresOnDevice;
-  let stopRequested = false;
-  let retried = false;
-  /** A missing-language error was held back for a retry on the next 'end'. */
-  let retryPending = false;
   const subscriptions: Subscription[] = [];
-
-  const cleanup = () => {
+  const detach = () => {
     for (const subscription of subscriptions) subscription.remove();
     subscriptions.length = 0;
   };
 
-  const finish = async () => {
-    if (finished) return;
-    finished = true;
-    cleanup();
-    const audio = audioUri
-      ? await readAudio(audioUri, Date.now() - startedAt)
+  const deliver = async (end: LoopEnd) => {
+    const audio = end.audioUri
+      ? await readAudio(end.audioUri, end.durationMs)
       : undefined;
-    handlers.onEnd({ text: accumulator.text(), ...(audio ? { audio } : {}) });
+    handlers.onEnd({
+      text: end.text,
+      ...(audio ? { audio } : {}),
+      ...(end.notice ? { notice: end.notice } : {}),
+    });
   };
 
-  /** Starts again with the system speech service; false if it can't. */
-  const retryWithSystemService = (): boolean => {
-    retried = true;
-    onDevice = false;
-    audioUri = null;
-    try {
-      mod.start({ ...startOptions, requiresOnDeviceRecognition: false });
-    } catch (error) {
-      warn("restart with the speech service failed", error);
-      handlers.onError("start-failed");
-      return false;
-    }
-    handlers.onRouteChange("system-service");
-    return true;
-  };
+  const loop = createCaptureLoop(
+    {
+      start: (onDevice) => {
+        try {
+          mod.start({ ...startOptions, requiresOnDeviceRecognition: onDevice });
+        } catch (error) {
+          warn("start failed", error);
+          throw error;
+        }
+      },
+      stop: () => mod.stop(),
+      abort: () => mod.abort(),
+    },
+    {
+      onTranscript: (text, isFinal) => handlers.onTranscript(text, isFinal),
+      onError: (code) => handlers.onError(code),
+      onRouteChange: (route) => handlers.onRouteChange(route),
+      onEnd: (end) => {
+        detach();
+        void deliver(end);
+      },
+    },
+    {
+      platform,
+      osVersion,
+      requiresOnDevice,
+      restartOnEnd: options.plan.restartOnEnd,
+      fallbackToSystemService: options.fallbackToSystemService,
+    },
+  );
 
+  // Native events are global: they reach this dictation's loop only while
+  // it runs, and a finished or cancelled loop ignores them.
   subscriptions.push(
     mod.addListener("result", ((event: {
       isFinal: boolean;
       results: { transcript: string }[];
     }) => {
-      const best = event.results[0]?.transcript ?? "";
-      handlers.onTranscript(
-        accumulator.push(best, event.isFinal),
-        event.isFinal,
-      );
+      loop.result(event.results[0]?.transcript ?? "", event.isFinal);
     }) as (payload: never) => void),
     mod.addListener("volumechange", ((event: { value: number }) => {
       handlers.onLevel(levelFromVolume(event.value));
     }) as (payload: never) => void),
+    mod.addListener("start", (() => {
+      loop.started();
+    }) as (payload: never) => void),
     mod.addListener("audioend", ((event: { uri: string | null }) => {
-      if (event.uri) audioUri = event.uri;
+      loop.audioEnd(event.uri);
     }) as (payload: never) => void),
     mod.addListener("error", ((event: { error: string; message?: string }) => {
-      if (finished) return;
       warn(event.error, event.message);
-      if (BENIGN_ERRORS.has(event.error)) return;
-      if (
-        shouldRetryWithSystemService({
-          code: event.error,
-          requiresOnDevice: onDevice,
-          consented: options.fallbackToSystemService,
-          alreadyRetried: retried,
-          stopRequested,
-        })
-      ) {
-        retryPending = true;
-        return;
-      }
-      handlers.onError(event.error);
+      loop.error(event.error);
     }) as (payload: never) => void),
     mod.addListener("end", (() => {
-      if (finished) return;
-      if (retryPending) {
-        retryPending = false;
-        // Done was pressed before the restart: report the held-back error.
-        if (stopRequested) handlers.onError("language-not-supported");
-        else if (retryWithSystemService()) return;
-      }
-      void finish();
+      // Silence on the meter, also between restarted sessions.
+      handlers.onLevel(0);
+      loop.ended();
     }) as (payload: never) => void),
   );
 
-  try {
-    mod.start(startOptions);
-  } catch (error) {
-    cleanup();
-    warn("start failed", error);
-    handlers.onError("start-failed");
+  if (!loop.begin()) {
+    detach();
     return null;
   }
 
   return {
-    stop: () => {
-      stopRequested = true;
-      try {
-        mod.stop();
-      } catch {
-        void finish();
-      }
-    },
+    stop: () => loop.stop(),
     abort: () => {
-      finished = true;
-      cleanup();
-      try {
-        mod.abort();
-      } catch {
-        // Already stopped.
-      }
+      loop.abort();
+      detach();
     },
   };
 }
