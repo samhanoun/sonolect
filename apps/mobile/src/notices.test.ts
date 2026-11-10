@@ -7,9 +7,12 @@ import {
   LANGUAGE_NOTICE_KINDS,
   NOTICE_ACTIONS,
   NOTICE_KINDS,
+  STORAGE_NOTICE_KINDS,
   actionLabel,
+  isStorageNotice,
   noticeFor,
   noticeText,
+  storageBanner,
 } from "./notices";
 import type { NoticeAction, NoticeKind } from "./notices";
 
@@ -107,6 +110,63 @@ describe("notices", () => {
       language: "de-DE",
     });
     assert.equal("language" in noticeFor("busy"), false);
+  });
+
+  it("uses the storage texts of the plan", () => {
+    assert.equal(
+      noticeText(STRINGS.en, noticeFor("storageReadError")),
+      "Sonolect couldn't read your saved notes. Nothing was deleted. Restart the app to try again.",
+    );
+    assert.equal(
+      noticeText(STRINGS.fr, noticeFor("storageReadError")),
+      "Sonolect n'a pas pu lire vos notes enregistrées. Rien n'a été supprimé. Redémarrez l'app pour réessayer.",
+    );
+    assert.equal(
+      noticeText(STRINGS.en, noticeFor("storageWriteError")),
+      "Your latest change couldn't be saved on this phone. Free up some storage and try again.",
+    );
+    assert.equal(
+      noticeText(STRINGS.fr, noticeFor("storageWriteError")),
+      "Votre dernière modification n'a pas pu être enregistrée sur ce téléphone. Libérez de l'espace et réessayez.",
+    );
+  });
+
+  it("tells the storage notices from the dictation ones", () => {
+    assert.deepEqual(
+      NOTICE_KINDS.filter((kind) => isStorageNotice(kind)),
+      [...STORAGE_NOTICE_KINDS],
+    );
+    assert.deepEqual(
+      [...STORAGE_NOTICE_KINDS],
+      ["storageReadError", "storageWriteError"],
+    );
+  });
+
+  it("puts storage notices, or the unread notes, on Library and Settings", () => {
+    const writeError = noticeFor("storageWriteError");
+    assert.deepEqual(storageBanner(writeError, false), {
+      notice: writeError,
+      dismissable: true,
+    });
+    assert.deepEqual(storageBanner(writeError, true), {
+      notice: writeError,
+      dismissable: true,
+    });
+    const readError = noticeFor("storageReadError");
+    // Settings, dictionary or snippets unread: the user may dismiss it.
+    assert.deepEqual(storageBanner(readError, false), {
+      notice: readError,
+      dismissable: true,
+    });
+    // Notes unread: it stays until a launch reads them.
+    for (const current of [null, readError, noticeFor("busy")]) {
+      assert.deepEqual(storageBanner(current, true), {
+        notice: readError,
+        dismissable: false,
+      });
+    }
+    assert.equal(storageBanner(noticeFor("busy"), false), null);
+    assert.equal(storageBanner(null, false), null);
   });
 
   it("gives every action a single owner in the action list", () => {

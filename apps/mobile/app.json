@@ -52,7 +52,8 @@
           "imageWidth": 160,
           "backgroundColor": "#0B120E"
         }
-      ]
+      ],
+      "./plugins/withAsyncStorageSize"
     ],
     "experiments": {
       "typedRoutes": false,

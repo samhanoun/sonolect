@@ -11,7 +11,7 @@ import type {
   Snippet,
   TranscriptTurn,
 } from "./domain";
-import { DEFAULT_SETTINGS, HISTORY_LIMIT, createId } from "./domain";
+import { DEFAULT_SETTINGS, createId } from "./domain";
 import {
   API_FEATURES_ENABLED,
   apiConfig,
@@ -33,6 +33,7 @@ import {
   refineLocally,
   stylePresetForMode,
 } from "./refine";
+import { sweepCacheFiles } from "./recordings";
 import type { SpeechSession } from "./speech";
 import {
   downloadLanguageModel,
@@ -56,6 +57,7 @@ import {
   systemServicePlan,
 } from "./speechPolicy";
 import { mobileStorage } from "./storage";
+import { isUnreadableValueError } from "./storageCore";
 
 interface CompanionState {
   hydrated: boolean;
@@ -72,6 +74,11 @@ interface CompanionState {
   notice: Notice | null;
   /** The plan of the current or last dictation; see speechPolicy.ts. */
   plan: RecognitionPlan | null;
+  /**
+   * Some saved notes could not be read at launch. Nothing was deleted, and
+   * notes are only added or updated until a launch reads them all.
+   */
+  storageDegraded: boolean;
   /** A language pack download is in progress. */
   downloading: boolean;
   refining: boolean;
@@ -146,6 +153,15 @@ function keepsHistory(settings: CompanionSettings): boolean {
   return settings.saveHistory && settings.privacyLevel !== "ephemeral";
 }
 
+/**
+ * Deletes the recordings and recorder temp files in the cache, unless a
+ * dictation runs: its recorder may still write one. The next launch sweeps
+ * then.
+ */
+function sweepCacheWhenIdle(): void {
+  if (!activeSession) sweepCacheFiles();
+}
+
 export const useCompanionStore = create<CompanionState>((set, get) => {
   // Bumped whenever stored history is wiped, so in-flight sync/persist work
   // started before the wipe cannot write transcripts back afterwards.
@@ -153,20 +169,41 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
   const stillAllowed = (epoch: number) =>
     epoch === dataEpoch && keepsHistory(get().settings);
 
+  /**
+   * Runs a write to the phone's storage. A failure keeps the change in
+   * memory and shows a notice; it never throws to the screen.
+   */
+  const persist = async (write: () => Promise<void>): Promise<boolean> => {
+    try {
+      await write();
+      return true;
+    } catch (error) {
+      // A value that couldn't be read at launch is never overwritten.
+      set({
+        notice: noticeFor(
+          isUnreadableValueError(error)
+            ? "storageReadError"
+            : "storageWriteError",
+        ),
+      });
+      return false;
+    }
+  };
+
+  /** Every note is kept: there is no local cap (data-2). */
   const persistHistory = async (history: TranscriptTurn[]) => {
     const epoch = dataEpoch;
-    const trimmed = history.slice(0, HISTORY_LIMIT);
-    set({ history: trimmed });
+    set({ history });
     const { settings, apiToken } = get();
     if (!keepsHistory(settings)) return;
     const config = apiConfig(settings, apiToken);
     if (config.apiUrl) {
-      const synced = await syncQueuedTranscriptTurns(trimmed, config);
+      const synced = await syncQueuedTranscriptTurns(history, config);
       if (!stillAllowed(epoch)) return;
-      if (synced !== trimmed) applySyncResult(trimmed, synced);
+      if (synced !== history) applySyncResult(history, synced);
     }
     if (!stillAllowed(epoch)) return;
-    await mobileStorage.saveHistory(get().history);
+    await persist(() => mobileStorage.saveNotes(get().history));
   };
 
   /**
@@ -434,6 +471,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     level: 0,
     notice: null,
     plan: null,
+    storageDegraded: false,
     downloading: false,
     refining: false,
 
@@ -449,47 +487,73 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
           if (state === "background") stopForBackground();
         });
       }
-      const [loadedSettings, loadedHistory, dictionary, snippets, storedToken] =
-        await Promise.all([
-          mobileStorage.loadSettings(),
-          mobileStorage.loadHistory(),
-          mobileStorage.loadDictionary(),
-          mobileStorage.loadSnippets(),
-          mobileStorage.loadApiToken(),
-        ]);
-      let settings = loadedSettings;
-      let history = loadedHistory;
-      let apiToken = storedToken;
-      if (!API_FEATURES_ENABLED) {
-        // Phone-only build: data from a build with the API (sync on, an API
-        // URL, queued notes) becomes local before anything else runs. A
-        // failed write is retried at the next launch; it must not keep the
-        // app on the splash screen.
-        const migrated = phoneOnlyMigration(settings, history);
-        settings = migrated.settings;
-        history = migrated.history;
-        if (migrated.changed) {
+      let settings: CompanionSettings;
+      let history: TranscriptTurn[];
+      let apiToken: string | undefined;
+      try {
+        const [settingsRead, notesRead, dictionaryRead, snippetsRead, token] =
           await Promise.all([
-            mobileStorage.saveSettings(settings),
-            mobileStorage.saveHistory(history),
-          ]).catch(() => undefined);
+            mobileStorage.loadSettings(),
+            mobileStorage.loadNotes(),
+            mobileStorage.loadDictionary(),
+            mobileStorage.loadSnippets(),
+            mobileStorage.loadApiToken(),
+          ]);
+        settings = settingsRead.value;
+        history = notesRead.notes;
+        apiToken = token;
+        if (!API_FEATURES_ENABLED) {
+          // Phone-only build: data from a build with the API (sync on, an
+          // API URL, queued notes) becomes local before anything else runs.
+          // A failed write is retried at the next launch; it must not keep
+          // the app on the splash screen.
+          const migrated = phoneOnlyMigration(settings, history);
+          settings = migrated.settings;
+          history = migrated.history;
+          if (migrated.changed) {
+            await Promise.all([
+              mobileStorage.saveSettings(settings).catch(() => undefined),
+              mobileStorage.saveNotes(history).catch(() => undefined),
+            ]);
+          }
+          // No dormant credential stays on the phone, including one that
+          // survived a reinstall in the iOS keychain.
+          if (apiToken) {
+            apiToken = undefined;
+            await mobileStorage.saveApiToken(undefined).catch(() => undefined);
+          }
         }
-        // No dormant credential stays on the phone, including one that
-        // survived a reinstall in the iOS keychain.
-        if (apiToken) {
-          apiToken = undefined;
-          await mobileStorage.saveApiToken(undefined).catch(() => undefined);
-        }
+        // Nothing was deleted: the next launch reads again.
+        const readFailed =
+          !settingsRead.ok ||
+          !notesRead.ok ||
+          !dictionaryRead.ok ||
+          !snippetsRead.ok;
+        set({
+          settings,
+          history,
+          dictionary: dictionaryRead.value,
+          snippets: snippetsRead.value,
+          ...(apiToken ? { apiToken } : {}),
+          latest: history[0],
+          storageDegraded: !notesRead.ok,
+          ...(readFailed ? { notice: noticeFor("storageReadError") } : {}),
+          hydrated: true,
+        });
+      } catch {
+        // The loads report failures instead of throwing; whatever happens,
+        // the app leaves the splash screen (_layout.tsx waits for this).
+        set({
+          hydrated: true,
+          storageDegraded: true,
+          notice: noticeFor("storageReadError"),
+        });
+        return;
+      } finally {
+        // No dictation runs yet: delete what earlier launches left in the
+        // cache (speech-7).
+        sweepCacheFiles();
       }
-      set({
-        settings,
-        history,
-        dictionary,
-        snippets,
-        ...(apiToken ? { apiToken } : {}),
-        latest: history[0],
-        hydrated: true,
-      });
 
       const config = apiConfig(settings, apiToken);
       if (!config.apiUrl || !keepsHistory(settings)) return;
@@ -500,7 +564,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         if (!stillAllowed(epoch)) return;
         const merged = mergeTranscriptHistory(synced, remote);
         set({ history: merged, latest: merged[0] });
-        await mobileStorage.saveHistory(merged);
+        await persist(() => mobileStorage.saveNotes(merged));
       } catch {
         // Offline: keep local history as is.
       }
@@ -626,7 +690,10 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     clearHistory: async () => {
       dataEpoch += 1;
       set({ history: [], latest: undefined });
-      await mobileStorage.clearHistory();
+      if (await persist(() => mobileStorage.clearNotes())) {
+        set({ storageDegraded: false });
+      }
+      sweepCacheWhenIdle();
     },
 
     eraseAll: async () => {
@@ -634,7 +701,14 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       activeSession?.abort();
       activeSession = null;
       keepScreenAwake(false);
-      await mobileStorage.eraseAll();
+      const erased = await persist(() => mobileStorage.eraseAll());
+      // The dictation was cancelled above: no recorder uses these files.
+      sweepCacheFiles();
+      if (!erased) {
+        // What is left on the phone stays shown; the notice asks to retry.
+        set({ capture: idleCapture, level: 0 });
+        return;
+      }
       set({
         settings: DEFAULT_SETTINGS,
         history: [],
@@ -643,7 +717,9 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         snippets: [],
         apiToken: undefined,
         capture: idleCapture,
+        level: 0,
         notice: null,
+        storageDegraded: false,
       });
     },
 
@@ -652,12 +728,15 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       // While the API is off, no screen can turn sync on or set an API URL.
       const settings = effectiveSettings({ ...previous, ...patch });
       set({ settings });
-      await mobileStorage.saveSettings(settings);
+      await persist(() => mobileStorage.saveSettings(settings));
       if (!keepsHistory(settings) && keepsHistory(previous)) {
-        // Turning history off or going ephemeral removes what was stored.
+        // Turning history off or going ephemeral removes what was stored,
+        // and the recordings in the cache (data-15).
         dataEpoch += 1;
-        await mobileStorage.clearHistory();
-        set({ history: [] });
+        if (await persist(() => mobileStorage.clearNotes())) {
+          set({ history: [], storageDegraded: false });
+        }
+        sweepCacheWhenIdle();
       }
       if (settings.cloudSyncEnabled && !previous.cloudSyncEnabled) {
         await persistHistory(
@@ -673,8 +752,11 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     setApiToken: async (token: string) => {
       if (!API_FEATURES_ENABLED) return;
       const trimmed = token.trim();
-      await mobileStorage.saveApiToken(trimmed || undefined);
-      set(trimmed ? { apiToken: trimmed } : { apiToken: undefined });
+      if (
+        await persist(() => mobileStorage.saveApiToken(trimmed || undefined))
+      ) {
+        set(trimmed ? { apiToken: trimmed } : { apiToken: undefined });
+      }
     },
 
     addDictionaryEntry: async (spoken: string, replacement: string) => {
@@ -692,14 +774,14 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         { id: createId("dict"), spoken: s, replacement: r },
       ];
       set({ dictionary });
-      await mobileStorage.saveDictionary(dictionary);
+      await persist(() => mobileStorage.saveDictionary(dictionary));
       return true;
     },
 
     removeDictionaryEntry: async (id: string) => {
       const dictionary = get().dictionary.filter((entry) => entry.id !== id);
       set({ dictionary });
-      await mobileStorage.saveDictionary(dictionary);
+      await persist(() => mobileStorage.saveDictionary(dictionary));
     },
 
     addSnippet: async (trigger: string, body: string) => {
@@ -719,14 +801,14 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         { id: createId("snippet"), trigger: t, body: b },
       ];
       set({ snippets });
-      await mobileStorage.saveSnippets(snippets);
+      await persist(() => mobileStorage.saveSnippets(snippets));
       return true;
     },
 
     removeSnippet: async (id: string) => {
       const snippets = get().snippets.filter((snippet) => snippet.id !== id);
       set({ snippets });
-      await mobileStorage.saveSnippets(snippets);
+      await persist(() => mobileStorage.saveSnippets(snippets));
     },
 
     downloadModel: async () => {

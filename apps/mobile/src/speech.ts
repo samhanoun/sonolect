@@ -5,6 +5,7 @@ import type { LoopEnd } from "./captureLoop";
 import { createCaptureLoop } from "./captureLoop";
 import type { DictationLanguage } from "./domain";
 import type { NoticeKind } from "./notices";
+import { deleteRecordings } from "./recordings";
 import type {
   DownloadAttempt,
   DownloadOutcome,
@@ -452,6 +453,9 @@ export function startSpeechSession(
     const audio = end.audioUri
       ? await readAudio(end.audioUri, end.durationMs)
       : undefined;
+    // The bytes are in memory now, and nothing retries an upload later: no
+    // recording stays on the phone (speech-7).
+    deleteRecordings(end.recordings);
     handlers.onEnd({
       text: end.text,
       ...(audio ? { audio } : {}),

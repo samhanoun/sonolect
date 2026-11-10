@@ -91,6 +91,10 @@ const en = {
         "Dictation stopped when Sonolect left the screen. Your text so far was kept.",
       maxDuration:
         "Dictation stopped after 10 minutes. Tap the mic to continue.",
+      storageReadError:
+        "Sonolect couldn't read your saved notes. Nothing was deleted. Restart the app to try again.",
+      storageWriteError:
+        "Your latest change couldn't be saved on this phone. Free up some storage and try again.",
     },
     actions: {
       downloadModel: "Download language",
@@ -320,6 +324,10 @@ const fr: Strings = {
         "La dictée s'est arrêtée quand Sonolect a quitté l'écran. Le texte déjà dicté a été conservé.",
       maxDuration:
         "La dictée s'est arrêtée après 10 minutes. Touchez le micro pour continuer.",
+      storageReadError:
+        "Sonolect n'a pas pu lire vos notes enregistrées. Rien n'a été supprimé. Redémarrez l'app pour réessayer.",
+      storageWriteError:
+        "Votre dernière modification n'a pas pu être enregistrée sur ce téléphone. Libérez de l'espace et réessayez.",
     },
     actions: {
       downloadModel: "Télécharger la langue",

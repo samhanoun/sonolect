@@ -28,8 +28,14 @@ Studio palette (forest `#1F3429`, lime `#DDF39A`).
   needs an API URL in Settings (`https://`, or `http://` on localhost / private
   LAN) and the sync switch. The optional access token is then kept in
   SecureStore (Keychain/Keystore), on this device only and outside backups.
-- **Storage**: settings, history (up to 100 items), dictionary and snippets in
-  AsyncStorage. _Ephemeral_ mode and turning history off delete stored history.
+- **Storage**: settings, notes, dictionary and snippets in AsyncStorage, one
+  key per note and no limit on how many are kept (`src/storageCore.ts`). A
+  value that can't be read is never deleted: the app says so and reads it
+  again at the next launch. _Ephemeral_ mode and turning history off delete
+  stored notes. Recordings and recorder files left in the app cache are
+  deleted at each start, on _Clear history_ and on _Erase all data_. On
+  Android the AsyncStorage database may grow to 64 MB
+  (`plugins/withAsyncStorageSize.js`).
 
 ## Phone-only build
 
@@ -95,9 +101,14 @@ phone-readiness audit, so they are parked here. Fix them first:
 - [ ] ux-27: processing and refining have no timeout or cancel on a slow or
       unreachable API.
 - [ ] ios-8: iOS recordings are WAV bytes in a .caf file, uploaded as
-      audio/x-caf, and never deleted.
+      audio/x-caf. (They are now deleted once read, see speech-7.)
 - [ ] data-2: ask the server for pages of at most 100 notes (the API rejects
-      a larger `limit`) and follow `nextCursor`.
+      a larger `limit`) and follow `nextCursor`. `mergeTranscriptHistory`
+      still keeps only the newest 100 notes, and the next save deletes the
+      others from the phone: remove that cap.
+- [ ] security-6: run notes from the API through `sanitizeTurn`
+      (`src/storageCore.ts`) before they reach the history. Saving already
+      cleans them, but the screens render them first.
 - [ ] security-8: add the reinstall marker. At startup, when both
       `sonolect.mobile.installed` and the settings key are missing from
       AsyncStorage, delete the SecureStore token, then write the marker. A

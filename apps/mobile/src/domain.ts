@@ -80,6 +80,11 @@ export const REFINEMENT_MODES = [
 ] as const satisfies readonly SonolectMode[];
 export type RefinementMode = (typeof REFINEMENT_MODES)[number];
 
+/**
+ * The page size of the dormant Sonolect API history (localApi.ts; the
+ * server's maximum is 100). The phone keeps every note (data-2); the cap in
+ * mergeTranscriptHistory is on the README checklist for the API.
+ */
 export const HISTORY_LIMIT = 100;
 
 export const DEFAULT_SETTINGS: CompanionSettings = {

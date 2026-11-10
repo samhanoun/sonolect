@@ -33,8 +33,21 @@ export const NOTICE_KINDS = [
   "generic",
   // Dormant API refine path (Rewrite/Reply without the API).
   "needsModel",
+  // Notes and settings on the phone (WP4).
+  "storageReadError",
+  "storageWriteError",
 ] as const;
 export type NoticeKind = (typeof NOTICE_KINDS)[number];
+
+/** The notices about storage, shown on Library and Settings too. */
+export const STORAGE_NOTICE_KINDS = [
+  "storageReadError",
+  "storageWriteError",
+] as const satisfies readonly NoticeKind[];
+
+export function isStorageNotice(kind: NoticeKind): boolean {
+  return (STORAGE_NOTICE_KINDS as readonly NoticeKind[]).includes(kind);
+}
 
 export const NOTICE_ACTIONS = [
   "downloadModel",
@@ -88,6 +101,8 @@ const DEFAULT_ACTIONS: Record<NoticeKind, readonly NoticeAction[]> = {
   startFailed: ["dismiss"],
   generic: ["dismiss"],
   needsModel: ["dismiss"],
+  storageReadError: ["dismiss"],
+  storageWriteError: ["dismiss"],
 };
 
 /**
@@ -137,7 +152,30 @@ const TEXT: Record<NoticeKind, (t: Strings, language: string) => string> = {
   startFailed: (t) => t.capture.notices.startFailed,
   generic: (t) => t.capture.notices.generic,
   needsModel: (t) => t.capture.needsModel,
+  storageReadError: (t) => t.capture.notices.storageReadError,
+  storageWriteError: (t) => t.capture.notices.storageWriteError,
 };
+
+/**
+ * The storage notice Library and Settings show. While some saved notes are
+ * unread, the read error stays until a launch reads them; a write error
+ * shows first, until dismissed. Otherwise the current storage notice, which
+ * the user may dismiss.
+ */
+export function storageBanner(
+  notice: Notice | null,
+  storageDegraded: boolean,
+): { notice: Notice; dismissable: boolean } | null {
+  if (notice?.kind === "storageWriteError") {
+    return { notice, dismissable: true };
+  }
+  if (storageDegraded) {
+    return { notice: noticeFor("storageReadError"), dismissable: false };
+  }
+  return notice && isStorageNotice(notice.kind)
+    ? { notice, dismissable: true }
+    : null;
+}
 
 export function noticeText(t: Strings, notice: Notice): string {
   const language = notice.language ? t.languageNames[notice.language] : "";

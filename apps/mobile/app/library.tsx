@@ -21,8 +21,17 @@ import {
   sortHistory,
   type LibraryFilter,
 } from "../src/library";
+import { noticeText, storageBanner } from "../src/notices";
 import { useCompanionStore } from "../src/store";
-import { Button, Card, Chip, Icon, Label, Title } from "../src/ui/components";
+import {
+  Button,
+  Card,
+  Chip,
+  Icon,
+  Label,
+  NoticeBanner,
+  Title,
+} from "../src/ui/components";
 import { confirm } from "../src/ui/confirm";
 import { colors, fonts, modeColor, radius, space } from "../src/ui/theme";
 
@@ -42,7 +51,11 @@ export default function LibraryScreen() {
   const settings = useCompanionStore((s) => s.settings);
   const deleteTurn = useCompanionStore((s) => s.deleteTurn);
   const togglePin = useCompanionStore((s) => s.togglePin);
+  const notice = useCompanionStore((s) => s.notice);
+  const storageDegraded = useCompanionStore((s) => s.storageDegraded);
+  const dismissNotice = useCompanionStore((s) => s.dismissNotice);
   const t = strings(settings.uiLanguage);
+  const banner = storageBanner(notice, storageDegraded);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<LibraryFilter>("all");
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -163,6 +176,17 @@ export default function LibraryScreen() {
               <Title>{t.library.title}</Title>
               <Label>{t.library.items(history.length)}</Label>
             </View>
+            {banner ? (
+              <NoticeBanner
+                text={noticeText(t, banner.notice)}
+                {...(banner.dismissable
+                  ? {
+                      actionLabel: t.capture.actions.dismiss,
+                      onAction: dismissNotice,
+                    }
+                  : {})}
+              />
+            ) : null}
             <View style={styles.search}>
               <Icon name="search" size={16} color={colors.muted} />
               <TextInput

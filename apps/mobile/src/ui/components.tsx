@@ -287,6 +287,38 @@ export function Card({
   return <View style={[styles.card, style]}>{children}</View>;
 }
 
+/**
+ * A message at the top of a screen, such as a storage error, with an
+ * optional action.
+ */
+export function NoticeBanner({
+  text,
+  actionLabel,
+  onAction,
+}: {
+  text: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <View
+      style={styles.banner}
+      accessibilityRole="alert"
+      accessibilityLiveRegion="polite"
+    >
+      <Text style={styles.bannerText}>{text}</Text>
+      {actionLabel && onAction ? (
+        <Button
+          compact
+          label={actionLabel}
+          onPress={onAction}
+          style={styles.bannerAction}
+        />
+      ) : null}
+    </View>
+  );
+}
+
 export function ToggleRow({
   label,
   value,
@@ -545,6 +577,21 @@ export const styles = StyleSheet.create({
     padding: space.lg,
     gap: space.md,
   },
+  banner: {
+    gap: space.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.lineStrong,
+    backgroundColor: colors.surfaceStrong,
+    padding: space.md,
+  },
+  bannerText: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.text,
+  },
+  bannerAction: { alignSelf: "flex-start" },
   toggleRow: {
     minHeight: 52,
     flexDirection: "row",

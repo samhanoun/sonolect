@@ -14,12 +14,14 @@ import { DICTATION_LANGUAGES, type PrivacyLevel } from "../src/domain";
 import { API_FEATURES_ENABLED } from "../src/features";
 import { LANGUAGE_NAMES, strings } from "../src/i18n";
 import { isAllowedApiUrl } from "../src/localApi";
+import { noticeText, storageBanner } from "../src/notices";
 import { useCompanionStore } from "../src/store";
 import {
   Button,
   Card,
   Chip,
   Label,
+  NoticeBanner,
   Segmented,
   Title,
   ToggleRow,
@@ -44,7 +46,11 @@ export default function SettingsScreen() {
   const removeSnippet = useCompanionStore((s) => s.removeSnippet);
   const clearHistory = useCompanionStore((s) => s.clearHistory);
   const eraseAll = useCompanionStore((s) => s.eraseAll);
+  const notice = useCompanionStore((s) => s.notice);
+  const storageDegraded = useCompanionStore((s) => s.storageDegraded);
+  const dismissNotice = useCompanionStore((s) => s.dismissNotice);
   const t = strings(settings.uiLanguage);
+  const banner = storageBanner(notice, storageDegraded);
 
   const [url, setUrl] = useState(settings.localApiUrl ?? "");
   const [token, setToken] = useState(apiToken ?? "");
@@ -99,6 +105,17 @@ export default function SettingsScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <Title>{t.settings.title}</Title>
+          {banner ? (
+            <NoticeBanner
+              text={noticeText(t, banner.notice)}
+              {...(banner.dismissable
+                ? {
+                    actionLabel: t.capture.actions.dismiss,
+                    onAction: dismissNotice,
+                  }
+                : {})}
+            />
+          ) : null}
 
           <View style={styles.section}>
             <Label>{t.settings.privacy}</Label>
