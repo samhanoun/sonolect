@@ -181,8 +181,24 @@ an old Reanimated that Expo autolinks into the Android build.
 `patches/expo-speech-recognition@58.0.1.patch` (applied by pnpm through
 `patchedDependencies` in the root `package.json`) makes on-device recognition
 fail closed on iOS, adds `supportsOnDeviceRecognitionForLocale`, and keeps
-transcript text out of the Android log. It only applies to that exact
-version: when `expo-speech-recognition` changes, run
-`pnpm patch expo-speech-recognition@<new>`, make the same changes again, run
-`pnpm patch-commit <dir>`, and delete the old patch and its
-`patchedDependencies` entry.
+transcript text out of the Android log. It is tied to that exact version.
+When `expo install --fix` moves `expo-speech-recognition` to a new version,
+pnpm stops with `ERR_PNPM_PATCH_NOT_APPLIED` and changes nothing. Then make
+the patch again:
+
+1. Remove the `expo-speech-recognition@58.0.1` entry from
+   `pnpm.patchedDependencies` in the root `package.json`. Keep the old patch
+   file for now, and run `pnpm exec expo install --fix` again.
+2. Run `pnpm patch expo-speech-recognition@<new>`, and in the folder it
+   prints make the changes of the old patch again: the iOS fail-closed
+   on-device check and `supportsOnDeviceRecognitionForLocale` (Swift), and
+   the Android log change (Kotlin).
+3. Run `pnpm patch-commit <folder>`. It writes
+   `patches/expo-speech-recognition@<new>.patch` and adds its
+   `patchedDependencies` entry. Delete the old patch file.
+
+Do not drop the patch. The app still runs without it (`src/speech.ts` checks
+for `supportsOnDeviceRecognitionForLocale`), but an iOS dictation that asks
+for on-device recognition could then go to Apple's servers, and the Android
+library writes transcripts to its debug log again. CI's
+`Mobile iOS build (simulator, unsigned)` job compiles the Swift part.

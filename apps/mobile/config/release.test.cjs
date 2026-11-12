@@ -4,6 +4,7 @@ const { describe, it } = require("node:test");
 const {
   MAX_BUILD_NUMBER,
   MESSAGES,
+  isEasBuilder,
   isReleaseBuild,
   resolveReleaseConfig,
 } = require("./release.cjs");
@@ -219,16 +220,23 @@ describe("SONOLECT_BUILD_NUMBER", () => {
   });
 
   it("is not required on an EAS builder (remote versioning)", () => {
-    const resolved = resolveReleaseConfig(APP, {
-      SONOLECT_RELEASE: "1",
-      SONOLECT_PRIVACY_POLICY_URL: POLICY,
-      EAS_BUILD: "true",
-    });
-    assert.deepEqual(resolved, {
-      ...APP,
-      extra: { privacyPolicyUrl: POLICY },
-    });
-    for (const EAS_BUILD of ["false", "1", ""]) {
+    // EAS sets EAS_BUILD=true on its servers and 1 for eas build --local.
+    for (const EAS_BUILD of ["true", "1", "TRUE"]) {
+      const resolved = resolveReleaseConfig(APP, {
+        SONOLECT_RELEASE: "1",
+        SONOLECT_PRIVACY_POLICY_URL: POLICY,
+        EAS_BUILD,
+      });
+      assert.deepEqual(
+        resolved,
+        {
+          ...APP,
+          extra: { privacyPolicyUrl: POLICY },
+        },
+        EAS_BUILD,
+      );
+    }
+    for (const EAS_BUILD of ["false", "0", ""]) {
       assert.throws(
         () =>
           resolveReleaseConfig(APP, {
@@ -246,6 +254,26 @@ describe("SONOLECT_BUILD_NUMBER", () => {
     assert.throws(() => resolveReleaseConfig(APP, { SONOLECT_RELEASE: "1" }), {
       message: MESSAGES.missingUrl,
     });
+  });
+});
+
+describe("isEasBuilder", () => {
+  it("reads EAS_BUILD as Expo does: true or 1", () => {
+    for (const EAS_BUILD of ["true", "1", "TRUE", " true\n", " 1 "]) {
+      assert.equal(
+        isEasBuilder({ EAS_BUILD }),
+        true,
+        JSON.stringify(EAS_BUILD),
+      );
+    }
+    for (const EAS_BUILD of ["false", "0", "", "yes", "2"]) {
+      assert.equal(
+        isEasBuilder({ EAS_BUILD }),
+        false,
+        JSON.stringify(EAS_BUILD),
+      );
+    }
+    assert.equal(isEasBuilder({}), false);
   });
 });
 

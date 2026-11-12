@@ -35,6 +35,18 @@ function isReleaseBuild(env) {
   return env.EAS_BUILD_PROFILE === "production" || env.SONOLECT_RELEASE === "1";
 }
 
+/**
+ * On an EAS builder: EAS sets EAS_BUILD=true on its build servers and 1 for
+ * `eas build --local`. Read like Expo reads it (getenv boolish: true or 1).
+ */
+function isEasBuilder(env) {
+  return ["true", "1"].includes(
+    String(env.EAS_BUILD ?? "")
+      .trim()
+      .toLowerCase(),
+  );
+}
+
 /** The policy URL from the environment, or null when unset. Throws when invalid. */
 function privacyPolicyUrlFrom(env) {
   const url = (env[POLICY_URL_VAR] ?? "").trim();
@@ -76,7 +88,7 @@ function buildNumberFrom(env) {
     }
     return Number(raw);
   }
-  if (env.SONOLECT_RELEASE === "1" && env.EAS_BUILD !== "true") {
+  if (env.SONOLECT_RELEASE === "1" && !isEasBuilder(env)) {
     throw new Error(MESSAGES.missingBuildNumber);
   }
   return null;
@@ -114,6 +126,7 @@ module.exports = {
   MESSAGES,
   POLICY_URL_VAR,
   buildNumberFrom,
+  isEasBuilder,
   isReleaseBuild,
   privacyPolicyUrlFrom,
   resolveReleaseConfig,
