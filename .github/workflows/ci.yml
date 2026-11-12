@@ -77,8 +77,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Bundle the mobile app (catches Metro resolution errors)
+      - name: Bundle the web app (catches Metro resolution errors)
         run: pnpm --filter @sonolect/mobile exec expo export --platform web --output-dir dist-web
+
+      - name: Bundle native JS (iOS + Android, Hermes bytecode)
+        # The web export resolves react-native-web and *.web.* files, not the
+        # native module graph. This catches what breaks only the iOS or
+        # Android bundle, including code hermesc rejects (js-3).
+        run: pnpm --filter @sonolect/mobile exec expo export --platform ios --platform android --output-dir "$RUNNER_TEMP/dist-native"
 
       - name: Generate native projects (catches config plugin errors)
         run: pnpm --filter @sonolect/mobile exec expo prebuild --no-install --clean
@@ -152,8 +158,13 @@ jobs:
         run: pnpm --filter @sonolect/mobile exec expo prebuild --no-install --clean --platform android
 
       - name: Build an installable APK
-        # The template signs release builds with the debug keystore, so this
-        # APK installs on any Android phone for testing (not for the store).
+        # The template signs release builds with the public debug keystore
+        # that ships with every Expo and React Native template, so this APK is
+        # for internal testing only: never publish it or give it to users.
+        # Store builds are signed with the owner's upload key, through EAS or
+        # the Gradle properties of plugins/withReleaseSigning.js (see
+        # docs/mobile-release.md). Outside EAS, bundleRelease refuses to run
+        # without that key.
         # arm64-v8a covers current phones and halves native compile time.
         working-directory: apps/mobile/android
         env:
@@ -165,13 +176,69 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
 
-      - name: Upload the test APK
+      - name: Check the APK only ships arm64-v8a native code
+        # A 32-bit phone or an x86_64 emulator must refuse the APK at install
+        # (INSTALL_FAILED_NO_MATCHING_ABIS) instead of crashing at launch. The
+        # JDK's jar tool (from Setup Java) lists the APK, which is a zip; unzip
+        # is not on every runner.
+        working-directory: apps/mobile/android
+        run: |
+          apk=app/build/outputs/apk/release/app-release.apk
+          test -f "$apk" || { echo "::error::No test APK at $apk"; exit 1; }
+          abis=$(jar tf "$apk" | { grep '^lib/[^/][^/]*/' || true; } | cut -d/ -f2 | sort -u | paste -sd' ' -)
+          echo "Native code in the test APK: ${abis:-none}"
+          test "$abis" = "arm64-v8a" || { echo "::error::Unexpected ABIs in the test APK: ${abis:-none}"; exit 1; }
+
+      - name: Upload the debug-signed test APK (internal testing only)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: sonolect-android-test-apk
+          name: sonolect-android-debug-signed-test-apk
           path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
           retention-days: 14
           if-no-files-found: error
+
+  mobile-ios:
+    name: Mobile iOS build (simulator, unsigned)
+    # The compile check for the whole iOS app, and the only one for the Swift
+    # part of patches/expo-speech-recognition@58.0.1.patch: no Linux job can
+    # build Swift. GitHub-hosted macOS, as the self-hosted runners have none.
+    # A Release build for the simulator also bundles the JS with Hermes, and
+    # needs no signing.
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate the iOS project
+        run: pnpm --filter @sonolect/mobile exec expo prebuild --no-install --clean --platform ios
+
+      - name: Install CocoaPods dependencies
+        working-directory: apps/mobile/ios
+        run: pod install
+
+      - name: Build the app for the iOS Simulator
+        working-directory: apps/mobile/ios
+        run: >-
+          xcodebuild -workspace Sonolect.xcworkspace -scheme Sonolect
+          -configuration Release -sdk iphonesimulator
+          -destination "generic/platform=iOS Simulator"
+          ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO
+          -quiet build
 
   desktop-e2e:
     name: Desktop Playwright E2E
@@ -262,6 +329,9 @@ jobs:
 
       - name: Check release readiness
         run: pnpm test:release-readiness
+
+      - name: Test the audit gate rules
+        run: pnpm test:audit-gate
 
       - name: Release readiness dry-run validation
         run: pnpm release:dry-run
@@ -383,10 +453,11 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Audit dependencies
-        # Gate on critical severity. The remaining moderate/high advisories are
-        # transitive dependencies of apps/mobile (Expo / React Native / Firebase),
-        # which is out of the current product scope and tracked separately. The
-        # one critical (shell-quote) is patched via pnpm.overrides.
+        # Gate on critical severity in every workspace. High advisories, the
+        # mobile app's included, are gated by scripts/audit-gate.mjs (Security
+        # workflow, npm-audit job), which accepts only the build-time tooling
+        # advisories listed in docs/security-scan-triage.md. The one critical
+        # (shell-quote) is patched via pnpm.overrides.
         run: pnpm audit --audit-level critical
 
       - name: Secret scan

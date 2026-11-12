@@ -1,0 +1,92 @@
+diff --git a/android/src/main/java/expo/modules/speechrecognition/ExpoSpeechService.kt b/android/src/main/java/expo/modules/speechrecognition/ExpoSpeechService.kt
+index 4a0604ab8ffd5112ec0bb770be56b3bc62dfcc80..c3a8412b3597bdcd153deab301ca0649d516b5b8 100644
+--- a/android/src/main/java/expo/modules/speechrecognition/ExpoSpeechService.kt
++++ b/android/src/main/java/expo/modules/speechrecognition/ExpoSpeechService.kt
+@@ -85,8 +85,11 @@ class ExpoSpeechService(
+         }
+     }
+ 
++    // Sonolect patch: no transcript text in logcat. Debug lines appear only
++    // after `adb shell setprop log.tag.ExpoSpeechService DEBUG`, and the
++    // result lines below log counts instead of the recognized text.
+     private fun log(message: String) {
+-        Log.d("ExpoSpeechService", message)
++        if (Log.isLoggable("ExpoSpeechService", Log.DEBUG)) Log.d("ExpoSpeechService", message)
+     }
+ 
+     private fun createSpeechRecognizer(options: SpeechRecognitionOptions): SpeechRecognizer? {
+@@ -382,7 +385,7 @@ class ExpoSpeechService(
+             // Optional list of strings, towards which the recognizer should bias the recognition results.
+             // These are separate from the device context.
+             val strings = ArrayList(contextualStrings)
+-            log("biasing strings: ${strings.joinToString(", ")}")
++            log("biasing strings: ${strings.size}")
+             intent.putExtra(
+                 RecognizerIntent.EXTRA_BIASING_STRINGS,
+                 // List<String> -> ArrayList<java.lang.String>
+@@ -633,7 +636,7 @@ class ExpoSpeechService(
+                 ),
+             )
+         }
+-        log("onResults(), results: $resultsList")
++        log("onResults(), ${resultsList.size} results")
+ 
+         teardownAndEnd()
+     }
+@@ -643,7 +646,7 @@ class ExpoSpeechService(
+         // Avoid sending result event if there was an empty result, or the first result is an empty string
+         val nonEmptyStrings = partialResultsList.filter { it["transcript"]?.toString()?.isNotEmpty() ?: false }
+ 
+-        log("onPartialResults(), results: $nonEmptyStrings")
++        log("onPartialResults(), ${nonEmptyStrings.size} results")
+         if (nonEmptyStrings.isNotEmpty()) {
+             sendEvent("result", mapOf("results" to nonEmptyStrings, "isFinal" to false))
+         }
+@@ -685,7 +688,7 @@ class ExpoSpeechService(
+                 ),
+             )
+         }
+-        log("onSegmentResults(), transcriptions: $resultsList")
++        log("onSegmentResults(), ${resultsList.size} results")
+ 
+         // If the user opted to stop
+         if (recognitionState == RecognitionState.STOPPING) {
+diff --git a/ios/ExpoSpeechRecognitionModule.swift b/ios/ExpoSpeechRecognitionModule.swift
+index 9dc90826634fe3424c0c143eb7cfd72efe90498a..db26e094f6973638569208b7a296b55beeae1398 100644
+--- a/ios/ExpoSpeechRecognitionModule.swift
++++ b/ios/ExpoSpeechRecognitionModule.swift
+@@ -204,6 +204,20 @@ public class ExpoSpeechRecognitionModule: Module {
+             )
+           }
+ 
++          // Sonolect patch: fail closed. prepareRequest drops
++          // requiresOnDeviceRecognition when the locale's recognizer can't run
++          // on the device, which would send the audio to Apple's servers.
++          if options.requiresOnDeviceRecognition,
++            let requestedLocale = self.resolveLocale(localeIdentifier: options.lang),
++            !(SFSpeechRecognizer(locale: requestedLocale)?.supportsOnDeviceRecognition ?? false)
++          {
++            self.sendErrorAndStop(
++              error: "language-not-supported",
++              message: "On-device recognition is not available for \(options.lang)"
++            )
++            return
++          }
++
+           if !options.requiresOnDeviceRecognition {
+             guard await SFSpeechRecognizer.hasAuthorizationToRecognize() else {
+               sendErrorAndStop(
+@@ -354,6 +368,13 @@ public class ExpoSpeechRecognitionModule: Module {
+       return recognizer?.supportsOnDeviceRecognition ?? false
+     }
+ 
++    // Sonolect patch: on-device support of the dictation locale, not of the
++    // device's default locale.
++    Function("supportsOnDeviceRecognitionForLocale") { (lang: String) -> Bool in
++      guard let locale = self.resolveLocale(localeIdentifier: lang) else { return false }
++      return SFSpeechRecognizer(locale: locale)?.supportsOnDeviceRecognition ?? false
++    }
++
+     Function("supportsRecording") { () -> Bool in
+       return true
+     }

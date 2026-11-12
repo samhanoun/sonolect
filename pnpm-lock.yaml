@@ -26,6 +26,11 @@ overrides:
   react-native-drawer-layout>react-native-reanimated: '-'
   react-native-drawer-layout>react-native-gesture-handler: '-'
 
+patchedDependencies:
+  expo-speech-recognition@58.0.1:
+    hash: ikdqb42sxqk7nzaw2gze3tn2d4
+    path: patches/expo-speech-recognition@58.0.1.patch
+
 importers:
 
   .:
@@ -154,27 +159,39 @@ importers:
       expo-constants:
         specifier: ~58.0.15
         version: 58.0.15(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(typescript@5.9.3)
+      expo-file-system:
+        specifier: ~58.0.13
+        version: 58.0.13(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))
       expo-font:
         specifier: ~58.0.11
         version: 58.0.11(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
       expo-haptics:
         specifier: ~58.0.7
         version: 58.0.7(expo@58.0.23)
+      expo-keep-awake:
+        specifier: ~58.0.3
+        version: 58.0.3(expo@58.0.23)(react@19.3.0)
       expo-linking:
         specifier: ~58.0.16
         version: 58.0.16(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
+      expo-localization:
+        specifier: ~58.0.5
+        version: 58.0.5(expo@58.0.23)(react@19.3.0)
       expo-router:
         specifier: ~58.0.30
         version: 58.0.30(@expo/log-box@58.0.15)(@expo/metro-runtime@58.0.17)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(expo-constants@58.0.15)(expo-linking@58.0.16)(expo@58.0.23)(react-dom@19.3.0(react@19.3.0))(react-native-safe-area-context@5.11.1(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0))(react-native-screens@4.30.1(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0))(react-native-web@0.21.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
       expo-secure-store:
         specifier: ~58.0.2
         version: 58.0.2(expo@58.0.23)
+      expo-sharing:
+        specifier: ~58.0.22
+        version: 58.0.22(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
       expo-speech:
         specifier: ~58.0.3
         version: 58.0.3(expo@58.0.23)
       expo-speech-recognition:
         specifier: ~58.0.1
-        version: 58.0.1(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
+        version: 58.0.1(patch_hash=ikdqb42sxqk7nzaw2gze3tn2d4)(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
       expo-splash-screen:
         specifier: ~58.0.13
         version: 58.0.13(expo@58.0.23)(typescript@5.9.3)
@@ -2844,6 +2861,12 @@ packages:
       react: '*'
       react-native: '*'
 
+  expo-localization@58.0.5:
+    resolution: {integrity: sha512-2wyZl/5wn95l38AAtdaUAq2VMJWbGbgQQDEuIEkkemmsA/BZ8gS21Nq+7I2X9hDfL5Z+4hlyLVdPtDIH0vvt1A==}
+    peerDependencies:
+      expo: '*'
+      react: '*'
+
   expo-modules-autolinking@58.0.17:
     resolution: {integrity: sha512-mZRVuUCOsYK4+n9U8972bQBqXn21ncMd9BBx0/iepKH49tdMB8ADj3O9bb+huA80XckyorFLVfi6nJcImYtUyg==}
     hasBin: true
@@ -2920,6 +2943,13 @@ packages:
   expo-server@58.0.6:
     resolution: {integrity: sha512-6DBlSZwxk3J0y1j2s4XebAWNiwGaMp32NcWX7b2kJC2+EFf1g+pCcVmx8ylawt2tyLmbDHswm4MHOfrd4bqfvA==}
     engines: {node: ^22.13.0 || ^24.3.0 || ^26.0.0 || >=27.0.0}
+
+  expo-sharing@58.0.22:
+    resolution: {integrity: sha512-s9/hFsGIZR+M8xRicKKKdV5/+TVSvEHze58yu3x9962lLvxkGY1aJ4vojg1RszSTesPJaNiCg7DRA2H8f47/9w==}
+    peerDependencies:
+      expo: '*'
+      react: '*'
+      react-native: '*'
 
   expo-speech-recognition@58.0.1:
     resolution: {integrity: sha512-ycDe1BxXblqFGsXxedjBKn3tVQO8Vnj/BtBIycdMjXkXueTYto1LaenkjeBGycJmnS/6mOWC8oQcyBSbZsueFg==}
@@ -4192,6 +4222,9 @@ packages:
     resolution: {integrity: sha512-J9qZyW++QK/09NyN/zeO0dG/1GdGfyp9lV8ajHnRVLfo/uFsbji5mHnDgn/qYdUHyCkM2N+8VyspgZclfAh0eQ==}
     engines: {node: '>=18.0.0', npm: '>=8.0.0'}
     hasBin: true
+
+  rtl-detect@1.1.2:
+    resolution: {integrity: sha512-PGMBq03+TTG/p/cRB7HCLKJ1MgDIi07+QU1faSjiYRfmY5UsAttV9Hs08jDAHVwcOwmVLcSJkpwyfXszVjWfIQ==}
 
   safe-buffer@5.1.2:
     resolution: {integrity: sha512-Gd2UZBJDkXlY7GbJxfsE8/nvKkUEU1G38c1siN6QP6a9PT9MmHB8GnpscSmMJSoF8LOIrt8ud/wPtojys4G6+g==}
@@ -7145,6 +7178,12 @@ snapshots:
       - supports-color
       - typescript
 
+  expo-localization@58.0.5(expo@58.0.23)(react@19.3.0):
+    dependencies:
+      expo: 58.0.23(@babel/core@7.29.13)(@expo/dom-webview@58.0.2)(@expo/metro-runtime@58.0.17)(expo-router@58.0.30)(react-dom@19.3.0(react@19.3.0))(react-native-web@0.21.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
+      react: 19.3.0
+      rtl-detect: 1.1.2
+
   expo-modules-autolinking@58.0.17(typescript@5.9.3):
     dependencies:
       '@expo/platforms': 58.0.1
@@ -7220,7 +7259,19 @@ snapshots:
 
   expo-server@58.0.6: {}
 
-  expo-speech-recognition@58.0.1(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0):
+  expo-sharing@58.0.22(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)(typescript@5.9.3):
+    dependencies:
+      '@expo/config-plugins': 58.0.12(typescript@5.9.3)
+      '@expo/config-types': 58.0.3
+      '@expo/plist': 0.10.1
+      expo: 58.0.23(@babel/core@7.29.13)(@expo/dom-webview@58.0.2)(@expo/metro-runtime@58.0.17)(expo-router@58.0.30)(react-dom@19.3.0(react@19.3.0))(react-native-web@0.21.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
+      react: 19.3.0
+      react-native: 0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0)
+    transitivePeerDependencies:
+      - supports-color
+      - typescript
+
+  expo-speech-recognition@58.0.1(patch_hash=ikdqb42sxqk7nzaw2gze3tn2d4)(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0):
     dependencies:
       expo: 58.0.23(@babel/core@7.29.13)(@expo/dom-webview@58.0.2)(@expo/metro-runtime@58.0.17)(expo-router@58.0.30)(react-dom@19.3.0(react@19.3.0))(react-native-web@0.21.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
       react: 19.3.0
@@ -8814,6 +8865,8 @@ snapshots:
       '@rollup/rollup-win32-x64-gnu': 4.60.2
       '@rollup/rollup-win32-x64-msvc': 4.60.2
       fsevents: 2.3.3
+
+  rtl-detect@1.1.2: {}
 
   safe-buffer@5.1.2: {}
 
