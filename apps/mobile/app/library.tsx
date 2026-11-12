@@ -1,28 +1,26 @@
-import { useMemo, useState } from "react";
-import {
-  FlatList,
-  Share,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
-import * as Clipboard from "expo-clipboard";
-import * as Speech from "expo-speech";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FlatList, StyleSheet, Text, TextInput, View } from "react-native";
+import { useLocales } from "expo-localization";
+import { useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { TranscriptTurn } from "../src/domain";
+import { exportNotes } from "../src/exportNotes";
 import { API_FEATURES_ENABLED } from "../src/features";
 import { strings } from "../src/i18n";
 import {
   exportAsMarkdown,
   filterHistory,
   formatDuration,
+  formatNoteDate,
+  formattingLocale,
   sortHistory,
   type LibraryFilter,
 } from "../src/library";
 import { noticeText, storageBanner } from "../src/notices";
 import { useCompanionStore } from "../src/store";
+import { ttsController, useTts } from "../src/tts";
+import { copyText, shareText } from "../src/ui/actions";
 import {
   Button,
   Card,
@@ -38,7 +36,7 @@ import { colors, fonts, modeColor, radius, space } from "../src/ui/theme";
 
 const FILTERS: LibraryFilter[] = ["all", "pinned", "summaries", "tasks"];
 
-function timeLabel(iso: string, locale: string): string {
+function timeLabel(iso: string, locale: string | undefined): string {
   const date = new Date(iso);
   const now = new Date();
   const sameDay = date.toDateString() === now.toDateString();
@@ -55,17 +53,73 @@ export default function LibraryScreen() {
   const notice = useCompanionStore((s) => s.notice);
   const storageDegraded = useCompanionStore((s) => s.storageDegraded);
   const dismissNotice = useCompanionStore((s) => s.dismissNotice);
+  const captureStatus = useCompanionStore((s) => s.capture.status);
   const t = strings(settings.uiLanguage);
   const banner = storageBanner(notice, storageDegraded);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<LibraryFilter>("all");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const exporting = useRef(false);
+  const tts = useTts();
+  // The microphone would hear it (speech-4).
+  const captureBusy =
+    captureStatus === "listening" || captureStatus === "processing";
 
   const items = useMemo(
     () => sortHistory(filterHistory(history, query, filter)),
     [history, query, filter],
   );
-  const locale = settings.uiLanguage === "fr" ? "fr-FR" : "en-US";
+  // The phone's own formats when it speaks the UI language (ux-23).
+  const locale = formattingLocale(
+    settings.uiLanguage,
+    useLocales()[0]?.languageTag,
+  );
+  const listState = useMemo(
+    () => ({ expanded, copiedId, tts, captureBusy, locale, t }),
+    [expanded, copiedId, tts, captureBusy, locale, t],
+  );
+
+  // Tabs stay mounted: leaving the Library stops what it reads (speech-4).
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        void ttsController.stop();
+      },
+      [],
+    ),
+  );
+
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
+
+  const copyItem = async (item: TranscriptTurn) => {
+    if (!(await copyText(item.refinedText, t))) return;
+    setCopiedId(item.id);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setCopiedId(null), 1500);
+  };
+
+  const exportAll = async () => {
+    if (exporting.current) return;
+    exporting.current = true;
+    try {
+      await exportNotes(
+        exportAsMarkdown(sortHistory(history), {
+          formatDate: (iso) => formatNoteDate(iso, locale),
+          modeLabel: (mode) => t.modeTag[mode] ?? mode,
+        }),
+        t,
+      );
+    } finally {
+      exporting.current = false;
+    }
+  };
 
   const renderItem = ({ item }: { item: TranscriptTurn }) => {
     const open = expanded === item.id;
@@ -111,33 +165,39 @@ export default function LibraryScreen() {
           <Button
             compact
             icon="copy"
-            label={t.capture.copy}
-            onPress={() => void Clipboard.setStringAsync(item.refinedText)}
+            label={copiedId === item.id ? t.capture.copied : t.capture.copy}
+            onPress={() => void copyItem(item)}
           />
           <Button
             compact
             icon="share"
             label={t.capture.share}
-            onPress={() =>
-              void Share.share({ message: item.refinedText }).catch(
-                () => undefined,
-              )
-            }
+            onPress={() => void shareText(item.refinedText, t)}
           />
-          <Button
-            compact
-            icon="speaker"
-            label={t.library.listen}
-            onPress={() => {
-              void Speech.stop();
-              Speech.speak(item.refinedText, {
-                rate: settings.speechRate,
-                ...(item.language !== "auto"
-                  ? { language: item.language }
-                  : {}),
-              });
-            }}
-          />
+          {tts.ownerId === item.id ? (
+            <Button
+              compact
+              icon="stop"
+              label={t.reader.stop}
+              onPress={() => void ttsController.stop()}
+            />
+          ) : (
+            <Button
+              compact
+              icon="speaker"
+              label={t.library.listen}
+              disabled={captureBusy}
+              onPress={() => {
+                ttsController.play(item.id, item.refinedText, {
+                  language:
+                    item.language !== "auto"
+                      ? item.language
+                      : settings.language,
+                  rate: settings.speechRate,
+                });
+              }}
+            />
+          )}
           <Button
             compact
             icon="pin"
@@ -174,6 +234,7 @@ export default function LibraryScreen() {
         data={items}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
+        extraData={listState}
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
@@ -221,11 +282,7 @@ export default function LibraryScreen() {
                   icon="share"
                   label={t.library.exportAll}
                   variant="ghost"
-                  onPress={() =>
-                    void Share.share({
-                      message: exportAsMarkdown(sortHistory(history)),
-                    }).catch(() => undefined)
-                  }
+                  onPress={() => void exportAll()}
                 />
               ) : null}
             </View>

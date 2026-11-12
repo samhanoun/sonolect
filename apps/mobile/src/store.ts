@@ -58,6 +58,7 @@ import {
 } from "./speechPolicy";
 import { mobileStorage } from "./storage";
 import { isUnreadableValueError } from "./storageCore";
+import { setTtsPlaybackGuard, ttsController } from "./tts";
 
 interface CompanionState {
   hydrated: boolean;
@@ -577,6 +578,9 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       }
       starting = true;
       try {
+        // Read-aloud would be heard by the microphone and written into the
+        // dictation (speech-4); its iOS session is given back first.
+        await ttsController.stop();
         await beginCapture(options?.allowSystemServiceOnce === true);
       } finally {
         starting = false;
@@ -677,6 +681,10 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     },
 
     deleteTurn: async (turnId: string) => {
+      // Its Listen button, and so its Stop, goes away with it.
+      if (ttsController.getState().ownerId === turnId) {
+        void ttsController.stop();
+      }
       if (get().latest?.id === turnId) set({ latest: undefined });
       await persistHistory(get().history.filter((turn) => turn.id !== turnId));
     },
@@ -698,6 +706,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
 
     eraseAll: async () => {
       dataEpoch += 1;
+      void ttsController.stop();
       activeSession?.abort();
       activeSession = null;
       keepScreenAwake(false);
@@ -842,4 +851,11 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       );
     },
   };
+});
+
+// Read-aloud never starts while a dictation starts, listens or is processed
+// (speech-4).
+setTtsPlaybackGuard(() => {
+  const { status } = useCompanionStore.getState().capture;
+  return !starting && status !== "listening" && status !== "processing";
 });

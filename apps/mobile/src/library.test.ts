@@ -6,8 +6,11 @@ import { normalizeSettings } from "./domain";
 import { STRINGS } from "./i18n";
 import {
   exportAsMarkdown,
+  exportFileName,
   filterHistory,
   formatDuration,
+  formatNoteDate,
+  formattingLocale,
   sortHistory,
 } from "./library";
 import { isAllowedApiUrl } from "./localApi";
@@ -82,6 +85,61 @@ describe("library", () => {
       exportAsMarkdown(history.slice(0, 1)),
       /^## 2026-11-01 10:00 · dictate\n\nClient summary due at four$/,
     );
+  });
+
+  it("exports with the phone's date format and mode names (ux-23)", () => {
+    const late = turn({
+      refinedText: "• Book room",
+      mode: "task_creation",
+      createdAt: "2026-11-08T22:30:00.000Z",
+    });
+    const markdown = exportAsMarkdown([late, history[1]!], {
+      formatDate: (iso) => formatNoteDate(iso, "en-US", "America/New_York"),
+      modeLabel: (mode) => STRINGS.en.modeTag[mode] ?? mode,
+    });
+    // Older ICU versions put a narrow no-break space before PM.
+    assert.equal(
+      markdown.replace(/[^\S\n]/g, " "),
+      "## Nov 8, 2026, 05:30 PM · TASKS\n\n• Book room\n\n" +
+        "## Nov 2, 2026, 05:00 AM · SUMMARY\n\nProduct sync notes",
+    );
+  });
+
+  it("formats note dates in the phone's time zone", () => {
+    const iso = "2026-11-08T22:30:00.000Z";
+    assert.equal(
+      formatNoteDate(iso, "en-GB", "Europe/London"),
+      "8 Nov 2026, 22:30",
+    );
+    // 22:30 UTC is 17:30 the same day in New York, 08:30 the next in Sydney.
+    assert.match(formatNoteDate(iso, "en-US", "America/New_York"), /^Nov 8,/);
+    assert.match(formatNoteDate(iso, "en-US", "America/New_York"), /05:30/);
+    assert.match(
+      formatNoteDate(iso, "fr", "Australia/Sydney"),
+      /^9 nov\. 2026/,
+    );
+    assert.match(formatNoteDate(iso, "fr", "Australia/Sydney"), /09:30/);
+    assert.equal(formatNoteDate("not a date", "en"), "not a date");
+  });
+
+  it("names export files with the local date", () => {
+    assert.equal(
+      exportFileName(new Date(2026, 0, 5, 23, 59)),
+      "sonolect-notes-2026-01-05.md",
+    );
+    assert.equal(
+      exportFileName(new Date(2026, 10, 12, 0, 1)),
+      "sonolect-notes-2026-11-12.md",
+    );
+  });
+
+  it("uses the device's formats only when it speaks the UI language", () => {
+    assert.equal(formattingLocale("fr", "fr-CA"), undefined);
+    assert.equal(formattingLocale("en", "en-GB"), undefined);
+    assert.equal(formattingLocale("fr", "en-US"), "fr");
+    assert.equal(formattingLocale("en", "fr-FR"), "en");
+    assert.equal(formattingLocale("en", undefined), "en");
+    assert.equal(formattingLocale("fr", "fr_BE"), undefined);
   });
 });
 

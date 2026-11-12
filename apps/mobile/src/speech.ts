@@ -21,6 +21,7 @@ import {
   levelFromVolume,
   mapDownloadOutcome,
 } from "./speechPolicy";
+import { releaseAudioSessionAfterRecognition } from "./tts";
 
 /**
  * Thin wrapper around expo-speech-recognition 58.0.1 (iOS SFSpeechRecognizer,
@@ -384,6 +385,38 @@ export interface SpeechSession {
   abort(): void;
 }
 
+/** Dictations that started and have not ended or been cancelled. */
+let liveDictations = 0;
+let watchingEnds = false;
+
+/**
+ * iOS: gives the audio session back once no dictation runs (speech-6).
+ * expo-speech-recognition sets playAndRecord at every start, and its next
+ * start sets it again, but it never deactivates the session: other apps'
+ * audio would not resume, and read-aloud would play on the record session.
+ */
+function releaseSessionWhenIdle(): void {
+  if (liveDictations === 0) releaseAudioSessionAfterRecognition();
+}
+
+/**
+ * The native 'end' comes once the recognizer has stopped its audio engine.
+ * A cancelled dictation stops listening to its own events at once, and a
+ * restarted one ends between sessions, so one listener for the app's
+ * lifetime releases the session when the last session has ended.
+ */
+function watchRecognitionEnds(mod: SpeechModule): void {
+  if (watchingEnds || Platform.OS !== "ios") return;
+  try {
+    mod.addListener("end", (() => {
+      releaseSessionWhenIdle();
+    }) as (payload: never) => void);
+    watchingEnds = true;
+  } catch (error) {
+    warn("end listener not added", error);
+  }
+}
+
 function mimeForUri(uri: string): string {
   if (uri.endsWith(".wav")) return "audio/wav";
   if (uri.endsWith(".caf")) return "audio/x-caf";
@@ -443,6 +476,14 @@ export function startSpeechSession(
     ...(options.persistAudio ? { recordingOptions: { persist: true } } : {}),
   };
 
+  watchRecognitionEnds(mod);
+  let live = false;
+  const ended = () => {
+    if (!live) return;
+    live = false;
+    liveDictations -= 1;
+  };
+
   const subscriptions: Subscription[] = [];
   const detach = () => {
     for (const subscription of subscriptions) subscription.remove();
@@ -482,6 +523,8 @@ export function startSpeechSession(
       onRouteChange: (route) => handlers.onRouteChange(route),
       onEnd: (end) => {
         detach();
+        ended();
+        releaseSessionWhenIdle();
         void deliver(end);
       },
     },
@@ -523,8 +566,12 @@ export function startSpeechSession(
     }) as (payload: never) => void),
   );
 
+  // Counted before begin(): native events arrive after it returns.
+  live = true;
+  liveDictations += 1;
   if (!loop.begin()) {
     detach();
+    ended();
     return null;
   }
 
@@ -533,6 +580,8 @@ export function startSpeechSession(
     abort: () => {
       loop.abort();
       detach();
+      // The native 'end' that follows releases the iOS session.
+      ended();
     },
   };
 }

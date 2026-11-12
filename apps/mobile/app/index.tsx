@@ -6,14 +6,12 @@ import {
   Linking,
   Platform,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
   View,
   type ScrollViewInstance,
 } from "react-native";
-import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -24,6 +22,7 @@ import { formatDuration } from "../src/library";
 import { actionLabel, noticeText, type NoticeAction } from "../src/notices";
 import { requestDictationPermission } from "../src/speech";
 import { useCompanionStore } from "../src/store";
+import { copyText, shareText } from "../src/ui/actions";
 import {
   Button,
   CHROME_MAX_FONT_SCALE,
@@ -282,11 +281,21 @@ export default function CaptureScreen() {
       ? latest.refinedText
       : "";
 
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
+
   const copyLatest = async () => {
     if (!latest) return;
-    await Clipboard.setStringAsync(latest.refinedText);
+    // A failure says so instead of failing silently (data-14).
+    if (!(await copyText(latest.refinedText, t))) return;
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    copiedTimer.current = setTimeout(() => setCopied(false), 1500);
   };
 
   const showOnboarding = !settings.onboarded;
@@ -502,11 +511,7 @@ export default function CaptureScreen() {
                     compact
                     icon="share"
                     label={t.capture.share}
-                    onPress={() =>
-                      void Share.share({ message: latest.refinedText }).catch(
-                        () => undefined,
-                      )
-                    }
+                    onPress={() => void shareText(latest.refinedText, t)}
                   />
                 </View>
                 <View style={styles.chips}>
