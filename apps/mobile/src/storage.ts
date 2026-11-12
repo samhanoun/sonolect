@@ -149,8 +149,9 @@ export const mobileStorage = {
   },
 
   /**
-   * Saves the notes that changed. After a load that failed, saves only add
-   * or update notes until a launch reads them all again.
+   * Saves the notes that changed. After a load that failed, saves add,
+   * update and remove the notes this session showed, but never write the
+   * index, until a launch reads them all again.
    */
   async saveNotes(history: readonly TranscriptTurn[]): Promise<void> {
     await notes.save(history);

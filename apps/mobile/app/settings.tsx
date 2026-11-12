@@ -21,9 +21,9 @@ import { LANGUAGE_NAMES, strings } from "../src/i18n";
 import { isAllowedApiUrl } from "../src/localApi";
 import { noticeText, storageBanner } from "../src/notices";
 import {
-  clearHistoryTitle,
+  clearHistoryPrompt,
   historyOffConfirmation,
-  historyOffTitle,
+  historyOffPrompt,
 } from "../src/settingsPolicy";
 import { useCompanionStore } from "../src/store";
 import {
@@ -100,7 +100,7 @@ export default function SettingsScreen() {
       confirming.current = true;
       try {
         const confirmed = await confirm({
-          title: historyOffTitle(t, confirmation),
+          ...historyOffPrompt(t, confirmation),
           confirmLabel: t.settings.deleteNotes,
           cancelLabel: t.common.cancel,
           destructive: true,
@@ -113,7 +113,7 @@ export default function SettingsScreen() {
     await updateSettings(patch);
   };
 
-  const clearTitle = clearHistoryTitle(t, history.length, storageDegraded);
+  const clearPrompt = clearHistoryPrompt(t, history.length, storageDegraded);
 
   const saveApi = async () => {
     if (!urlValid) return;
@@ -438,12 +438,12 @@ export default function SettingsScreen() {
                 icon="trash"
                 label={t.settings.clearHistory}
                 // Nothing to delete: no notes, and none that couldn't be read.
-                disabled={clearTitle === null}
+                disabled={clearPrompt === null}
                 onPress={async () => {
                   if (
-                    clearTitle !== null &&
+                    clearPrompt !== null &&
                     (await confirm({
-                      title: clearTitle,
+                      ...clearPrompt,
                       confirmLabel: t.settings.clearButton,
                       cancelLabel: t.common.cancel,
                       destructive: true,
@@ -458,7 +458,8 @@ export default function SettingsScreen() {
                 onPress={async () => {
                   if (
                     await confirm({
-                      title: t.settings.eraseConfirm,
+                      title: t.settings.eraseTitle,
+                      message: t.settings.eraseMessage,
                       confirmLabel: t.settings.eraseButton,
                       cancelLabel: t.common.cancel,
                       destructive: true,

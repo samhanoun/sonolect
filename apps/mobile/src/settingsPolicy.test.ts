@@ -5,9 +5,9 @@ import type { CompanionSettings } from "./domain";
 import { DEFAULT_SETTINGS, keepsHistory } from "./domain";
 import { STRINGS } from "./i18n";
 import {
-  clearHistoryTitle,
+  clearHistoryPrompt,
   historyOffConfirmation,
-  historyOffTitle,
+  historyOffPrompt,
   httpsUrlOrNull,
 } from "./settingsPolicy";
 
@@ -108,41 +108,102 @@ describe("historyOffConfirmation", () => {
   });
 });
 
-describe("confirmation titles", () => {
-  it("names the count and the change", () => {
-    assert.equal(
-      historyOffTitle(STRINGS.en, { kind: "ephemeral", count: 3 }),
-      "Switch to Ephemeral? This deletes 3 notes saved on this phone.",
+describe("confirmation prompts", () => {
+  it("asks about the change and counts the notes in the message", () => {
+    assert.deepEqual(
+      historyOffPrompt(STRINGS.en, { kind: "ephemeral", count: 3 }),
+      {
+        title: "Switch to Ephemeral?",
+        message: "This deletes 3 notes saved on this phone.",
+      },
     );
-    assert.equal(
-      historyOffTitle(STRINGS.fr, { kind: "historyOff", count: 1 }),
-      "Désactiver l'historique ? Cela supprime 1 note enregistrée sur ce téléphone.",
+    assert.deepEqual(
+      historyOffPrompt(STRINGS.fr, { kind: "historyOff", count: 1 }),
+      {
+        title: "Désactiver l'historique ?",
+        message: "Cela supprime 1 note enregistrée sur ce téléphone.",
+      },
     );
   });
 
   it("names no count when notes could not be read", () => {
     for (const ui of ["en", "fr"] as const) {
-      assert.equal(
-        historyOffTitle(STRINGS[ui], {
+      const t = STRINGS[ui];
+      assert.deepEqual(
+        historyOffPrompt(t, {
           kind: "historyOff",
           count: 0,
           notesUnread: true,
         }),
-        STRINGS[ui].errorBoundary.deleteNotesConfirm,
+        {
+          title: t.settings.historyOffTitle,
+          message: t.errorBoundary.deleteNotesMessage,
+        },
       );
-      assert.equal(
-        clearHistoryTitle(STRINGS[ui], 2, true),
-        STRINGS[ui].errorBoundary.deleteNotesConfirm,
-      );
+      assert.deepEqual(clearHistoryPrompt(t, 2, true), {
+        title: t.settings.clearHistoryTitle,
+        message: t.errorBoundary.deleteNotesMessage,
+      });
+      assert.doesNotMatch(t.errorBoundary.deleteNotesMessage, /\d/);
     }
   });
 
   it("has nothing to clear without notes", () => {
-    assert.equal(clearHistoryTitle(STRINGS.en, 0), null);
-    assert.equal(
-      clearHistoryTitle(STRINGS.en, 42),
-      "Delete all 42 notes from this phone?",
-    );
+    assert.equal(clearHistoryPrompt(STRINGS.en, 0), null);
+    assert.deepEqual(clearHistoryPrompt(STRINGS.en, 42), {
+      title: "Clear history?",
+      message: "This deletes 42 notes saved on this phone.",
+    });
+  });
+});
+
+describe("confirmation titles fit an Android alert", () => {
+  // react-native's Android Alert shows at most two lines of its title and
+  // cuts the rest with an ellipsis (alert_title_layout.xml: singleLine,
+  // ellipsize end; DialogTitle.onMeasure raises maxLines to 2 only). On a
+  // narrow phone with larger text, two lines hold about 32 characters, so
+  // titles stay short questions and what is deleted goes in the message.
+  const MAX_TITLE = 32;
+  const counts = [1, 2, 42, 999, 123_456];
+
+  it("keeps every confirmation title short, with no count in it", () => {
+    for (const ui of ["en", "fr"] as const) {
+      const t = STRINGS[ui];
+      const titles = [
+        t.settings.clearHistoryTitle,
+        t.settings.historyOffTitle,
+        t.settings.ephemeralTitle,
+        t.settings.eraseTitle,
+        t.errorBoundary.deleteNotesTitle,
+        t.library.deleteConfirm,
+        t.capture.discardTitle,
+      ];
+      for (const title of titles) {
+        assert.ok(title.length <= MAX_TITLE, `${ui}: ${title}`);
+        assert.doesNotMatch(title, /\d/, `${ui}: ${title}`);
+      }
+    }
+  });
+
+  it("puts every count in the message", () => {
+    for (const ui of ["en", "fr"] as const) {
+      const t = STRINGS[ui];
+      for (const count of counts) {
+        const prompts = [
+          historyOffPrompt(t, { kind: "historyOff", count }),
+          historyOffPrompt(t, { kind: "ephemeral", count }),
+          clearHistoryPrompt(t, count),
+        ];
+        for (const prompt of prompts) {
+          assert.ok(prompt);
+          assert.ok(prompt.title.length <= MAX_TITLE, `${ui}: ${prompt.title}`);
+          assert.ok(
+            prompt.message.includes(String(count)),
+            `${ui}: ${prompt.message}`,
+          );
+        }
+      }
+    }
   });
 });
 

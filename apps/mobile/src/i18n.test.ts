@@ -4,65 +4,46 @@ import { describe, it } from "node:test";
 import { STRINGS } from "./i18n";
 
 describe("settings confirmations", () => {
-  it("counts notes in Clear history (en)", () => {
-    const t = STRINGS.en.settings;
-    assert.equal(t.clearHistoryConfirm(1), "Delete the note from this phone?");
-    assert.equal(
-      t.clearHistoryConfirm(42),
-      "Delete all 42 notes from this phone?",
-    );
-  });
-
-  it("counts notes in Clear history (fr)", () => {
-    const t = STRINGS.fr.settings;
-    assert.equal(
-      t.clearHistoryConfirm(1),
-      "Supprimer la note de ce téléphone ?",
-    );
-    assert.equal(
-      t.clearHistoryConfirm(42),
-      "Supprimer les 42 notes de ce téléphone ?",
-    );
-  });
-
-  it("uses the singular and plural when history goes off (en)", () => {
+  it("counts the notes deleted, singular and plural (en)", () => {
     const t = STRINGS.en.settings;
     assert.equal(
-      t.historyOffConfirm(1),
-      "Turn off saved history? This deletes 1 note saved on this phone.",
+      t.deleteNotesMessage(1),
+      "This deletes 1 note saved on this phone.",
     );
     assert.equal(
-      t.historyOffConfirm(2),
-      "Turn off saved history? This deletes 2 notes saved on this phone.",
+      t.deleteNotesMessage(2),
+      "This deletes 2 notes saved on this phone.",
     );
     assert.equal(
-      t.ephemeralConfirm(1),
-      "Switch to Ephemeral? This deletes 1 note saved on this phone.",
-    );
-    assert.equal(
-      t.ephemeralConfirm(2),
-      "Switch to Ephemeral? This deletes 2 notes saved on this phone.",
+      t.deleteNotesMessage(42),
+      "This deletes 42 notes saved on this phone.",
     );
   });
 
-  it("uses the singular and plural when history goes off (fr)", () => {
+  it("counts the notes deleted, singular and plural (fr)", () => {
     const t = STRINGS.fr.settings;
     assert.equal(
-      t.historyOffConfirm(1),
-      "Désactiver l'historique ? Cela supprime 1 note enregistrée sur ce téléphone.",
+      t.deleteNotesMessage(1),
+      "Cela supprime 1 note enregistrée sur ce téléphone.",
     );
     assert.equal(
-      t.historyOffConfirm(2),
-      "Désactiver l'historique ? Cela supprime 2 notes enregistrées sur ce téléphone.",
+      t.deleteNotesMessage(2),
+      "Cela supprime 2 notes enregistrées sur ce téléphone.",
     );
     assert.equal(
-      t.ephemeralConfirm(1),
-      "Passer en mode éphémère ? Cela supprime 1 note enregistrée sur ce téléphone.",
+      t.deleteNotesMessage(42),
+      "Cela supprime 42 notes enregistrées sur ce téléphone.",
     );
-    assert.equal(
-      t.ephemeralConfirm(2),
-      "Passer en mode éphémère ? Cela supprime 2 notes enregistrées sur ce téléphone.",
+  });
+
+  it("says that deleting every note or erasing can't be undone", () => {
+    assert.match(
+      STRINGS.en.errorBoundary.deleteNotesMessage,
+      /can't be undone/,
     );
+    assert.match(STRINGS.en.settings.eraseMessage, /can't be undone/);
+    assert.match(STRINGS.fr.errorBoundary.deleteNotesMessage, /irréversible/);
+    assert.match(STRINGS.fr.settings.eraseMessage, /irréversible/);
   });
 });
 

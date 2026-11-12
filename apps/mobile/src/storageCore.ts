@@ -10,6 +10,9 @@ import type { DictionaryEntry, Snippet, TranscriptTurn } from "./domain";
  * - a note whose JSON is broken is copied to `<key>.corrupt`, then removed;
  * - a save writes the changed notes, then removes the deleted ones, then
  *   writes the index, so a crash never brings a deleted note back;
+ * - after a load that failed, a save adds, updates and removes the notes
+ *   this session showed, but never writes the index; the ids it removes
+ *   are recorded first, so the v2 history can't bring them back;
  * - the v2 history value is removed only after the new index was written
  *   and read back.
  */
@@ -32,6 +35,11 @@ export const NOTE_PREFIX = "sonolect.mobile.note.";
 export const INDEX_KEY = "sonolect.mobile.notes.index.v3";
 /** The whole history as one JSON array, before v3. */
 export const LEGACY_V2_KEY = "sonolect.mobile.history.v2";
+/**
+ * `{"v":3,"ids":[...]}`: the notes deleted after a load that failed. The v2
+ * history may still hold them, so the migration skips them.
+ */
+export const DELETED_KEY = "sonolect.mobile.notes.deleted.v3";
 /** v0.1's history key. */
 export const LEGACY_V1_KEY = "sonolect.mobile.history";
 /** A value that could not be parsed is kept under its key plus this. */
@@ -203,6 +211,11 @@ export function parseIndex(raw: string): string[] | null {
   return [...unique];
 }
 
+/** The ids of a DELETED_KEY value; none when absent or unparseable. */
+function parseDeleted(raw: string | null | undefined): string[] {
+  return raw === null || raw === undefined ? [] : (parseIndex(raw) ?? []);
+}
+
 function chunk<T>(items: readonly T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let start = 0; start < items.length; start += size) {
@@ -267,9 +280,10 @@ function sameIds(left: readonly string[] | null, right: readonly string[]) {
 
 export interface NotesLoad {
   /**
-   * False: some saved notes could not be read. Nothing was deleted, `notes`
-   * holds what could be read without changing anything, and saves only add
-   * or update notes until the next load succeeds.
+   * False: some saved notes could not be read. Nothing was deleted, and
+   * `notes` holds what could be read without changing anything. Until the
+   * next load succeeds, saves add, update and remove these notes and the
+   * new ones, but never write the index.
    */
   ok: boolean;
   /** Newest first. */
@@ -295,8 +309,8 @@ export function createNoteStore(
   }: { now?: () => number; batchSize?: number } = {},
 ): NoteStore {
   const size = Math.max(1, Math.floor(batchSize));
-  // Until a load succeeds, the stored notes are unknown: saves then add or
-  // update notes only, and never remove a key or write the index.
+  // Until a load succeeds, the stored notes are unknown: saves then remove
+  // only the notes this session read or wrote, and never write the index.
   let degraded = true;
   /**
    * What the store holds for each note this session knows: its JSON, and
@@ -325,13 +339,25 @@ export function createNoteStore(
     );
   };
 
-  const listNoteIds = async (): Promise<string[] | null> => {
+  /** Every key; null on a listing error. */
+  const listKeys = async (): Promise<readonly string[] | null> => {
     try {
-      return (await kv.getAllKeys())
-        .filter(isNoteKey)
-        .map((key) => key.slice(NOTE_PREFIX.length));
+      return await kv.getAllKeys();
     } catch {
       return null;
+    }
+  };
+
+  const noteIdsIn = (keys: readonly string[]): string[] =>
+    keys.filter(isNoteKey).map((key) => key.slice(NOTE_PREFIX.length));
+
+  /** The deleted ids recorded while degraded are no longer needed. */
+  const forgetDeleted = async (keys: readonly string[] | null) => {
+    if (!keys?.includes(DELETED_KEY)) return;
+    try {
+      await kv.removeItem(DELETED_KEY);
+    } catch {
+      // Removed by a later load.
     }
   };
 
@@ -393,8 +419,8 @@ export function createNoteStore(
    */
   const failed = async (nowMs: number): Promise<NotesLoad> => {
     degraded = true;
-    const ids = await listNoteIds();
-    const read = ids ? await readNotes(ids, nowMs) : null;
+    const keys = await listKeys();
+    const read = keys ? await readNotes(noteIdsIn(keys), nowMs) : null;
     const notes = read ? [...read.notes.values()].sort(newestFirst) : [];
     remember(notes);
     return { ok: false, notes: notes.map((stored) => stored.turn) };
@@ -434,9 +460,8 @@ export function createNoteStore(
     // or a crash before the index write). A listing error only postpones
     // them to the next load.
     const listed = new Set(ids);
-    const orphanIds = ((await listNoteIds()) ?? []).filter(
-      (id) => !listed.has(id),
-    );
+    const keys = await listKeys();
+    const orphanIds = noteIdsIn(keys ?? []).filter((id) => !listed.has(id));
     let orphans: StoredNote[] = [];
     if (orphanIds.length > 0) {
       const orphanRead = await readNotes(orphanIds, nowMs);
@@ -446,7 +471,9 @@ export function createNoteStore(
       }
     }
     const notes = orphans.length > 0 ? mergeByDate(indexed, orphans) : indexed;
-    if (orphans.length > 0 || rewrite) {
+    // A listed note that is gone (deleted while degraded, or set aside as
+    // broken) leaves the index.
+    if (orphans.length > 0 || rewrite || indexed.length !== ids.length) {
       try {
         await kv.setItem(
           INDEX_KEY,
@@ -456,6 +483,8 @@ export function createNoteStore(
         // Every save writes the index again.
       }
     }
+    // With an index, the v2 history is never read again.
+    await forgetDeleted(keys);
     return loaded(notes);
   };
 
@@ -472,12 +501,19 @@ export function createNoteStore(
     if (v2Raw !== null) {
       const value = parseJson(v2Raw);
       if (Array.isArray(value)) {
+        // Notes deleted while the migration could not finish stay deleted.
+        let deleted: Set<string>;
+        try {
+          deleted = new Set(parseDeleted(await kv.getItem(DELETED_KEY)));
+        } catch {
+          return failed(nowMs);
+        }
         const seen = new Set<string>();
         for (const item of value as unknown[]) {
           const turn = sanitizeTurn(item, nowMs);
           if (!turn || seen.has(turn.id) || isV01Sample(turn)) continue;
           seen.add(turn.id);
-          fromV2.push(turn);
+          if (!deleted.has(turn.id)) fromV2.push(turn);
         }
       } else {
         // Not a history: keep a copy, then remove it.
@@ -498,9 +534,9 @@ export function createNoteStore(
     // Note keys that exist already were written by this version (a session
     // that couldn't finish the migration, or a crash before the first index
     // write). They are at least as new as their v2 copies, so they win.
-    const storedIds = await listNoteIds();
-    if (!storedIds) return failed(nowMs);
-    const read = await readNotes(storedIds, nowMs);
+    const keys = await listKeys();
+    if (!keys) return failed(nowMs);
+    const read = await readNotes(noteIdsIn(keys), nowMs);
     if (!read) return failed(nowMs);
     await setAside(read.broken);
     const stored = read.notes;
@@ -530,7 +566,10 @@ export function createNoteStore(
       .sort(newestFirst);
     const notes = mergeByDate(migrated, others);
     // A fresh install: nothing to write.
-    if (v2Raw === null && notes.length === 0) return loaded(notes);
+    if (v2Raw === null && notes.length === 0) {
+      await forgetDeleted(keys);
+      return loaded(notes);
+    }
 
     const ids = notes.map((note) => note.turn.id);
     try {
@@ -560,6 +599,7 @@ export function createNoteStore(
         // Unused from now on: loads read the index.
       }
     }
+    await forgetDeleted(keys);
     return loaded(notes);
   };
 
@@ -594,11 +634,22 @@ export function createNoteStore(
     }
 
     for (const batch of chunk(changed, size)) await kv.multiSet(batch);
+    // Only notes this session read or wrote, which are the ones it showed:
+    // a note it could not read is never removed.
+    const removed = [...known.keys()].filter((id) => !next.has(id));
+    if (degraded && removed.length > 0) {
+      // Recorded first: the v2 history may still hold them. A read error
+      // rejects the save, and nothing is removed.
+      const deleted = parseDeleted(await kv.getItem(DELETED_KEY));
+      await kv.setItem(
+        DELETED_KEY,
+        serializeIndex([...new Set([...deleted, ...removed])]),
+      );
+    }
+    for (const batch of chunk(removed.map(noteKey), size)) {
+      await kv.multiRemove(batch);
+    }
     if (!degraded) {
-      const removed = [...known.keys()]
-        .filter((id) => !next.has(id))
-        .map(noteKey);
-      for (const batch of chunk(removed, size)) await kv.multiRemove(batch);
       await kv.setItem(INDEX_KEY, serializeIndex([...next.keys()]));
     }
     // A failure above keeps the previous baseline, so the next save writes
@@ -610,6 +661,7 @@ export function createNoteStore(
     const keys = new Set<string>([
       INDEX_KEY,
       `${INDEX_KEY}${CORRUPT_SUFFIX}`,
+      DELETED_KEY,
       LEGACY_V2_KEY,
       `${LEGACY_V2_KEY}${CORRUPT_SUFFIX}`,
       LEGACY_V1_KEY,

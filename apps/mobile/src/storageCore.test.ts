@@ -5,6 +5,7 @@ import type { TranscriptTurn } from "./domain";
 import type { KeyValueStore } from "./storageCore";
 import {
   CORRUPT_SUFFIX,
+  DELETED_KEY,
   INDEX_KEY,
   LEGACY_V1_KEY,
   LEGACY_V2_KEY,
@@ -358,7 +359,7 @@ describe("note store", () => {
     assert.deepEqual(ids(result.notes), ["turn_1", "turn_2"]);
   });
 
-  it("saves only note keys while degraded; the next load recovers them", async () => {
+  it("saves and deletes shown notes while degraded, without the index", async () => {
     const kv = await seeded([note(1), note(2)]);
     kv.fail = (op, keys) => op === "getItem" && keys[0] === INDEX_KEY;
     const store = storeOn(kv);
@@ -369,15 +370,63 @@ describe("note store", () => {
     // A new capture, and note 2 deleted.
     const fresh = note(0);
     await store.save([fresh, ...shown.filter((turn) => turn.id !== "turn_2")]);
-    assert.deepEqual(kv.writes(), [`multiSet ${noteKey(fresh.id)}`]);
+    assert.deepEqual(kv.writes(), [
+      `multiSet ${noteKey(fresh.id)}`,
+      `setItem ${DELETED_KEY}`,
+      `multiRemove ${noteKey("turn_2")}`,
+    ]);
     assert.deepEqual(indexOf(kv), ["turn_1", "turn_2"]);
+    assert.deepEqual(parseIndex(kv.data.get(DELETED_KEY) ?? ""), ["turn_2"]);
 
+    // The next load recovers the new note and drops the deleted one.
     const next = storeOn(kv);
     const result = await next.load();
     assert.equal(result.ok, true);
     assert.equal(next.isDegraded(), false);
-    assert.deepEqual(ids(result.notes), ["turn_0", "turn_1", "turn_2"]);
-    assert.deepEqual(indexOf(kv), ["turn_0", "turn_1", "turn_2"]);
+    assert.deepEqual(ids(result.notes), ["turn_0", "turn_1"]);
+    assert.deepEqual(indexOf(kv), ["turn_0", "turn_1"]);
+    assert.equal(kv.data.has(DELETED_KEY), false);
+  });
+
+  it("never removes a note a degraded session did not read", async () => {
+    const kv = await seeded([note(1), note(2)]);
+    kv.fail = (op, keys) => op === "getItem" && keys[0] === INDEX_KEY;
+    const store = storeOn(kv);
+    const shown = (await store.load()).notes;
+    kv.fail = () => false;
+    // Written after the load, so this session never showed it.
+    kv.data.set(noteKey("turn_3"), JSON.stringify(note(3)));
+    kv.log.length = 0;
+
+    await store.save(shown.filter((turn) => turn.id !== "turn_1"));
+    assert.deepEqual(kv.writes(), [
+      `setItem ${DELETED_KEY}`,
+      `multiRemove ${noteKey("turn_1")}`,
+    ]);
+    assert.ok(kv.data.has(noteKey("turn_3")));
+    assert.deepEqual(ids((await storeOn(kv).load()).notes), [
+      "turn_2",
+      "turn_3",
+    ]);
+  });
+
+  it("removes nothing while degraded when the deleted ids can't be read", async () => {
+    const kv = await seeded([note(1), note(2)]);
+    kv.fail = (op, keys) => op === "getItem" && keys[0] === INDEX_KEY;
+    const store = storeOn(kv);
+    const shown = (await store.load()).notes;
+    kv.fail = (op, keys) => op === "getItem" && keys[0] === DELETED_KEY;
+    kv.log.length = 0;
+
+    const kept = shown.filter((turn) => turn.id !== "turn_2");
+    await assert.rejects(store.save(kept));
+    assert.deepEqual(kv.writes(), []);
+    assert.ok(kv.data.has(noteKey("turn_2")));
+
+    // The next save does what this one could not.
+    kv.fail = () => false;
+    await store.save(kept);
+    assert.equal(kv.data.has(noteKey("turn_2")), false);
   });
 
   it("merges orphans in by date and keeps the index order", async () => {
@@ -429,6 +478,8 @@ describe("note store", () => {
     const result = await storeOn(kv).load();
     assert.equal(result.ok, true);
     assert.deepEqual(ids(result.notes), ["turn_2"]);
+    // It leaves the index.
+    assert.deepEqual(indexOf(kv), ["turn_2"]);
   });
 
   it("deletes nothing when a note read fails", async () => {
@@ -493,6 +544,7 @@ describe("note store", () => {
     kv.data.set(LEGACY_V2_KEY, "[]");
     kv.data.set(`${LEGACY_V2_KEY}${CORRUPT_SUFFIX}`, "[");
     kv.data.set(LEGACY_V1_KEY, "[]");
+    kv.data.set(DELETED_KEY, serializeIndex(["turn_7"]));
     kv.data.set(SETTINGS_KEY, "{}");
     const store = storeOn(kv);
     await store.load();
@@ -630,6 +682,60 @@ describe("v2 to v3 migration", () => {
     const second = await storeOn(kv).load();
     assert.equal(second.ok, false);
     assert.deepEqual(ids(second.notes), ["turn_0"]);
+    assert.deepEqual(kv.writes(), []);
+    assert.equal(kv.data.get(LEGACY_V2_KEY), v2);
+  });
+
+  it("deletes notes saved since, while v2 stays unreadable", async () => {
+    const kv = new MemoryStore();
+    kv.data.set(LEGACY_V2_KEY, v2);
+    kv.fail = (op, keys) => op === "getItem" && keys[0] === LEGACY_V2_KEY;
+    const first = storeOn(kv);
+    await first.load();
+    await first.save([note(6), note(7)]);
+
+    const second = storeOn(kv);
+    const shown = await second.load();
+    assert.equal(shown.ok, false);
+    assert.deepEqual(ids(shown.notes), ["turn_6", "turn_7"]);
+    await second.save(shown.notes.filter((turn) => turn.id !== "turn_7"));
+
+    const third = await storeOn(kv).load();
+    assert.equal(third.ok, false);
+    assert.deepEqual(ids(third.notes), ["turn_6"]);
+    assert.equal(kv.data.get(LEGACY_V2_KEY), v2);
+  });
+
+  it("keeps a note deleted mid-migration out of v2's copy", async () => {
+    // The notes are written, then the index write fails.
+    const kv = new MemoryStore();
+    kv.data.set(LEGACY_V2_KEY, v2);
+    let failures = 1;
+    kv.fail = (op, keys) =>
+      op === "setItem" && keys[0] === INDEX_KEY && failures-- > 0;
+    const store = storeOn(kv);
+    const shown = await store.load();
+    assert.equal(shown.ok, false);
+    assert.deepEqual(shown.notes, migrated);
+    await store.save(shown.notes.filter((turn) => turn.id !== "turn_2"));
+    assert.equal(kv.data.has(noteKey("turn_2")), false);
+
+    kv.fail = () => false;
+    const next = await storeOn(kv).load();
+    assert.equal(next.ok, true);
+    assert.deepEqual(ids(next.notes), ["turn_1", "turn_3"]);
+    assert.deepEqual(indexOf(kv), ["turn_1", "turn_3"]);
+    assert.equal(kv.data.has(LEGACY_V2_KEY), false);
+    assert.equal(kv.data.has(DELETED_KEY), false);
+  });
+
+  it("keeps v2 when the deleted ids can't be read", async () => {
+    const kv = new MemoryStore();
+    kv.data.set(LEGACY_V2_KEY, v2);
+    kv.data.set(DELETED_KEY, serializeIndex(["turn_2"]));
+    kv.fail = (op, keys) => op === "getItem" && keys[0] === DELETED_KEY;
+    const result = await storeOn(kv).load();
+    assert.equal(result.ok, false);
     assert.deepEqual(kv.writes(), []);
     assert.equal(kv.data.get(LEGACY_V2_KEY), v2);
   });

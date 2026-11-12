@@ -39,31 +39,64 @@ export function historyOffConfirmation(
     : { kind, count: noteCount };
 }
 
+/** A deletion confirmation: a short question, then what it deletes. */
+export interface ConfirmPrompt {
+  /**
+   * Kept short: react-native's Android Alert shows at most two lines of
+   * its title and cuts the rest (alert_title_layout.xml is singleLine with
+   * ellipsize end, and DialogTitle.onMeasure only raises maxLines to 2).
+   */
+  title: string;
+  /** Shown in full on every platform: the count goes here. */
+  message: string;
+}
+
 /**
- * The confirmation question. With notes that could not be read, the count
- * is unknown, so the question names no number.
+ * What the confirmation deletes. With notes that could not be read, the
+ * count is unknown, so the message names no number.
  */
-export function historyOffTitle(
+function deletionMessage(
+  t: Strings,
+  count: number,
+  notesUnread: boolean,
+): string {
+  return notesUnread
+    ? t.errorBoundary.deleteNotesMessage
+    : t.settings.deleteNotesMessage(count);
+}
+
+/** The confirmation to show for a HistoryOffConfirmation. */
+export function historyOffPrompt(
   t: Strings,
   confirmation: HistoryOffConfirmation,
-): string {
-  if (confirmation.notesUnread) return t.errorBoundary.deleteNotesConfirm;
-  return confirmation.kind === "ephemeral"
-    ? t.settings.ephemeralConfirm(confirmation.count)
-    : t.settings.historyOffConfirm(confirmation.count);
+): ConfirmPrompt {
+  return {
+    title:
+      confirmation.kind === "ephemeral"
+        ? t.settings.ephemeralTitle
+        : t.settings.historyOffTitle,
+    message: deletionMessage(
+      t,
+      confirmation.count,
+      confirmation.notesUnread === true,
+    ),
+  };
 }
 
 /**
  * Clear history: null when there is nothing to delete (the button is then
- * disabled), otherwise the question to ask.
+ * disabled), otherwise the confirmation to show.
  */
-export function clearHistoryTitle(
+export function clearHistoryPrompt(
   t: Strings,
   noteCount: number,
   notesUnread = false,
-): string | null {
-  if (notesUnread) return t.errorBoundary.deleteNotesConfirm;
-  return noteCount > 0 ? t.settings.clearHistoryConfirm(noteCount) : null;
+): ConfirmPrompt | null {
+  if (noteCount <= 0 && !notesUnread) return null;
+  return {
+    title: t.settings.clearHistoryTitle,
+    message: deletionMessage(t, noteCount, notesUnread),
+  };
 }
 
 /** https://, a host, then an optional path, query or fragment; no spaces. */

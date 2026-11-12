@@ -213,13 +213,22 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   const busy = useRef(false);
   const message = error instanceof Error ? error.message : String(error);
 
-  /** Asks first, then deletes and renders the app again. */
-  const deleteAndRetry = async (title: string, wipe: () => Promise<void>) => {
+  /**
+   * Asks first, then deletes and renders the app again. The title stays a
+   * short question: Android cuts an Alert title after two lines, so what is
+   * deleted goes in the message.
+   */
+  const deleteAndRetry = async (
+    title: string,
+    message: string,
+    wipe: () => Promise<void>,
+  ) => {
     if (busy.current) return;
     busy.current = true;
     try {
       const confirmed = await confirm({
         title,
+        message,
         confirmLabel: t.common.confirm,
         cancelLabel: t.common.cancel,
         destructive: true,
@@ -253,8 +262,10 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
         <RecoveryButton
           label={t.errorBoundary.deleteNotes}
           onPress={() =>
-            void deleteAndRetry(t.errorBoundary.deleteNotesConfirm, () =>
-              useCompanionStore.getState().clearHistory(),
+            void deleteAndRetry(
+              t.errorBoundary.deleteNotesTitle,
+              t.errorBoundary.deleteNotesMessage,
+              () => useCompanionStore.getState().clearHistory(),
             )
           }
         />
@@ -262,8 +273,10 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
           variant="danger"
           label={t.settings.eraseAll}
           onPress={() =>
-            void deleteAndRetry(t.settings.eraseConfirm, () =>
-              useCompanionStore.getState().eraseAll(),
+            void deleteAndRetry(
+              t.settings.eraseTitle,
+              t.settings.eraseMessage,
+              () => useCompanionStore.getState().eraseAll(),
             )
           }
         />

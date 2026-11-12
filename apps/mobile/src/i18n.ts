@@ -219,18 +219,17 @@ const en = {
     remove: "Remove",
     data: "DATA",
     clearHistory: "Clear history",
-    clearHistoryConfirm: (n: number) =>
-      n === 1
-        ? "Delete the note from this phone?"
-        : `Delete all ${n} notes from this phone?`,
+    clearHistoryTitle: "Clear history?",
     clearButton: "Delete",
-    historyOffConfirm: (n: number) =>
-      `Turn off saved history? This deletes ${n} ${n === 1 ? "note" : "notes"} saved on this phone.`,
-    ephemeralConfirm: (n: number) =>
-      `Switch to Ephemeral? This deletes ${n} ${n === 1 ? "note" : "notes"} saved on this phone.`,
+    historyOffTitle: "Turn off saved history?",
+    ephemeralTitle: "Switch to Ephemeral?",
+    deleteNotesMessage: (n: number) =>
+      `This deletes ${n} ${n === 1 ? "note" : "notes"} saved on this phone.`,
     deleteNotes: "Delete notes",
     eraseAll: "Erase all data",
-    eraseConfirm: "Erase all Sonolect data on this phone?",
+    eraseTitle: "Erase all data?",
+    eraseMessage:
+      "All Sonolect data on this phone will be erased. This can't be undone.",
     eraseButton: "Erase",
     about: "Sonolect mobile · your notes stay on this phone",
     privacyPolicy: "Privacy policy",
@@ -248,8 +247,9 @@ const en = {
     body: "Sonolect hit an unexpected problem. Your notes are still on this phone.",
     tryAgain: "Try again",
     deleteNotes: "Delete saved notes",
-    deleteNotesConfirm:
-      "Delete all notes saved on this phone? This can't be undone.",
+    deleteNotesTitle: "Delete all saved notes?",
+    deleteNotesMessage:
+      "Every note saved on this phone will be deleted. This can't be undone.",
   },
   /** Language names used inside sentences. */
   languageNames: {
@@ -484,18 +484,17 @@ const fr: Strings = {
     remove: "Retirer",
     data: "DONNÉES",
     clearHistory: "Effacer l'historique",
-    clearHistoryConfirm: (n: number) =>
-      n === 1
-        ? "Supprimer la note de ce téléphone ?"
-        : `Supprimer les ${n} notes de ce téléphone ?`,
+    clearHistoryTitle: "Effacer l'historique ?",
     clearButton: "Supprimer",
-    historyOffConfirm: (n: number) =>
-      `Désactiver l'historique ? Cela supprime ${n} note${n > 1 ? "s" : ""} enregistrée${n > 1 ? "s" : ""} sur ce téléphone.`,
-    ephemeralConfirm: (n: number) =>
-      `Passer en mode éphémère ? Cela supprime ${n} note${n > 1 ? "s" : ""} enregistrée${n > 1 ? "s" : ""} sur ce téléphone.`,
+    historyOffTitle: "Désactiver l'historique ?",
+    ephemeralTitle: "Passer en mode éphémère ?",
+    deleteNotesMessage: (n: number) =>
+      `Cela supprime ${n} note${n > 1 ? "s" : ""} enregistrée${n > 1 ? "s" : ""} sur ce téléphone.`,
     deleteNotes: "Supprimer les notes",
     eraseAll: "Effacer toutes les données",
-    eraseConfirm: "Effacer toutes les données Sonolect de ce téléphone ?",
+    eraseTitle: "Effacer toutes les données ?",
+    eraseMessage:
+      "Toutes les données Sonolect de ce téléphone seront effacées. Cette action est irréversible.",
     eraseButton: "Effacer",
     about: "Sonolect mobile · vos notes restent sur ce téléphone",
     privacyPolicy: "Politique de confidentialité",
@@ -513,8 +512,9 @@ const fr: Strings = {
     body: "Sonolect a rencontré un problème inattendu. Vos notes sont toujours sur ce téléphone.",
     tryAgain: "Réessayer",
     deleteNotes: "Supprimer les notes enregistrées",
-    deleteNotesConfirm:
-      "Supprimer toutes les notes enregistrées sur ce téléphone ? Cette action est irréversible.",
+    deleteNotesTitle: "Supprimer toutes les notes ?",
+    deleteNotesMessage:
+      "Toutes les notes enregistrées sur ce téléphone seront supprimées. Cette action est irréversible.",
   },
   languageNames: {
     "en-US": "anglais",
