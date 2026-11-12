@@ -28,7 +28,7 @@ overrides:
 
 patchedDependencies:
   expo-speech-recognition@58.0.1:
-    hash: tx4362lbbkygparqwvnim6ulji
+    hash: ikdqb42sxqk7nzaw2gze3tn2d4
     path: patches/expo-speech-recognition@58.0.1.patch
 
 importers:
@@ -191,7 +191,7 @@ importers:
         version: 58.0.3(expo@58.0.23)
       expo-speech-recognition:
         specifier: ~58.0.1
-        version: 58.0.1(patch_hash=tx4362lbbkygparqwvnim6ulji)(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
+        version: 58.0.1(patch_hash=ikdqb42sxqk7nzaw2gze3tn2d4)(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
       expo-splash-screen:
         specifier: ~58.0.13
         version: 58.0.13(expo@58.0.23)(typescript@5.9.3)
@@ -7201,7 +7201,7 @@ snapshots:
       - supports-color
       - typescript
 
-  expo-speech-recognition@58.0.1(patch_hash=tx4362lbbkygparqwvnim6ulji)(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0):
+  expo-speech-recognition@58.0.1(patch_hash=ikdqb42sxqk7nzaw2gze3tn2d4)(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0):
     dependencies:
       expo: 58.0.23(@babel/core@7.29.13)(@expo/dom-webview@58.0.2)(@expo/metro-runtime@58.0.17)(expo-router@58.0.30)(react-dom@19.3.0(react@19.3.0))(react-native-web@0.21.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)(typescript@5.9.3)
       react: 19.3.0

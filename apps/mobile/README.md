@@ -177,3 +177,12 @@ Native's `gradle/libs.versions.toml` asks for, so it needs no edit.
 Reanimated and Gesture Handler. The app uses neither, so the root
 `package.json` removes them with pnpm overrides. Without that, pnpm installs
 an old Reanimated that Expo autolinks into the Android build.
+
+`patches/expo-speech-recognition@58.0.1.patch` (applied by pnpm through
+`patchedDependencies` in the root `package.json`) makes on-device recognition
+fail closed on iOS, adds `supportsOnDeviceRecognitionForLocale`, and keeps
+transcript text out of the Android log. It only applies to that exact
+version: when `expo-speech-recognition` changes, run
+`pnpm patch expo-speech-recognition@<new>`, make the same changes again, run
+`pnpm patch-commit <dir>`, and delete the old patch and its
+`patchedDependencies` entry.

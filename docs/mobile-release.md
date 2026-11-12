@@ -10,11 +10,13 @@ server.
 `apps/mobile/app.config.js` reads these through
 `apps/mobile/config/release.cjs`. Nothing in the repo or in CI sets them.
 
-| Variable                      | Used for                                                                                                                                                       |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SONOLECT_PRIVACY_POLICY_URL` | The hosted privacy policy. Settings and the onboarding card link to it. It must be an `https://` URL. Unset, the app shows no link.                            |
-| `SONOLECT_RELEASE`            | Set it to `1` for a release built without EAS (a local `expo prebuild` or archive). It makes the policy URL required.                                          |
-| `EAS_BUILD_PROFILE`           | Set by EAS Build, not by you. The `production` profile counts as a release build, so it needs the policy URL too. Other profiles (preview, development) don't. |
+| Variable                      | Used for                                                                                                                                                                                                                    |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SONOLECT_PRIVACY_POLICY_URL` | The hosted privacy policy. Settings and the onboarding card link to it. It must be an `https://` URL. Unset, the app shows no link.                                                                                         |
+| `SONOLECT_RELEASE`            | Set it to `1` for a release built without EAS (a local `expo prebuild` or archive). It makes the policy URL and `SONOLECT_BUILD_NUMBER` required. Do not set it in `eas.json`.                                              |
+| `SONOLECT_BUILD_NUMBER`       | The build number of a local release archive: it sets `ios.buildNumber` (CFBundleVersion) and `android.versionCode`. A whole number from 1 to 2100000000, raised for every upload. EAS builds use remote versioning instead. |
+| `EAS_BUILD_PROFILE`           | Set by EAS Build, not by you. The `production` profile counts as a release build, so it needs the policy URL too. Other profiles (preview, development) don't.                                                              |
+| `EAS_BUILD`                   | Set to `true` by EAS Build on its build servers, not by you. There `SONOLECT_BUILD_NUMBER` is not needed, and the `bundleRelease` signing check is skipped.                                                                 |
 
 Development builds, `expo start`, the web export and the CI jobs run without
 these variables. They build normally and show no policy link.
@@ -46,11 +48,12 @@ A URL that is not `https://` stops every build, release or not:
   environment with `eas env:create`, with plain-text visibility: the URL is
   public, and `eas build` reads `app.config.js` on your computer before the
   upload, which secret variables are not available to. It reads it again on
-  the build server. The production build profile in `eas.json` must use the
-  production environment (`"environment": "production"`). Because the value
-  is public, the profile's `env` in `eas.json` also works.
-- **Local release build**: export both variables in the shell that runs
-  `expo prebuild` and the native build (`./gradlew bundleRelease`,
+  the build server. The production build profile in `apps/mobile/eas.json`
+  uses the production environment (`"environment": "production"`). Because
+  the value is public, the profile's `env` in `eas.json` would also work.
+- **Local release build**: export `SONOLECT_RELEASE=1`, the URL and
+  `SONOLECT_BUILD_NUMBER` (see [Versioning](#versioning)) in the shell that
+  runs `expo prebuild` and the native build (`./gradlew bundleRelease`,
   `xcodebuild archive`, `expo run:android --variant release` or
   `expo run:ios --configuration Release`). The native build is when
   `expo-constants` reads the config and puts it into the app, so the URL
@@ -58,11 +61,162 @@ A URL that is not `https://` stops every build, release or not:
   ignores. An archive started from the Xcode app does not see variables
   exported in a terminal, so use a `.env` file there.
 - **Check**: in `apps/mobile`, run
-  `SONOLECT_RELEASE=1 pnpm exec expo config --type public --json` with the
-  URL set. `extra.privacyPolicyUrl` must show it. Without the URL the command
-  fails with the message above.
+  `SONOLECT_RELEASE=1 SONOLECT_BUILD_NUMBER=<n> pnpm exec expo config --type public --json`
+  with the URL set. `extra.privacyPolicyUrl` must show it. Without the URL
+  the command fails with the message above.
 
 The URL is built into the app. Changing it needs a new build.
+
+## Signing
+
+The Expo template signs release builds with the debug keystore that ships
+with every Expo and React Native template. Its private key is public, so
+anyone could sign an "update" of `com.sonolect.app` that Android installs
+over the real app, with access to its notes. A debug-signed build must never
+leave the team, and Google Play refuses it. CI's
+`sonolect-android-debug-signed-test-apk` artifact is such a build: internal
+testing only. Testers who install it must uninstall it before they can
+install a properly signed build, which deletes their notes.
+
+Store builds are signed with the owner's upload key, through one of two
+routes. Both are prepared in the repo; EAS is the recommended one.
+
+### Route (a): EAS Build (recommended)
+
+`apps/mobile/eas.json` has two profiles:
+
+- `preview`: internal distribution. Android builds an installable APK, iOS an
+  ad hoc build for registered devices.
+- `production`: store builds (an Android App Bundle and an iOS archive), with
+  remote versioning and the EAS `production` environment.
+
+Steps, in `apps/mobile`:
+
+1. `eas credentials`: for Android, upload the upload key created below
+   (Needs owner), or let EAS generate one and enrol it in Play App Signing.
+   For iOS, let EAS manage the distribution certificate and the profiles.
+2. `eas build --platform all --profile production`.
+3. `eas submit --profile production` sends the Android bundle to the
+   internal testing track and the iOS build to TestFlight.
+
+EAS signs with the credentials it holds. The `bundleRelease` check of route
+(b) is skipped on its build servers (`EAS_BUILD=true`).
+
+### Route (b): Gradle with the upload key
+
+`apps/mobile/plugins/withReleaseSigning.js` adds a block to the generated
+`android/app/build.gradle`. It reads four Gradle properties:
+
+| Gradle property               | Value                                                   |
+| ----------------------------- | ------------------------------------------------------- |
+| `sonolectUploadStoreFile`     | Absolute path of the upload keystore (`.p12` or `.jks`) |
+| `sonolectUploadStorePassword` | Keystore password                                       |
+| `sonolectUploadKeyAlias`      | Key alias, for example `sonolect-upload`                |
+| `sonolectUploadKeyPassword`   | Key password                                            |
+
+Pass them as environment variables (`ORG_GRADLE_PROJECT_sonolectUploadStoreFile`
+and so on) or in `~/.gradle/gradle.properties`, never in the repo. When
+`sonolectUploadStoreFile` is set, release builds are signed with the upload
+key. When it is not, `./gradlew bundleRelease` stops with
+`bundleRelease needs the private upload key: ...`, and `assembleRelease`
+still builds the debug-signed test APK that CI uses.
+
+A local store bundle, after the variables above are exported:
+
+```bash
+cd apps/mobile
+SONOLECT_RELEASE=1 SONOLECT_BUILD_NUMBER=<n> pnpm exec expo prebuild --no-install --clean --platform android
+cd android && ./gradlew bundleRelease
+# -> app/build/outputs/bundle/release/app-release.aab
+```
+
+CI does not build store bundles. To let it, add secrets for the base64
+keystore and the passwords, a repository variable for the policy URL, and a
+job like this one to `.github/workflows/ci.yml`. Copy the setup steps from
+the `mobile-android` job, and protect the secrets with a GitHub environment:
+
+```yaml
+mobile-android-store-bundle:
+  name: Mobile Android store bundle (upload key)
+  if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  runs-on: instabox-medium
+  timeout-minutes: 60
+  environment: release
+  env:
+    SONOLECT_RELEASE: "1"
+    SONOLECT_PRIVACY_POLICY_URL: ${{ vars.SONOLECT_PRIVACY_POLICY_URL }}
+    # Must be higher than every build already uploaded.
+    SONOLECT_BUILD_NUMBER: ${{ github.run_number }}
+  steps:
+    # Checkout, Setup pnpm, Setup Node.js, Setup Java, Install dependencies,
+    # the Android versions step and Setup Android SDK: as in mobile-android.
+    - name: Generate the Android project
+      run: pnpm --filter @sonolect/mobile exec expo prebuild --no-install --clean --platform android
+
+    - name: Decode the upload key
+      env:
+        UPLOAD_KEYSTORE_BASE64: ${{ secrets.SONOLECT_UPLOAD_KEYSTORE_BASE64 }}
+      run: echo "$UPLOAD_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/upload.p12"
+
+    - name: Build the store bundle
+      working-directory: apps/mobile/android
+      env:
+        ORG_GRADLE_PROJECT_sonolectUploadStoreFile: ${{ runner.temp }}/upload.p12
+        ORG_GRADLE_PROJECT_sonolectUploadStorePassword: ${{ secrets.SONOLECT_UPLOAD_STORE_PASSWORD }}
+        ORG_GRADLE_PROJECT_sonolectUploadKeyAlias: ${{ secrets.SONOLECT_UPLOAD_KEY_ALIAS }}
+        ORG_GRADLE_PROJECT_sonolectUploadKeyPassword: ${{ secrets.SONOLECT_UPLOAD_KEY_PASSWORD }}
+      run: |
+        echo "sdk.dir=$ANDROID_HOME" > local.properties
+        ./gradlew bundleRelease --no-daemon
+
+    - name: Upload the store bundle
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: sonolect-android-release-aab
+        path: apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
+        retention-days: 7
+        if-no-files-found: error
+
+    - name: Delete the upload key
+      if: always()
+      run: rm -f "$RUNNER_TEMP/upload.p12"
+```
+
+## Versioning
+
+The user-facing version is `expo.version` in `apps/mobile/app.json`
+(`0.2.0`). Each upload to a store also needs a build number higher than the
+last one: `versionCode` on Android, `CFBundleVersion` on iOS.
+
+- **EAS builds**: `eas.json` sets `"appVersionSource": "remote"` and
+  `"autoIncrement": true` on the production profile. EAS stores the numbers
+  and raises them for every production build. Set the starting numbers once
+  with `eas build:version:set`, above anything already uploaded. Do not add
+  `android.versionCode` or `ios.buildNumber` to `app.json`: EAS ignores them.
+- **Local release archives**: set `SONOLECT_BUILD_NUMBER`. `config/release.cjs`
+  writes it to `ios.buildNumber` and `android.versionCode`. With
+  `SONOLECT_RELEASE=1` outside EAS and no build number, the config fails with
+  `Set SONOLECT_BUILD_NUMBER for local release builds (EAS builds use remote versioning)`.
+  Check with `SONOLECT_BUILD_NUMBER=7 pnpm exec expo config --type public --json`
+  in `apps/mobile`: it shows `"buildNumber":"7"` and `"versionCode":7`.
+
+## How to check a release
+
+- **No transcripts in logcat** (Android): install the release build, run
+  `adb logcat -s ExpoSpeechService` and dictate. No dictated text may appear.
+  R8 removes `Log.v`, `Log.d` and `Log.i` calls from release builds
+  (`plugins/withReleaseLogStripping.js`), and the patched
+  `expo-speech-recognition` logs only counts, and only after
+  `adb shell setprop log.tag.ExpoSpeechService DEBUG`.
+- **Signature** (Android): `apksigner verify --print-certs app-release.apk`,
+  or `keytool -printcert -jarfile app-release.aab` for a bundle, shows the
+  owner's upload certificate, never `CN=Android Debug`.
+- **Permissions**: the merged Android manifest has `RECORD_AUDIO` and no
+  `USE_BIOMETRIC` or `USE_FINGERPRINT`; the iOS `Info.plist` has no
+  `NSFaceIDUsageDescription`.
+- **Native code** (Android): CI checks that its test APK ships only
+  `arm64-v8a` libraries, so an x86_64 emulator refuses it with
+  `INSTALL_FAILED_NO_MATCHING_ABIS` instead of crashing at launch.
 
 ## What the owner must provide
 
@@ -94,8 +248,8 @@ decisions.
 1. Create the upload key once and keep it out of git:
    `keytool -genkeypair -v -storetype PKCS12 -keystore sonolect-upload.p12 -alias sonolect-upload -keyalg RSA -keysize 4096 -validity 10000`.
 2. Either let EAS hold it (`eas credentials`, the recommended route), or
-   store it as CI secrets for a Gradle signing route (base64 keystore, store
-   password, key alias, key password).
+   store it as CI secrets for the Gradle route (base64 keystore, store
+   password, key alias, key password; see [Signing](#signing)).
 3. Create the Play Console app `com.sonolect.app` and enrol in Play App
    Signing. Upload the first AAB to the internal testing track.
 
@@ -110,14 +264,17 @@ decisions.
 
 1. Use EAS remote versioning, and set the starting build numbers with
    `eas build:version:set`.
-2. Raise the build number for every upload of a local archive.
+2. For a local archive, set `SONOLECT_BUILD_NUMBER` and raise it for every
+   upload (see [Versioning](#versioning)).
 
 ### EAS project
 
 1. `eas login`, then `eas init` in `apps/mobile`. Commit the `projectId` and
    `owner` it adds.
-2. Run a preview build per platform (`eas build --profile preview`). The iOS
-   build is also the compile check for the `expo-speech-recognition` patch.
+2. Run a preview build per platform (`eas build --profile preview`). CI's
+   `Mobile iOS build (simulator, unsigned)` job compiles the
+   `expo-speech-recognition` patch for the simulator; the EAS iOS build
+   checks a device build too.
 
 ### Real-device tests
 

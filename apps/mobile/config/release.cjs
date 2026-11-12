@@ -7,14 +7,24 @@
  * User Data policy). Development and CI builds may leave it unset: the app
  * then shows no link. A release build without it fails here, so a store
  * build can never ship without the link or with a placeholder.
- * See docs/mobile-release.md.
+ *
+ * SONOLECT_BUILD_NUMBER is the build number of a local release archive
+ * (ios-10, android-3): it sets ios.buildNumber (CFBundleVersion) and
+ * android.versionCode. EAS builds use remote versioning (eas.json) instead,
+ * so only a local release build (SONOLECT_RELEASE=1 outside EAS) requires
+ * it. See docs/mobile-release.md.
  */
 
 const POLICY_URL_VAR = "SONOLECT_PRIVACY_POLICY_URL";
+const BUILD_NUMBER_VAR = "SONOLECT_BUILD_NUMBER";
+/** The largest versionCode Google Play accepts. */
+const MAX_BUILD_NUMBER = 2100000000;
 
 const MESSAGES = {
   invalidUrl: `${POLICY_URL_VAR} must be an https:// URL`,
   missingUrl: `${POLICY_URL_VAR} is required for release builds (App Review 5.1.1(i), Google Play User Data policy). See docs/mobile-release.md.`,
+  invalidBuildNumber: `${BUILD_NUMBER_VAR} must be a whole number from 1 to ${MAX_BUILD_NUMBER}`,
+  missingBuildNumber: `Set ${BUILD_NUMBER_VAR} for local release builds (EAS builds use remote versioning)`,
 };
 
 /**
@@ -54,24 +64,56 @@ function privacyPolicyUrlFrom(env) {
 }
 
 /**
- * The Expo config with `extra.privacyPolicyUrl` from the environment. When
- * the URL is unset the key is left out rather than set to null: @expo/config
- * 58 turns a null in a dynamic config into {} (serializeAndEvaluate). The
- * app reads a missing key as no policy link. A value in app.json is dropped,
- * so the environment is the only source.
+ * The build number from the environment, or null when unset. Throws when it
+ * is not a whole number from 1 to MAX_BUILD_NUMBER, and when a local release
+ * build (SONOLECT_RELEASE=1, not on an EAS builder) has none.
+ */
+function buildNumberFrom(env) {
+  const raw = (env[BUILD_NUMBER_VAR] ?? "").trim();
+  if (raw) {
+    if (!/^[1-9][0-9]*$/.test(raw) || Number(raw) > MAX_BUILD_NUMBER) {
+      throw new Error(MESSAGES.invalidBuildNumber);
+    }
+    return Number(raw);
+  }
+  if (env.SONOLECT_RELEASE === "1" && env.EAS_BUILD !== "true") {
+    throw new Error(MESSAGES.missingBuildNumber);
+  }
+  return null;
+}
+
+/**
+ * The Expo config with `extra.privacyPolicyUrl` from the environment, and
+ * ios.buildNumber and android.versionCode from SONOLECT_BUILD_NUMBER when it
+ * is set. When the URL is unset the key is left out rather than set to null:
+ * @expo/config 58 turns a null in a dynamic config into {}
+ * (serializeAndEvaluate). The app reads a missing key as no policy link. A
+ * value in app.json is dropped, so the environment is the only source.
  */
 function resolveReleaseConfig(config, env) {
   const privacyPolicyUrl = privacyPolicyUrlFrom(env);
+  const buildNumber = buildNumberFrom(env);
   const { privacyPolicyUrl: _static, ...extra } = config.extra ?? {};
+  const versions =
+    buildNumber === null
+      ? {}
+      : {
+          ios: { ...config.ios, buildNumber: String(buildNumber) },
+          android: { ...config.android, versionCode: buildNumber },
+        };
   return {
     ...config,
+    ...versions,
     extra: privacyPolicyUrl ? { ...extra, privacyPolicyUrl } : extra,
   };
 }
 
 module.exports = {
+  BUILD_NUMBER_VAR,
+  MAX_BUILD_NUMBER,
   MESSAGES,
   POLICY_URL_VAR,
+  buildNumberFrom,
   isReleaseBuild,
   privacyPolicyUrlFrom,
   resolveReleaseConfig,
