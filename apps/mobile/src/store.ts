@@ -25,8 +25,14 @@ import {
   refineWithApi,
   syncQueuedTranscriptTurns,
 } from "./localApi";
-import type { Notice, NoticeKind } from "./notices";
-import { noticeFor } from "./notices";
+import { createKeepAwake } from "./keepAwake";
+import type { Notice, NoticeChange, NoticeKind } from "./notices";
+import {
+  emptyEndOutcome,
+  noticeFor,
+  refineNoticeChange,
+  replaceNotice,
+} from "./notices";
 import {
   cleanTranscript,
   modeNeedsModel,
@@ -51,6 +57,7 @@ import type {
 import {
   blockedNoticeKind,
   classifySpeechError,
+  downloadNoticeAllowed,
   downloadNoticeKind,
   permissionNoticeKind,
   planRecognition,
@@ -93,7 +100,11 @@ interface CompanionState {
   }) => Promise<void>;
   stopCapture: () => void;
   cancelCapture: () => void;
-  saveTyped: (text: string) => Promise<void>;
+  /**
+   * Saves typed text as a note. False, with nothing saved, when the text is
+   * empty or a dictation listens or is processed.
+   */
+  saveTyped: (text: string) => Promise<boolean>;
   refine: (turnId: string, mode: RefinementMode) => Promise<void>;
   deleteTurn: (turnId: string) => Promise<void>;
   togglePin: (turnId: string) => Promise<void>;
@@ -129,26 +140,18 @@ let watchingAppState = false;
 /** The dictation that stopped because the app went to the background. */
 let backgroundStopId: string | null = null;
 
-const KEEP_AWAKE_TAG = "sonolect-dictation";
-let keptAwake = false;
-let keepAwakeQueue: Promise<void> = Promise.resolve();
+/** Dictations that reached 'listening'; see downloadModel. */
+let dictationsStarted = 0;
 
+const KEEP_AWAKE_TAG = "sonolect-dictation";
 /**
- * Keeps the screen on while dictating: a screen that turns off sends the app
- * to the background, where the microphone stops. The calls are queued so a
- * release never lands before the activation it follows.
+ * Keeps the screen on while dictating. Only the dictation that holds it, or
+ * an exit that ends every dictation, releases it.
  */
-function keepScreenAwake(on: boolean): void {
-  if (keptAwake === on) return;
-  keptAwake = on;
-  keepAwakeQueue = keepAwakeQueue
-    .then(() =>
-      on
-        ? activateKeepAwakeAsync(KEEP_AWAKE_TAG)
-        : deactivateKeepAwake(KEEP_AWAKE_TAG),
-    )
-    .catch(() => undefined);
-}
+const screenAwake = createKeepAwake({
+  activate: () => activateKeepAwakeAsync(KEEP_AWAKE_TAG),
+  deactivate: () => deactivateKeepAwake(KEEP_AWAKE_TAG),
+});
 
 /**
  * Deletes the recordings and recorder temp files in the cache, unless a
@@ -185,6 +188,16 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       });
       return false;
     }
+  };
+
+  /** The state for a notice change (notices.ts); {} when there is none. */
+  const noticePatch = (
+    change: NoticeChange | null,
+  ): Partial<CompanionState> => {
+    if (!change) return {};
+    return change.resetStatus
+      ? { notice: change.notice, capture: idleCapture }
+      : { notice: change.notice };
   };
 
   /** Every note is kept: there is no local cap (data-2). */
@@ -282,7 +295,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       consentOnce,
     });
     if (plan.route === "blocked") {
-      keepScreenAwake(false);
+      screenAwake.release();
       set({
         capture: idleCapture,
         level: 0,
@@ -299,7 +312,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     });
     const deniedKind = permissionNoticeKind(permission);
     if (deniedKind) {
-      keepScreenAwake(false);
+      screenAwake.release();
       set({
         capture: { ...idleCapture, status: "error" },
         level: 0,
@@ -310,7 +323,10 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
 
     const startedAt = new Date().toISOString();
     const captureId = createId("capture");
+    /** The last error notice this dictation raised. */
+    let raised: Notice | null = null;
     backgroundStopId = null;
+    dictationsStarted += 1;
     set({
       notice: null,
       level: 0,
@@ -323,7 +339,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         partialTranscript: "",
       },
     });
-    keepScreenAwake(true);
+    screenAwake.hold(captureId);
 
     // Assigned once the session exists; its handlers only run after that.
     let session: SpeechSession | null = null;
@@ -355,6 +371,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
           // Never a switch to the system speech service here: that needs
           // the user's consent (the notice offers it).
           const notice = noticeFor(kind, language);
+          raised = notice;
           set({ notice });
           if (kind === "modelMissing") invalidateRecognitionEnvironment();
           if (kind === "micDenied") {
@@ -374,9 +391,11 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         onEnd: async ({ text, audio, notice: endNotice }) => {
           ended = true;
           if (activeSession === session) activeSession = null;
+          // Before the check below: this dictation's hold ends with it, even
+          // when something else replaced it on the screen.
+          screenAwake.release(captureId);
           const capture = get().capture;
           if (capture.id !== captureId) return;
-          keepScreenAwake(false);
           const backgrounded = backgroundStopId === captureId;
           if (backgrounded) backgroundStopId = null;
           // Leaving the screen explains the end better than the error it
@@ -407,15 +426,18 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
           });
           if (get().capture.id !== captureId) return;
           if (!turn) {
-            // An error notice reads ATTENTION; an empty dictation is no error,
-            // nor is one the app stopped when it left the screen.
-            set(
-              backgrounded
-                ? { capture: idleCapture }
-                : get().notice
-                  ? { capture: { ...idleCapture, status: "error" } }
-                  : { capture: idleCapture, notice: noticeFor("noSpeech") },
-            );
+            // Only an error this dictation raised reads ATTENTION; an empty
+            // dictation is no error, nor is one the app stopped when it left
+            // the screen.
+            if (backgrounded) {
+              set({ capture: idleCapture });
+              return;
+            }
+            const outcome = emptyEndOutcome(raised, get().notice);
+            set({
+              capture: { ...idleCapture, status: outcome.status },
+              notice: outcome.notice,
+            });
             return;
           }
           // The Capture screen shows and announces `latest` once ready.
@@ -433,8 +455,8 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     );
     if (session && !ended) activeSession = session;
 
+    if (!session) screenAwake.release(captureId);
     if (!session && get().capture.id === captureId) {
-      keepScreenAwake(false);
       set({
         capture: { ...idleCapture, status: "error" },
         level: 0,
@@ -452,7 +474,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     if (capture.status !== "listening") return;
     backgroundStopId = capture.id;
     get().stopCapture();
-    keepScreenAwake(false);
+    screenAwake.release();
     if (get().notice?.kind !== "backgrounded") {
       set({ notice: noticeFor("backgrounded") });
     }
@@ -593,13 +615,17 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     cancelCapture: () => {
       activeSession?.abort();
       activeSession = null;
-      keepScreenAwake(false);
+      screenAwake.release();
       set({ capture: idleCapture, level: 0 });
     },
 
     saveTyped: async (text: string) => {
       const raw = text.trim();
-      if (!raw) return;
+      if (!raw) return false;
+      // The dictation's own end would find its capture replaced and drop
+      // its text.
+      const { status } = get().capture;
+      if (status === "listening" || status === "processing") return false;
       const { settings, dictionary, snippets } = get();
       const turn = buildTurn({
         settings,
@@ -623,6 +649,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         latest: turn,
       });
       await addTurn(turn);
+      return true;
     },
 
     refine: async (turnId: string, mode: RefinementMode) => {
@@ -635,9 +662,16 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         history.find((turn) => turn.id === turnId) ??
         (latest?.id === turnId ? latest : undefined);
       if (!source) return;
-      set({ refining: true, notice: null });
+      // A refinement clears only its own notices: a dictation's error stays
+      // with its ATTENTION status.
+      set({
+        refining: true,
+        ...noticePatch(
+          refineNoticeChange(get().notice, get().capture.status, null),
+        ),
+      });
 
-      let refined: TranscriptTurn;
+      let refined: TranscriptTurn | null = null;
       let notice: Notice | null = null;
       try {
         const context = { language: source.language, dictionary, snippets };
@@ -672,10 +706,18 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
               ? "queued"
               : source.syncState,
         };
-      } finally {
-        // Clear the busy state even when a refinement throws.
-        set({ refining: false, notice });
+      } catch {
+        // The note stays as it was. The Capture screen calls `void refine()`,
+        // so a throw would only be an unhandled rejection: say so instead.
+        notice = noticeFor("refineFailed");
       }
+      set({
+        refining: false,
+        ...noticePatch(
+          refineNoticeChange(get().notice, get().capture.status, notice),
+        ),
+      });
+      if (!refined) return;
       if (get().latest?.id === turnId) set({ latest: refined });
       if (history.some((turn) => turn.id === turnId)) {
         await replaceTurn(refined);
@@ -711,7 +753,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       void ttsController.stop();
       activeSession?.abort();
       activeSession = null;
-      keepScreenAwake(false);
+      screenAwake.release();
       const erased = await persist(() => mobileStorage.eraseAll());
       // The dictation was cancelled above: no recorder uses these files.
       sweepCacheFiles();
@@ -826,10 +868,30 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     downloadModel: async () => {
       if (get().downloading) return;
       const { language } = get().settings;
+      const startedBefore = dictationsStarted;
       set({ downloading: true });
       try {
         const outcome = await downloadLanguageModel(language);
-        set({ notice: noticeFor(downloadNoticeKind(outcome), language) });
+        // It can settle minutes later. When the outcome is not shown, the
+        // download still refreshed the plan and the badge (speech.ts).
+        const { capture, notice } = get();
+        if (
+          !downloadNoticeAllowed({
+            status: capture.status,
+            dictationStartedSince: dictationsStarted !== startedBefore,
+            hasNotice: notice !== null,
+          })
+        ) {
+          return;
+        }
+        set(
+          noticePatch(
+            replaceNotice(
+              capture.status,
+              noticeFor(downloadNoticeKind(outcome), language),
+            ),
+          ),
+        );
       } finally {
         set({ downloading: false });
       }
@@ -847,11 +909,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
 
     dismissNotice: () => {
       // Without its notice, an error status would read ATTENTION for nothing.
-      set(
-        get().capture.status === "error"
-          ? { notice: null, capture: idleCapture }
-          : { notice: null },
-      );
+      set(noticePatch(replaceNotice(get().capture.status, null)));
     },
   };
 });

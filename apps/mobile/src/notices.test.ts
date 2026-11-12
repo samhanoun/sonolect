@@ -1,6 +1,7 @@
 import * as assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import type { CaptureStatus } from "./domain";
 import { DICTATION_LANGUAGES } from "./domain";
 import { STRINGS } from "./i18n";
 import {
@@ -9,9 +10,12 @@ import {
   NOTICE_KINDS,
   STORAGE_NOTICE_KINDS,
   actionLabel,
+  emptyEndOutcome,
   isStorageNotice,
   noticeFor,
   noticeText,
+  refineNoticeChange,
+  replaceNotice,
   storageBanner,
 } from "./notices";
 import type { NoticeAction, NoticeKind } from "./notices";
@@ -175,5 +179,139 @@ describe("notices", () => {
       assert.equal(new Set(actions).size, actions.length, kind);
       assert.ok(actions.length > 0, kind);
     }
+  });
+
+  it("uses the refinement failure texts", () => {
+    assert.equal(
+      noticeText(STRINGS.en, noticeFor("refineFailed")),
+      "Sonolect couldn't refine this note. It was kept as it was.",
+    );
+    assert.equal(
+      noticeText(STRINGS.fr, noticeFor("refineFailed")),
+      "Sonolect n'a pas pu raffiner cette note. Elle est restée inchangée.",
+    );
+  });
+});
+
+describe("replaceNotice", () => {
+  it("takes an error status back to idle with the notice it explained", () => {
+    const next = noticeFor("modelInstalled", "fr-FR");
+    assert.deepEqual(replaceNotice("error", next), {
+      notice: next,
+      resetStatus: true,
+    });
+    assert.deepEqual(replaceNotice("error", null), {
+      notice: null,
+      resetStatus: true,
+    });
+  });
+
+  it("leaves any other status alone, a running dictation included", () => {
+    const statuses: CaptureStatus[] = [
+      "idle",
+      "listening",
+      "processing",
+      "ready",
+    ];
+    for (const status of statuses) {
+      assert.deepEqual(replaceNotice(status, null), {
+        notice: null,
+        resetStatus: false,
+      });
+    }
+  });
+});
+
+describe("emptyEndOutcome", () => {
+  it("reads ATTENTION with the error the dictation raised", () => {
+    const network = noticeFor("network");
+    assert.deepEqual(emptyEndOutcome(network, network), {
+      status: "error",
+      notice: network,
+    });
+  });
+
+  it("keeps what replaced the dictation's error", () => {
+    const denied = noticeFor("micDenied");
+    const blocked = noticeFor("micBlocked");
+    assert.deepEqual(emptyEndOutcome(denied, blocked), {
+      status: "error",
+      notice: blocked,
+    });
+  });
+
+  it("shows the dictation's error again when it was dismissed", () => {
+    const network = noticeFor("network");
+    assert.deepEqual(emptyEndOutcome(network, null), {
+      status: "error",
+      notice: network,
+    });
+  });
+
+  it("is an empty dictation, not an error, when none was raised", () => {
+    const others = [
+      null,
+      noticeFor("modelInstalled", "fr-FR"),
+      noticeFor("modelScheduled"),
+      noticeFor("maxDuration"),
+      noticeFor("needsModel"),
+    ];
+    for (const current of others) {
+      assert.deepEqual(
+        emptyEndOutcome(null, current),
+        { status: "idle", notice: noticeFor("noSpeech") },
+        current?.kind ?? "none",
+      );
+    }
+  });
+
+  it("never drops a storage notice", () => {
+    for (const kind of STORAGE_NOTICE_KINDS) {
+      const current = noticeFor(kind);
+      assert.deepEqual(emptyEndOutcome(null, current), {
+        status: "idle",
+        notice: current,
+      });
+    }
+  });
+});
+
+describe("refineNoticeChange", () => {
+  it("keeps a dictation's notice and its status", () => {
+    const network = noticeFor("network");
+    for (const status of ["error", "listening", "ready"] as const) {
+      assert.equal(refineNoticeChange(network, status, null), null, status);
+    }
+    assert.equal(
+      refineNoticeChange(noticeFor("storageWriteError"), "ready", null),
+      null,
+    );
+    assert.equal(refineNoticeChange(null, "idle", null), null);
+  });
+
+  it("clears its own earlier notices", () => {
+    for (const kind of ["needsModel", "refineFailed"] as const) {
+      assert.deepEqual(refineNoticeChange(noticeFor(kind), "ready", null), {
+        notice: null,
+        resetStatus: false,
+      });
+    }
+  });
+
+  it("shows its notice, taking an error status back to idle", () => {
+    const needsModel = noticeFor("needsModel");
+    assert.deepEqual(
+      refineNoticeChange(noticeFor("network"), "error", needsModel),
+      { notice: needsModel, resetStatus: true },
+    );
+    const failed = noticeFor("refineFailed");
+    assert.deepEqual(refineNoticeChange(null, "ready", failed), {
+      notice: failed,
+      resetStatus: false,
+    });
+    assert.deepEqual(refineNoticeChange(null, "listening", failed), {
+      notice: failed,
+      resetStatus: false,
+    });
   });
 });

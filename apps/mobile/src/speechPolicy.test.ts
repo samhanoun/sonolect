@@ -16,7 +16,9 @@ import {
   TranscriptAccumulator,
   blockedNoticeKind,
   classifySpeechError,
+  downloadNoticeAllowed,
   downloadNoticeKind,
+  installedListLacks,
   localeMatches,
   mapDownloadOutcome,
   permissionNoticeKind,
@@ -398,6 +400,78 @@ describe("localeMatches", () => {
       assert.equal(localeMatches(language, installed), expected);
     });
   }
+});
+
+describe("installedListLacks", () => {
+  // A list that lacks the language is read again by the next plan: a pack
+  // can arrive later without any event.
+  const cases: [string, readonly string[] | null, boolean][] = [
+    ["fr-FR", ["en-US"], true],
+    ["fr-FR", [], true],
+    ["fr-FR", ["fr_fr"], false],
+    ["fr-FR", ["fr-CA"], false],
+    ["fr-FR", null, false],
+  ];
+  for (const [language, installed, expected] of cases) {
+    it(`${language} against ${JSON.stringify(installed)}: ${expected}`, () => {
+      assert.equal(installedListLacks(language, installed), expected);
+    });
+  }
+});
+
+describe("downloadNoticeAllowed", () => {
+  it("never lands on a dictation that listens or is processed", () => {
+    for (const status of ["listening", "processing"] as const) {
+      for (const dictationStartedSince of [false, true]) {
+        for (const hasNotice of [false, true]) {
+          assert.equal(
+            downloadNoticeAllowed({ status, dictationStartedSince, hasNotice }),
+            false,
+            `${status} ${String(dictationStartedSince)} ${String(hasNotice)}`,
+          );
+        }
+      }
+    }
+  });
+
+  it("never replaces a notice a later dictation left", () => {
+    for (const status of ["idle", "ready", "error"] as const) {
+      assert.equal(
+        downloadNoticeAllowed({
+          status,
+          dictationStartedSince: true,
+          hasNotice: true,
+        }),
+        false,
+        status,
+      );
+    }
+  });
+
+  it("shows the outcome otherwise, over the error that led to Download", () => {
+    for (const status of ["idle", "ready", "error"] as const) {
+      for (const hasNotice of [false, true]) {
+        assert.equal(
+          downloadNoticeAllowed({
+            status,
+            dictationStartedSince: false,
+            hasNotice,
+          }),
+          true,
+          `${status} ${String(hasNotice)}`,
+        );
+      }
+      assert.equal(
+        downloadNoticeAllowed({
+          status,
+          dictationStartedSince: true,
+          hasNotice: false,
+        }),
+        true,
+        status,
+      );
+    }
+  });
 });
 
 describe("classifySpeechError", () => {

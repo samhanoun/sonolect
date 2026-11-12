@@ -280,6 +280,25 @@ decisions.
 
 1. Run the device test matrix of the 2026-11 phone-readiness fix plan on
    real Android phones and iPhones, and report failures.
+2. Also run these checks from the review of the fixes:
+   - Android 14 on Wi-Fi, _Local first_, language pack missing: tap
+     _Download language_, then _Use speech service this time_, say nothing
+     and tap _Done_. The screen reads READY with the no-speech notice.
+   - A recognizer whose locale query fails: after the failed on-device
+     attempt, tap _Download language_. The screen reads READY with the
+     download notice.
+   - Android 14 on mobile data: _Download language_ reports a scheduled
+     download. Join Wi-Fi with Sonolect in front. Once the pack installs, a
+     mic tap dictates on the device (lock badge) without leaving the app.
+     Repeat on Android 13 after the system dialog, and with _Always allow_
+     on.
+   - Screen reader on (VoiceOver; TalkBack on Android 13+ and on 11 or 12),
+     loudspeaker, no headphones: double-tap the mic, stay silent for 3 s,
+     then tap _Done_. Expect the no-speech notice and no new note. Repeat
+     while saying one sentence: the note must start with it. If the
+     screen reader's words ("Dictation started", "Done" or the French ones)
+     appear in a note, the start announcement must finish before the
+     microphone opens.
 
 ## Store privacy declarations: what the build does
 

@@ -18,6 +18,7 @@ import {
   ANDROID_ON_DEVICE_MIN_API,
   DOWNLOAD_TIMEOUT_MS,
   LOCALES_TIMEOUT_MS,
+  installedListLacks,
   levelFromVolume,
   mapDownloadOutcome,
 } from "./speechPolicy";
@@ -221,12 +222,23 @@ export async function getRecognitionEnvironment(
     () => mod.supportsOnDeviceRecognition() === true,
     false,
   );
-  const installedLocales =
+  let installedLocales: readonly string[] | null = null;
+  if (
     platform === "android" &&
     osVersion >= ANDROID_ON_DEVICE_MIN_API &&
     onDeviceService
-      ? await readInstalledLocales(mod)
-      : null;
+  ) {
+    const read = readInstalledLocales(mod);
+    installedLocales = await read;
+    // A pack can arrive later with no event, so a list without the
+    // language is read again by the next plan.
+    if (
+      installedListLacks(language, installedLocales) &&
+      installedLocalesRead === read
+    ) {
+      installedLocalesRead = null;
+    }
+  }
   const localeOnDevice =
     platform === "ios" ? readLocaleOnDevice(mod, language) : null;
   return {
@@ -331,12 +343,23 @@ export function downloadLanguageModel(
       return { error };
     },
   );
+  let capped = false;
   const pending = withTimeout(attempt, DOWNLOAD_TIMEOUT_MS, "timeout" as const)
-    .then(mapDownloadOutcome)
+    .then((result) => {
+      if (result === "timeout") capped = true;
+      return mapDownloadOutcome(result);
+    })
     .finally(() => {
       download = null;
       invalidateRecognitionEnvironment();
     });
+  // A download that settles after the cap refreshes the plan and the badge
+  // too.
+  void attempt.then((result) => {
+    if (capped && typeof result === "object" && "status" in result) {
+      invalidateRecognitionEnvironment();
+    }
+  });
   download = pending;
   return pending;
 }

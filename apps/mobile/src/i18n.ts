@@ -93,6 +93,8 @@ const en = {
         "Dictation stopped when Sonolect left the screen. Your text so far was kept.",
       maxDuration:
         "Dictation stopped after 10 minutes. Tap the mic to continue.",
+      refineFailed:
+        "Sonolect couldn't refine this note. It was kept as it was.",
       storageReadError:
         "Sonolect couldn't read your saved notes. Nothing was deleted. Restart the app to try again.",
       storageWriteError:
@@ -356,6 +358,8 @@ const fr: Strings = {
         "La dictée s'est arrêtée quand Sonolect a quitté l'écran. Le texte déjà dicté a été conservé.",
       maxDuration:
         "La dictée s'est arrêtée après 10 minutes. Touchez le micro pour continuer.",
+      refineFailed:
+        "Sonolect n'a pas pu raffiner cette note. Elle est restée inchangée.",
       storageReadError:
         "Sonolect n'a pas pu lire vos notes enregistrées. Rien n'a été supprimé. Redémarrez l'app pour réessayer.",
       storageWriteError:

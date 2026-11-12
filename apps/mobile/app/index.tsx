@@ -478,12 +478,14 @@ export default function CaptureScreen() {
                   style={styles.input}
                   {...inputColors}
                 />
+                {/* Not while a dictation is processed: its text comes first. */}
                 <Button
                   variant="primary"
                   label={t.capture.saveTyped}
-                  disabled={!draft.trim()}
+                  disabled={!draft.trim() || capturing}
                   onPress={async () => {
-                    await saveTyped(draft);
+                    // A refused save keeps the draft.
+                    if (!(await saveTyped(draft))) return;
                     setDraft("");
                     setTyping(false);
                   }}

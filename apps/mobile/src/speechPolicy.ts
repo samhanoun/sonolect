@@ -1,4 +1,4 @@
-import type { DictationLanguage, PrivacyLevel } from "./domain";
+import type { CaptureStatus, DictationLanguage, PrivacyLevel } from "./domain";
 import type { NoticeKind } from "./notices";
 
 /**
@@ -201,6 +201,19 @@ export function localeMatches(
   return tags.some((tag) => tag.split("-")[0] === base);
 }
 
+/**
+ * A known list of installed language packs that does not cover the
+ * dictation language. speech.ts reads such a list again for the next plan:
+ * a scheduled download, Android 13's download dialog or one that outlived
+ * DOWNLOAD_TIMEOUT_MS installs the pack later, with no event.
+ */
+export function installedListLacks(
+  language: string,
+  installed: readonly string[] | null,
+): boolean {
+  return installed !== null && !localeMatches(language, installed);
+}
+
 export type SpeechErrorClass = NoticeKind | "benign" | "aborted";
 
 /**
@@ -355,6 +368,24 @@ const DOWNLOAD_NOTICES: Record<DownloadOutcome, NoticeKind> = {
 
 export function downloadNoticeKind(outcome: DownloadOutcome): NoticeKind {
   return DOWNLOAD_NOTICES[outcome];
+}
+
+/**
+ * Whether a download's outcome may replace the notice once it settles, which
+ * can take minutes on Android 14+. Never while a dictation listens or is
+ * processed, and never over a notice that a dictation started since the tap
+ * left: the outcome would read as that dictation's.
+ */
+export function downloadNoticeAllowed(input: {
+  status: CaptureStatus;
+  /** A dictation started listening after Download was tapped. */
+  dictationStartedSince: boolean;
+  hasNotice: boolean;
+}): boolean {
+  if (input.status === "listening" || input.status === "processing") {
+    return false;
+  }
+  return !(input.dictationStartedSince && input.hasNotice);
 }
 
 /** Accumulates continuous-mode results: finalised segments plus the live one. */
