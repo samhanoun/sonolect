@@ -35,7 +35,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-router",
+      ["expo-router", { "sitemap": false }],
       "expo-font",
       "expo-secure-store",
       [
@@ -53,7 +53,8 @@
           "backgroundColor": "#0B120E"
         }
       ],
-      "./plugins/withAsyncStorageSize"
+      "./plugins/withAsyncStorageSize",
+      "./plugins/withDarkAndroidTheme"
     ],
     "experiments": {
       "typedRoutes": false,

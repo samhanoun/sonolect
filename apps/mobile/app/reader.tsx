@@ -13,7 +13,14 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { strings } from "../src/i18n";
 import { useCompanionStore } from "../src/store";
-import { Button, Card, Chip, Label, Title } from "../src/ui/components";
+import {
+  Button,
+  Card,
+  Chip,
+  Label,
+  Title,
+  inputColors,
+} from "../src/ui/components";
 import { colors, fonts, radius, space } from "../src/ui/theme";
 
 const RATES = [0.75, 1, 1.25, 1.5];
@@ -105,6 +112,7 @@ export default function ReaderScreen() {
               placeholder={t.reader.placeholder}
               placeholderTextColor={colors.muted}
               style={styles.textarea}
+              {...inputColors}
             />
             {latest && !text ? (
               <Button
@@ -210,7 +218,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.lineInteractive,
     color: colors.text,
     fontFamily: fonts.body,
     fontSize: 16,

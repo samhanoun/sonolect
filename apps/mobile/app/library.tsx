@@ -31,6 +31,7 @@ import {
   Label,
   NoticeBanner,
   Title,
+  inputColors,
 } from "../src/ui/components";
 import { confirm } from "../src/ui/confirm";
 import { colors, fonts, modeColor, radius, space } from "../src/ui/theme";
@@ -90,7 +91,11 @@ export default function LibraryScreen() {
           style={styles.itemText}
           numberOfLines={open ? undefined : 4}
           onPress={() => setExpanded(open ? null : item.id)}
-          accessibilityHint="Expands the transcript"
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          accessibilityHint={
+            open ? t.library.collapseHint : t.library.expandHint
+          }
         >
           {item.refinedText}
         </Text>
@@ -136,6 +141,7 @@ export default function LibraryScreen() {
           <Button
             compact
             icon="pin"
+            selected={Boolean(item.pinned)}
             accessibilityLabel={item.pinned ? t.library.unpin : t.library.pin}
             onPress={() => void togglePin(item.id)}
           />
@@ -173,7 +179,7 @@ export default function LibraryScreen() {
         ListHeaderComponent={
           <View style={styles.header}>
             <View style={styles.titleRow}>
-              <Title>{t.library.title}</Title>
+              <Title style={styles.shrink}>{t.library.title}</Title>
               <Label>{t.library.items(history.length)}</Label>
             </View>
             {banner ? (
@@ -197,6 +203,7 @@ export default function LibraryScreen() {
                 onChangeText={setQuery}
                 style={styles.searchInput}
                 returnKeyType="search"
+                {...inputColors}
               />
             </View>
             <View style={styles.filters}>
@@ -238,11 +245,15 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   container: { padding: space.xl, gap: space.md, paddingBottom: 40 },
   header: { gap: space.md, marginBottom: space.xs },
+  // At large font sizes the count wraps under the title (ux-19).
   titleRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "baseline",
     justifyContent: "space-between",
+    columnGap: space.sm,
   },
+  shrink: { flexShrink: 1, minWidth: 0 },
   search: {
     flexDirection: "row",
     alignItems: "center",
@@ -252,7 +263,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.lineInteractive,
   },
   searchInput: {
     flex: 1,

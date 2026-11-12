@@ -3,6 +3,7 @@ import {
   AccessibilityInfo,
   Animated,
   Easing,
+  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -11,12 +12,34 @@ import {
   type ColorValue,
   type PressableProps,
   type StyleProp,
+  type TextInputProps,
   type TextStyle,
   type ViewStyle,
 } from "react-native";
 import Svg, { Circle, Path, Rect } from "react-native-svg";
 
 import { colors, fonts, radius, space } from "./theme";
+
+/** Smallest touch target: 44 pt on iOS, 48 dp on Android (ux-18). */
+export const MIN_TOUCH_SIZE = Platform.select({
+  ios: 44,
+  android: 48,
+  default: 44,
+});
+
+/**
+ * Fixed chrome (labels, chips, segments, the mode pill, tab labels) grows
+ * with the system font size up to 1.5x, so it stays on screen at 200%.
+ * Body text is not capped (ux-19).
+ */
+export const CHROME_MAX_FONT_SCALE = 1.5;
+
+/** Lime cursor, selection handles and selection in every text field. */
+export const inputColors = {
+  cursorColor: colors.lime,
+  selectionHandleColor: colors.lime,
+  selectionColor: colors.selection,
+} as const satisfies TextInputProps;
 
 export type IconName =
   | "mic"
@@ -161,21 +184,41 @@ export function useReducedMotion(): boolean {
   return reduced;
 }
 
+/**
+ * A small mono caption. `heading` makes it a screen-reader heading: only for
+ * section labels, never for mode tags, durations or a status.
+ */
 export function Label({
   children,
   color = colors.muted,
   style,
+  heading,
 }: {
   children: ReactNode;
   color?: string;
   style?: StyleProp<TextStyle>;
+  heading?: boolean;
 }) {
-  return <Text style={[styles.label, { color }, style]}>{children}</Text>;
+  return (
+    <Text
+      {...(heading ? { accessibilityRole: "header" as const } : {})}
+      maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
+      style={[styles.label, { color }, style]}
+    >
+      {children}
+    </Text>
+  );
 }
 
-export function Title({ children }: { children: ReactNode }) {
+export function Title({
+  children,
+  style,
+}: {
+  children: ReactNode;
+  style?: StyleProp<TextStyle>;
+}) {
   return (
-    <Text accessibilityRole="header" style={styles.title}>
+    <Text accessibilityRole="header" style={[styles.title, style]}>
       {children}
     </Text>
   );
@@ -189,6 +232,7 @@ export function Button({
   variant = "outline",
   onPress,
   disabled,
+  selected,
   style,
   accessibilityLabel,
   compact,
@@ -198,6 +242,8 @@ export function Button({
   variant?: ButtonVariant;
   onPress: PressableProps["onPress"];
   disabled?: boolean;
+  /** A toggle such as Pin: read as selected, with a lime icon when on. */
+  selected?: boolean;
   style?: StyleProp<ViewStyle>;
   accessibilityLabel?: string;
   compact?: boolean;
@@ -212,7 +258,10 @@ export function Button({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{ disabled: Boolean(disabled) }}
+      accessibilityState={{
+        disabled: Boolean(disabled),
+        ...(selected === undefined ? {} : { selected }),
+      }}
       disabled={disabled}
       onPress={onPress}
       hitSlop={compact ? 6 : 0}
@@ -227,7 +276,13 @@ export function Button({
         style,
       ]}
     >
-      {icon ? <Icon name={icon} size={compact ? 16 : 18} color={fg} /> : null}
+      {icon ? (
+        <Icon
+          name={icon}
+          size={compact ? 16 : 18}
+          color={selected ? colors.lime : fg}
+        />
+      ) : null}
       {label ? (
         <Text
           style={[
@@ -270,7 +325,10 @@ export function Chip({
         pressed && styles.pressed,
       ]}
     >
-      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+      <Text
+        maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
+        style={[styles.chipText, selected && styles.chipTextSelected]}
+      >
         {label}
       </Text>
     </Pressable>
@@ -289,7 +347,8 @@ export function Card({
 
 /**
  * A message at the top of a screen, such as a storage error, with an
- * optional action.
+ * optional action. The root layout announces each notice once, so this has
+ * no live region: Android would read it twice.
  */
 export function NoticeBanner({
   text,
@@ -301,11 +360,7 @@ export function NoticeBanner({
   onAction?: () => void;
 }) {
   return (
-    <View
-      style={styles.banner}
-      accessibilityRole="alert"
-      accessibilityLiveRegion="polite"
-    >
+    <View style={styles.banner} accessibilityRole="alert">
       <Text style={styles.bannerText}>{text}</Text>
       {actionLabel && onAction ? (
         <Button
@@ -337,9 +392,9 @@ export function ToggleRow({
         accessibilityLabel={label}
         value={value}
         onValueChange={onChange}
-        trackColor={{ false: colors.line, true: colors.lime }}
+        trackColor={{ false: colors.lineInteractive, true: colors.lime }}
         thumbColor={value ? colors.onLime : colors.muted}
-        ios_backgroundColor={colors.line}
+        ios_backgroundColor={colors.lineInteractive}
         {...({ activeThumbColor: colors.onLime } as object)}
       />
     </View>
@@ -371,9 +426,12 @@ export function Segmented<T extends string>({
             accessibilityRole="radio"
             accessibilityState={{ checked: selected }}
             onPress={() => onChange(option.value)}
+            // 40 + 4 + 4 = 48, inside the container's padding of 4.
+            hitSlop={{ top: 4, bottom: 4 }}
             style={[styles.segment, selected && styles.segmentSelected]}
           >
             <Text
+              maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
               style={[
                 styles.segmentText,
                 selected && styles.segmentTextSelected,
@@ -538,7 +596,7 @@ export const styles = StyleSheet.create({
   },
   body: { fontFamily: fonts.body, fontSize: 15, color: colors.text },
   button: {
-    minHeight: 44,
+    minHeight: MIN_TOUCH_SIZE,
     paddingHorizontal: space.lg,
     borderRadius: radius.md,
     flexDirection: "row",
@@ -558,12 +616,14 @@ export const styles = StyleSheet.create({
   buttonTextCompact: { fontFamily: fonts.bodyMedium, fontSize: 13 },
   disabled: { opacity: 0.4 },
   pressed: { opacity: 0.8, transform: [{ scale: 0.98 }] },
+  // No hitSlop: chip rows are 8 apart, so slop areas would overlap and send
+  // a tap to the wrong chip.
   chip: {
-    minHeight: 38,
+    minHeight: MIN_TOUCH_SIZE,
     paddingHorizontal: 14,
     borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.lineInteractive,
     justifyContent: "center",
   },
   chipSelected: { backgroundColor: colors.forest, borderColor: colors.forest },
@@ -619,10 +679,12 @@ export const styles = StyleSheet.create({
     justifyContent: "center",
   },
   segmentSelected: { backgroundColor: colors.forest },
+  // A label that wraps at a large font size stays centred in its segment.
   segmentText: {
     fontFamily: fonts.bodyMedium,
     fontSize: 13,
     color: colors.muted,
+    textAlign: "center",
   },
   segmentTextSelected: { color: colors.lime, fontFamily: fonts.bodyBold },
   waveform: { flexDirection: "row", alignItems: "center", gap: 4, height: 44 },

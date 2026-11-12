@@ -143,6 +143,8 @@ const en = {
     sync: { local: "LOCAL", queued: "QUEUED", synced: "SYNCED" },
     original: "Original",
     typed: "TYPED",
+    expandHint: "Shows the whole transcript",
+    collapseHint: "Shows less",
   },
   reader: {
     title: "Reader",
@@ -219,6 +221,14 @@ const en = {
     skip: "Not now",
   },
   common: { cancel: "Cancel", confirm: "Confirm" },
+  errorBoundary: {
+    title: "Something went wrong",
+    body: "Sonolect hit an unexpected problem. Your notes are still on this phone.",
+    tryAgain: "Try again",
+    deleteNotes: "Delete saved notes",
+    deleteNotesConfirm:
+      "Delete all notes saved on this phone? This can't be undone.",
+  },
   /** Language names used inside sentences. */
   languageNames: {
     "en-US": "English",
@@ -376,6 +386,8 @@ const fr: Strings = {
     sync: { local: "LOCAL", queued: "EN ATTENTE", synced: "SYNCHRONISÉ" },
     original: "Original",
     typed: "SAISI",
+    expandHint: "Affiche toute la transcription",
+    collapseHint: "Affiche moins",
   },
   reader: {
     title: "Lecture",
@@ -451,6 +463,14 @@ const fr: Strings = {
     skip: "Plus tard",
   },
   common: { cancel: "Annuler", confirm: "Confirmer" },
+  errorBoundary: {
+    title: "Une erreur s'est produite",
+    body: "Sonolect a rencontré un problème inattendu. Vos notes sont toujours sur ce téléphone.",
+    tryAgain: "Réessayer",
+    deleteNotes: "Supprimer les notes enregistrées",
+    deleteNotesConfirm:
+      "Supprimer toutes les notes enregistrées sur ce téléphone ? Cette action est irréversible.",
+  },
   languageNames: {
     "en-US": "anglais",
     "fr-FR": "français",

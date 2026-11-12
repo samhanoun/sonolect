@@ -26,12 +26,14 @@ import { requestDictationPermission } from "../src/speech";
 import { useCompanionStore } from "../src/store";
 import {
   Button,
+  CHROME_MAX_FONT_SCALE,
   Card,
   Chip,
   Icon,
   Label,
   MicOrb,
   Waveform,
+  inputColors,
 } from "../src/ui/components";
 import { confirm } from "../src/ui/confirm";
 import { colors, fonts, modeColor, radius, space } from "../src/ui/theme";
@@ -301,7 +303,7 @@ export default function CaptureScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.header}>
-            <View>
+            <View style={styles.shrink}>
               <Text style={styles.brand}>
                 sono<Text style={{ color: colors.lime }}>lect</Text>
               </Text>
@@ -309,11 +311,16 @@ export default function CaptureScreen() {
             </View>
             {modeBadge ? (
               <View
-                style={styles.modePill}
+                style={[styles.modePill, styles.shrink]}
                 accessibilityLabel={modeBadge.label}
               >
                 <Icon name={modeBadge.icon} size={14} color={colors.lime} />
-                <Text style={styles.modePillText}>{modeBadge.label}</Text>
+                <Text
+                  maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
+                  style={styles.modePillText}
+                >
+                  {modeBadge.label}
+                </Text>
               </View>
             ) : null}
           </View>
@@ -439,7 +446,7 @@ export default function CaptureScreen() {
                 scrollToTypingCard();
               }}
             >
-              <Card>
+              <Card style={styles.typingCard}>
                 <TextInput
                   autoFocus
                   accessibilityLabel={t.capture.typePlaceholder}
@@ -449,6 +456,7 @@ export default function CaptureScreen() {
                   placeholder={t.capture.typePlaceholder}
                   placeholderTextColor={colors.muted}
                   style={styles.input}
+                  {...inputColors}
                 />
                 <Button
                   variant="primary"
@@ -465,7 +473,7 @@ export default function CaptureScreen() {
           ) : null}
 
           <View style={styles.section}>
-            <Label>{t.capture.afterCapture}</Label>
+            <Label heading>{t.capture.afterCapture}</Label>
             {latest ? (
               <Card>
                 <View style={styles.metaRow}>
@@ -527,11 +535,16 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
   container: { padding: space.xl, paddingBottom: 40, gap: space.xl },
+  // At large font sizes the mode pill wraps under the brand instead of
+  // running off the screen (ux-19).
   header: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: space.sm,
   },
+  shrink: { flexShrink: 1, minWidth: 0 },
   brand: {
     fontFamily: fonts.display,
     fontSize: 22,
@@ -550,6 +563,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   modePillText: {
+    flexShrink: 1,
     fontFamily: fonts.bodyMedium,
     fontSize: 13,
     color: colors.text,
@@ -598,6 +612,8 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   noticeActions: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
+  // The card is the typing field's outline (ux-26).
+  typingCard: { borderColor: colors.lineInteractive },
   input: {
     minHeight: 110,
     color: colors.text,

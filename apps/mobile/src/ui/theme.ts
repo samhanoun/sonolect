@@ -1,18 +1,27 @@
 /**
  * "Night" theme: the dark counterpart of the approved desktop Studio palette
- * (forest #1F3429, lime #DDF39A). Text colours are checked for 4.5:1 contrast
- * on `bg` and `surface`.
+ * (forest #1F3429, lime #DDF39A). contrast.test.ts checks text colours for
+ * 4.5:1 on `bg` and `surface`, and `lineInteractive` for 3:1 on every
+ * background.
  */
 export const colors = {
   bg: "#0B120E",
   bgRaised: "#0E1611",
   surface: "#111A15",
   surfaceStrong: "#16211B",
+  /** Decorative dividers and card edges only: too faint for a control. */
   line: "#22302A",
+  /**
+   * Outlines that show where a control is: text fields, unselected chips and
+   * the switch's off track (3:1, WCAG 1.4.11).
+   */
+  lineInteractive: "#5B7064",
   lineStrong: "#2E4236",
   forest: "#1F3429",
   lime: "#DDF39A",
   limeSoft: "#EEF9C8",
+  /** Selected text in a text field: translucent lime. */
+  selection: "rgba(221,243,154,0.35)",
   cyan: "#9AE6F3",
   amber: "#F3C99A",
   danger: "#F49A8E",

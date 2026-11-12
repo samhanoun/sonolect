@@ -25,6 +25,7 @@ import {
   Segmented,
   Title,
   ToggleRow,
+  inputColors,
 } from "../src/ui/components";
 import { confirm } from "../src/ui/confirm";
 import { colors, fonts, radius, space } from "../src/ui/theme";
@@ -118,7 +119,7 @@ export default function SettingsScreen() {
           ) : null}
 
           <View style={styles.section}>
-            <Label>{t.settings.privacy}</Label>
+            <Label heading>{t.settings.privacy}</Label>
             <Segmented
               accessibilityLabel={t.settings.privacy}
               options={privacyOptions}
@@ -176,7 +177,7 @@ export default function SettingsScreen() {
           </Card>
 
           <View style={styles.section}>
-            <Label>{t.settings.dictation}</Label>
+            <Label heading>{t.settings.dictation}</Label>
             <View style={styles.chips}>
               {DICTATION_LANGUAGES.map((language) => (
                 <Chip
@@ -190,7 +191,7 @@ export default function SettingsScreen() {
           </View>
 
           <View style={styles.section}>
-            <Label>{t.settings.interface}</Label>
+            <Label heading>{t.settings.interface}</Label>
             <Segmented
               accessibilityLabel={t.settings.interface}
               options={[
@@ -204,7 +205,7 @@ export default function SettingsScreen() {
 
           {API_FEATURES_ENABLED ? (
             <View style={styles.section}>
-              <Label>{t.settings.api}</Label>
+              <Label heading>{t.settings.api}</Label>
               <Card>
                 <Text style={styles.fieldLabel} nativeID="api-url-label">
                   {t.settings.apiUrl}
@@ -223,6 +224,7 @@ export default function SettingsScreen() {
                     setApiMessage(null);
                   }}
                   style={[styles.input, !urlValid && styles.inputError]}
+                  {...inputColors}
                 />
                 <Text style={styles.fieldLabel}>{t.settings.apiToken}</Text>
                 <TextInput
@@ -235,6 +237,7 @@ export default function SettingsScreen() {
                   value={token}
                   onChangeText={setToken}
                   style={styles.input}
+                  {...inputColors}
                 />
                 <Text
                   style={[styles.help, !urlValid && { color: colors.danger }]}
@@ -270,7 +273,7 @@ export default function SettingsScreen() {
           ) : null}
 
           <View style={styles.section}>
-            <Label>{t.settings.dictionary}</Label>
+            <Label heading>{t.settings.dictionary}</Label>
             <Card>
               <Text style={styles.help}>{t.settings.dictionaryHelp}</Text>
               {dictionary.map((entry) => (
@@ -294,7 +297,8 @@ export default function SettingsScreen() {
                   placeholderTextColor={colors.muted}
                   value={spoken}
                   onChangeText={setSpoken}
-                  style={[styles.input, styles.flex]}
+                  style={[styles.input, styles.pairInput]}
+                  {...inputColors}
                 />
                 <TextInput
                   accessibilityLabel={t.settings.written}
@@ -302,7 +306,8 @@ export default function SettingsScreen() {
                   placeholderTextColor={colors.muted}
                   value={written}
                   onChangeText={setWritten}
-                  style={[styles.input, styles.flex]}
+                  style={[styles.input, styles.pairInput]}
+                  {...inputColors}
                 />
               </View>
               <Button
@@ -320,7 +325,7 @@ export default function SettingsScreen() {
           </View>
 
           <View style={styles.section}>
-            <Label>{t.settings.snippets}</Label>
+            <Label heading>{t.settings.snippets}</Label>
             <Card>
               <Text style={styles.help}>{t.settings.snippetsHelp}</Text>
               {snippets.map((snippet) => (
@@ -346,6 +351,7 @@ export default function SettingsScreen() {
                 value={trigger}
                 onChangeText={setTrigger}
                 style={styles.input}
+                {...inputColors}
               />
               <TextInput
                 accessibilityLabel={t.settings.body}
@@ -355,6 +361,7 @@ export default function SettingsScreen() {
                 onChangeText={setBody}
                 multiline
                 style={[styles.input, styles.multiline]}
+                {...inputColors}
               />
               <Button
                 icon="plus"
@@ -371,7 +378,7 @@ export default function SettingsScreen() {
           </View>
 
           <View style={styles.section}>
-            <Label>{t.settings.data}</Label>
+            <Label heading>{t.settings.data}</Label>
             <View style={styles.row}>
               <Button
                 variant="danger"
@@ -441,7 +448,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: colors.bg,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.lineInteractive,
     color: colors.text,
     fontFamily: fonts.body,
     fontSize: 15,
@@ -450,6 +457,9 @@ const styles = StyleSheet.create({
   multiline: { minHeight: 80, textAlignVertical: "top" },
   row: { flexDirection: "row", gap: space.sm, flexWrap: "wrap" },
   pair: { flexDirection: "row", gap: space.sm },
+  // Two fields share the row; without minWidth 0 a field keeps its
+  // intrinsic width and pushes the second one past the card's edge.
+  pairInput: { flex: 1, minWidth: 0 },
   entry: {
     flexDirection: "row",
     alignItems: "center",
