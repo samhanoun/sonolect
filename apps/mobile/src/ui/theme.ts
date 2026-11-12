@@ -20,7 +20,7 @@ export const colors = {
   forest: "#1F3429",
   lime: "#DDF39A",
   limeSoft: "#EEF9C8",
-  /** Selected text in a text field: translucent lime. */
+  /** Selected text in an Android text field: translucent lime. */
   selection: "rgba(221,243,154,0.35)",
   cyan: "#9AE6F3",
   amber: "#F3C99A",
@@ -29,6 +29,17 @@ export const colors = {
   muted: "#93A096",
   onLime: "#0B120E",
 } as const;
+
+/**
+ * A text field's `selectionColor` for `os` (Platform.OS). On iOS it is the
+ * UIKit tint of the caret, the selection handles and the highlight, so it
+ * must be opaque or the caret is faint. Android colours the caret and the
+ * handles with cursorColor and selectionHandleColor, so `selectionColor`
+ * only sets the highlight there and stays translucent.
+ */
+export function inputSelectionColor(os: string): string {
+  return os === "ios" ? colors.lime : colors.selection;
+}
 
 export const fonts = {
   display: "SpaceGrotesk_700Bold",

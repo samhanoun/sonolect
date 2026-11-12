@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import {
   AccessibilityInfo,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -25,7 +26,7 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
-import { strings } from "../src/i18n";
+import { strings, type Strings } from "../src/i18n";
 import { noticeText } from "../src/notices";
 import { useCompanionStore } from "../src/store";
 import {
@@ -55,7 +56,12 @@ function tabIcon(name: IconName) {
   );
 }
 
-/** Tab names grow with the font size up to 1.5x, on one line (ux-19). */
+/**
+ * Tab names grow with the font size up to 1.5x, then shrink to fit the tab
+ * width, on one line (ux-19): "Bibliothèque" at 1.5x is wider than a tab on
+ * a 360 dp phone or a 375 pt iPhone. There it needs about 0.81x of that
+ * size, which is still larger than at 1.0x.
+ */
 function tabLabel({
   color,
   position,
@@ -69,6 +75,7 @@ function tabLabel({
     <Text
       maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
       numberOfLines={1}
+      adjustsFontSizeToFit
       style={[
         styles.tabLabel,
         // Wide screens (iPad) put the name beside the icon.
@@ -83,6 +90,36 @@ function tabLabel({
 
 /** Tab bar height above the system navigation area (icon, label, padding). */
 const TAB_BAR_HEIGHT = 62;
+
+/** Visible tabs in the bar; +not-found is hidden and not counted. */
+const TAB_COUNT = 4;
+
+/**
+ * A tab's name and icon. With a function tabBarLabel the tab bar no longer
+ * builds the iOS label itself, and iOS tabs have the button role, so
+ * VoiceOver gets "Capture, tab, 1 of 4" from here. Android keeps the "tab"
+ * role and its own reading.
+ */
+function tabOptions(
+  t: Strings,
+  title: string,
+  icon: IconName,
+  position: number,
+) {
+  return {
+    title,
+    tabBarIcon: tabIcon(icon),
+    ...(Platform.OS === "ios"
+      ? {
+          tabBarAccessibilityLabel: t.tabs.a11yLabel(
+            title,
+            position,
+            TAB_COUNT,
+          ),
+        }
+      : {}),
+  };
+}
 
 /** ErrorBoundary's retry mounts the layout again: storage is read once. */
 let hydrationStarted = false;
@@ -149,19 +186,19 @@ export default function RootLayout() {
       >
         <Tabs.Screen
           name="index"
-          options={{ title: t.tabs.capture, tabBarIcon: tabIcon("mic") }}
+          options={tabOptions(t, t.tabs.capture, "mic", 1)}
         />
         <Tabs.Screen
           name="library"
-          options={{ title: t.tabs.library, tabBarIcon: tabIcon("list") }}
+          options={tabOptions(t, t.tabs.library, "list", 2)}
         />
         <Tabs.Screen
           name="reader"
-          options={{ title: t.tabs.reader, tabBarIcon: tabIcon("speaker") }}
+          options={tabOptions(t, t.tabs.reader, "speaker", 3)}
         />
         <Tabs.Screen
           name="settings"
-          options={{ title: t.tabs.settings, tabBarIcon: tabIcon("settings") }}
+          options={tabOptions(t, t.tabs.settings, "settings", 4)}
         />
         {/* Unknown links redirect to Capture; never a tab. */}
         <Tabs.Screen name="+not-found" options={{ href: null }} />

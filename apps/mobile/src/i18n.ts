@@ -6,6 +6,9 @@ const en = {
     library: "Library",
     reader: "Reader",
     settings: "Settings",
+    /** What VoiceOver reads for a tab: its name and its place in the bar. */
+    a11yLabel: (name: string, position: number, total: number) =>
+      `${name}, tab, ${position} of ${total}`,
   },
   brandTag: "VOICE OS · MOBILE",
   mode: {
@@ -269,6 +272,8 @@ const fr: Strings = {
     library: "Bibliothèque",
     reader: "Lecture",
     settings: "Réglages",
+    a11yLabel: (name: string, position: number, total: number) =>
+      `${name}, onglet, ${position} sur ${total}`,
   },
   brandTag: "VOICE OS · MOBILE",
   mode: {

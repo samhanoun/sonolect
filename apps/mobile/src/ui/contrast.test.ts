@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { contrastRatio, relativeLuminance } from "./contrast";
-import { colors } from "./theme";
+import { colors, inputSelectionColor } from "./theme";
 
 const close = (actual: number, expected: number) =>
   assert.ok(
@@ -69,5 +69,26 @@ describe("theme contrast", () => {
         );
       }
     }
+  });
+});
+
+describe("inputSelectionColor", () => {
+  it("is an opaque tint that reaches 3:1 on every background on iOS", () => {
+    // UIKit draws the caret and the selection handles in this colour.
+    const tint = inputSelectionColor("ios");
+    assert.match(tint, /^#[0-9A-F]{6}$/i);
+    for (const background of [
+      "bg",
+      "bgRaised",
+      "surface",
+      "surfaceStrong",
+    ] as const) {
+      const ratio = contrastRatio(tint, colors[background]);
+      assert.ok(ratio >= 3, `caret on ${background}: ${ratio.toFixed(2)}`);
+    }
+  });
+
+  it("keeps the translucent highlight on Android", () => {
+    assert.equal(inputSelectionColor("android"), colors.selection);
   });
 });

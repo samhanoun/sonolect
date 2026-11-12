@@ -18,7 +18,7 @@ import {
 } from "react-native";
 import Svg, { Circle, Path, Rect } from "react-native-svg";
 
-import { colors, fonts, radius, space } from "./theme";
+import { colors, fonts, inputSelectionColor, radius, space } from "./theme";
 
 /** Smallest touch target: 44 pt on iOS, 48 dp on Android (ux-18). */
 export const MIN_TOUCH_SIZE = Platform.select({
@@ -34,11 +34,15 @@ export const MIN_TOUCH_SIZE = Platform.select({
  */
 export const CHROME_MAX_FONT_SCALE = 1.5;
 
-/** Lime cursor, selection handles and selection in every text field. */
+/**
+ * Lime cursor, selection handles and selection in every text field. iOS
+ * ignores cursorColor and selectionHandleColor and tints all three with
+ * selectionColor, which is opaque there (see inputSelectionColor).
+ */
 export const inputColors = {
   cursorColor: colors.lime,
   selectionHandleColor: colors.lime,
-  selectionColor: colors.selection,
+  selectionColor: inputSelectionColor(Platform.OS),
 } as const satisfies TextInputProps;
 
 export type IconName =

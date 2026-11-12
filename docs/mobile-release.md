@@ -299,6 +299,15 @@ decisions.
      screen reader's words ("Dictation started", "Done" or the French ones)
      appear in a note, the start announcement must finish before the
      microphone opens.
+   - iPhone: in the Capture text field, Library search, Reader and a
+     Settings field, the caret is clearly lime, and a long-press selection
+     shows a visible highlight and handles.
+   - French UI, largest text sizes (Android 360 dp phone at 130% and 200%;
+     iPhone 375 pt and 393 pt at XXXL and AX1): all four tab names show in
+     full, "Bibliothèque" smaller if needed. On iOS, long-pressing a tab
+     still shows the large content viewer.
+   - VoiceOver, in English and in French: each tab is read with its place,
+     "Capture, tab, 1 of 4" or "Bibliothèque, onglet, 2 sur 4".
 
 ## Store privacy declarations: what the build does
 

@@ -3,6 +3,22 @@ import { describe, it } from "node:test";
 
 import { STRINGS } from "./i18n";
 
+describe("tab labels", () => {
+  it("names the tab and its position for VoiceOver (en)", () => {
+    assert.equal(
+      STRINGS.en.tabs.a11yLabel("Capture", 1, 4),
+      "Capture, tab, 1 of 4",
+    );
+  });
+
+  it("names the tab and its position for VoiceOver (fr)", () => {
+    assert.equal(
+      STRINGS.fr.tabs.a11yLabel("Bibliothèque", 2, 4),
+      "Bibliothèque, onglet, 2 sur 4",
+    );
+  });
+});
+
 describe("settings confirmations", () => {
   it("counts the notes deleted, singular and plural (en)", () => {
     const t = STRINGS.en.settings;
