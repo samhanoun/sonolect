@@ -308,6 +308,15 @@ decisions.
      still shows the large content viewer.
    - VoiceOver, in English and in French: each tab is read with its place,
      "Capture, tab, 1 of 4" or "Bibliothèque, onglet, 2 sur 4".
+   - Android phone set to English: Library _Listen_ on a French note, and
+     the Reader with _Use latest_ on a French note and the system default
+     voice, read with a French voice. Repeat with an Arabic note.
+   - Android, just after Sonolect starts: open the Library first, tap
+     _Listen_ and then _Stop_ at once. Nothing is read. Tapping _Listen_ on
+     two notes in quick succession reads only the second.
+   - iPhone with music playing in another app: the music ducks during
+     Reader _Play_ and Library _Listen_, and comes back to full volume both
+     after the note plays to the end and after _Stop_.
 
 ## Store privacy declarations: what the build does
 

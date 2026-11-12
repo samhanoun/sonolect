@@ -22,7 +22,10 @@ import {
   levelFromVolume,
   mapDownloadOutcome,
 } from "./speechPolicy";
-import { releaseAudioSessionAfterRecognition } from "./tts";
+import {
+  noteRecordSessionTaken,
+  releaseAudioSessionAfterRecognition,
+} from "./tts";
 
 /**
  * Thin wrapper around expo-speech-recognition 58.0.1 (iOS SFSpeechRecognizer,
@@ -530,6 +533,8 @@ export function startSpeechSession(
   const loop = createCaptureLoop(
     {
       start: (onDevice) => {
+        // A late retry to release the iOS session must not end this one.
+        noteRecordSessionTaken();
         try {
           mod.start({ ...startOptions, requiresOnDeviceRecognition: onDevice });
         } catch (error) {

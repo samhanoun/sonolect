@@ -3,7 +3,11 @@ import { Platform } from "react-native";
 import * as Speech from "expo-speech";
 
 import type { TtsController, TtsState } from "./ttsCore";
-import { createTtsController } from "./ttsCore";
+import {
+  createTtsController,
+  engineLanguage,
+  retryWhileThrowing,
+} from "./ttsCore";
 
 /**
  * Read-aloud for the whole app: one controller (ttsCore.ts) wired to
@@ -55,22 +59,38 @@ function warn(message: string, detail: unknown): void {
 /** Read-aloud has the session, between beforeSpeak and afterSpeak. */
 let speechHoldsSession = false;
 
+/** Changes each time read-aloud or a dictation takes the session. */
+let sessionGeneration = 0;
+
+/** A dictation is about to set its record session (speech.ts). */
+export function noteRecordSessionTaken(): void {
+  sessionGeneration += 1;
+}
+
 function deactivateSession(): void {
   if (Platform.OS !== "ios") return;
   const mod = loadSessionModule();
-  try {
-    mod?.setAudioSessionActiveIOS?.(false, {
-      notifyOthersOnDeactivation: true,
-    });
-  } catch (error) {
-    // Busy while audio still runs; the next start sets the session again.
-    warn("audio session not released", error);
-  }
+  if (!mod?.setAudioSessionActiveIOS) return;
+  const generation = sessionGeneration;
+  // Busy while audio still runs, and other apps stay ducked until it is
+  // released: tried again shortly, unless the session was taken since.
+  retryWhileThrowing(
+    () =>
+      mod.setAudioSessionActiveIOS?.(false, {
+        notifyOthersOnDeactivation: true,
+      }),
+    () => generation === sessionGeneration && !speechHoldsSession,
+    (run, ms) => {
+      setTimeout(run, ms);
+    },
+    (error) => warn("audio session not released", error),
+  );
 }
 
 /** Playback that the Silent switch does not mute, ducking other audio. */
 function takePlaybackSession(): void {
   speechHoldsSession = true;
+  sessionGeneration += 1;
   if (Platform.OS !== "ios") return;
   const mod = loadSessionModule();
   if (!mod) return;
@@ -115,10 +135,38 @@ export function setTtsPlaybackGuard(guard: () => boolean): void {
   playbackAllowed = guard;
 }
 
+/** Past this, read-aloud speaks without waiting for the engine. */
+const ENGINE_START_TIMEOUT_MS = 5000;
+
+let engineReady = Platform.OS !== "android";
+let engineStarting: Promise<void> | null = null;
+
+/**
+ * Android binds its TextToSpeech engine on first use. expo-speech keeps the
+ * utterances spoken before that in its own queue, which Speech.stop()
+ * cannot empty, so a Stop meanwhile would not stop them. The voice list
+ * resolves once the engine is bound (empty if it failed to start), so
+ * read-aloud waits for it before speaking.
+ */
+function engineReadiness(): Promise<void> | null {
+  if (engineReady) return null;
+  engineStarting ??= new Promise<void>((resolve) => {
+    const started = () => {
+      engineReady = true;
+      resolve();
+    };
+    setTimeout(started, ENGINE_START_TIMEOUT_MS);
+    Speech.getAvailableVoicesAsync().then(started, started);
+  });
+  return engineStarting;
+}
+
 export const ttsController: TtsController = createTtsController({
   speak: (text, options, callbacks) => {
     Speech.speak(text, {
-      ...(options.language ? { language: options.language } : {}),
+      ...(options.language
+        ? { language: engineLanguage(options.language, Platform.OS) }
+        : {}),
       ...(options.rate !== undefined ? { rate: options.rate } : {}),
       ...(options.voice ? { voice: options.voice } : {}),
       onStopped: callbacks.onStopped,
@@ -134,6 +182,7 @@ export const ttsController: TtsController = createTtsController({
   beforeSpeak: takePlaybackSession,
   afterSpeak: givePlaybackSessionBack,
   canPlay: () => playbackAllowed(),
+  ready: engineReadiness,
 });
 
 /** The read-aloud state, for screens. */

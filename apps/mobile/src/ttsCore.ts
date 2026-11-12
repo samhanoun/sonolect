@@ -107,6 +107,12 @@ export interface TtsDeps {
   afterSpeak(): void;
   /** False while reading aloud is not allowed, such as during a dictation. */
   canPlay?(): boolean;
+  /**
+   * Null once the engine can speak, otherwise a promise that settles when
+   * it can. Android binds its engine on first use, and expo-speech keeps
+   * what is spoken before that in a queue that stop() cannot empty.
+   */
+  ready?(): Promise<void> | null;
 }
 
 export interface TtsController {
@@ -128,6 +134,37 @@ export interface TtsController {
 }
 
 export const IDLE_TTS_STATE: TtsState = { status: "idle", ownerId: null };
+
+/**
+ * Runs attempt now and, while it throws, up to `retries` more times,
+ * `delayMs` apart, as long as stillWanted() holds. iOS refuses to
+ * deactivate the audio session while audio still runs, and other apps stay
+ * ducked until it is deactivated (speech-6, ios-5). onGiveUp gets the last
+ * error.
+ */
+export function retryWhileThrowing(
+  attempt: () => void,
+  stillWanted: () => boolean,
+  schedule: (run: () => void, ms: number) => void,
+  onGiveUp: (error: unknown) => void = () => undefined,
+  retries = 3,
+  delayMs = 300,
+): void {
+  const run = (left: number) => {
+    try {
+      attempt();
+    } catch (error) {
+      if (left <= 0) {
+        onGiveUp(error);
+        return;
+      }
+      schedule(() => {
+        if (stillWanted()) run(left - 1);
+      }, delayMs);
+    }
+  };
+  run(retries);
+}
 
 function settle(run: () => Promise<void> | void): Promise<void> {
   try {
@@ -186,9 +223,11 @@ export function createTtsController(deps: TtsDeps): TtsController {
     if (utteranceToken !== token) return;
     token += 1;
     setState(IDLE_TTS_STATE);
-    // After an error the rest of the queue must not keep playing.
-    if (how === "error") void stopEngine();
-    else release();
+    // After an error the rest of the queue must not keep playing. After a
+    // finish the engine is stopped too before the session is given back:
+    // iOS refuses to deactivate it while the synthesizer still runs.
+    if (how === "stopped") release();
+    else void stopEngine();
   };
 
   return {
@@ -210,23 +249,36 @@ export function createTtsController(deps: TtsDeps): TtsController {
         }
       }
       setState({ status: "playing", ownerId });
-      chunks.forEach((chunk, index) => {
-        if (current !== token) return;
-        const callbacks: TtsUtteranceCallbacks = {
-          // On iOS a stop cancels only the current utterance, so every
-          // chunk reports its stop and errors.
-          onStopped: () => end(current, "stopped"),
-          onError: () => end(current, "error"),
-          ...(index === chunks.length - 1
-            ? { onDone: () => end(current, "done") }
-            : {}),
+      const queue = () => {
+        chunks.forEach((chunk, index) => {
+          if (current !== token) return;
+          const callbacks: TtsUtteranceCallbacks = {
+            // On iOS a stop cancels only the current utterance, so every
+            // chunk reports its stop and errors.
+            onStopped: () => end(current, "stopped"),
+            onError: () => end(current, "error"),
+            ...(index === chunks.length - 1
+              ? { onDone: () => end(current, "done") }
+              : {}),
+          };
+          try {
+            deps.speak(chunk, options, callbacks);
+          } catch {
+            end(current, "error");
+          }
+        });
+      };
+      // Nothing is queued before the engine is ready, so a stop meanwhile
+      // only has to change the token.
+      const pending = deps.ready?.() ?? null;
+      if (pending) {
+        const queueIfCurrent = () => {
+          if (current === token) queue();
         };
-        try {
-          deps.speak(chunk, options, callbacks);
-        } catch {
-          end(current, "error");
-        }
-      });
+        void pending.then(queueIfCurrent, queueIfCurrent);
+        return true;
+      }
+      queue();
       return current === token;
     },
 
@@ -288,6 +340,16 @@ export const MAX_VOICES = 6;
 
 function baseLanguage(tag: string): string {
   return tag.toLowerCase().split(/[-_]/)[0] ?? "";
+}
+
+/**
+ * The language to give expo-speech. On Android it builds the locale with
+ * Locale.Builder().setLanguage(), which rejects a tag with a region such as
+ * 'fr-FR' and falls back to the phone's language, so Android gets the base
+ * language ('fr'). iOS and the web take the full tag.
+ */
+export function engineLanguage(tag: string, platform: string): string {
+  return platform === "android" ? baseLanguage(tag) : tag;
 }
 
 /**
