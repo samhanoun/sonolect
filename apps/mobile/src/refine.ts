@@ -34,8 +34,13 @@ const KEEPS_ALL_REPETITIONS: readonly string[] = ["ar"];
 // A word repeated right after itself ("the the"). JS \b is ASCII-only even
 // with the u flag, so the boundaries are Unicode letters, marks and digits;
 // marks keep a word with combining accents or Arabic vowel signs whole.
+// A word joined to the letter before it by a hyphen or an apostrophe
+// ("peut-être", "jusqu'à") is part of that word and never starts a
+// repetition ("peut-être être", "jusqu'à à peu près"). A repetition followed
+// by a hyphen and a letter is part of a compound ("peut peut-être") and is
+// kept. An apostrophe after it is not, so "I I'm" still becomes "I'm".
 const REPEATED_WORD =
-  /(?<![\p{L}\p{M}\p{N}])(\p{L}[\p{L}\p{M}]*)(?:\s+\1)+(?![\p{L}\p{M}\p{N}])/giu;
+  /(?<![\p{L}\p{M}\p{N}]|[\p{L}\p{M}\p{N}][-\u2010\u2011'\u2019])(\p{L}[\p{L}\p{M}]*)(?:\s+\1)+(?![\p{L}\p{M}\p{N}]|[-\u2010\u2011]\p{L})/giu;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

@@ -86,6 +86,29 @@ describe("local refinement", () => {
     );
     // Arabic doubles a noun to mean "one by one": خطوة خطوة is "step by step".
     assert.equal(removeFillers("خطوة خطوة", "ar-SA"), "خطوة خطوة");
+    // A word joined by a hyphen or an apostrophe belongs to the word before
+    // it, so the next word is not a repetition of it.
+    for (const text of [
+      "il va peut-être être en retard",
+      "il peut peut-être venir",
+      "de neuf heures jusqu'à à peu près midi",
+      "jusqu\u2019à à midi",
+      "est-ce ce que tu viens",
+      "peut\u2010être être",
+      "quelqu'un un jour",
+      "dis-moi moi aussi",
+    ]) {
+      assert.equal(removeFillers(text, "fr-FR"), text);
+    }
+    // A stutter before a contraction still collapses.
+    assert.equal(
+      removeFillers("so I I'm thinking", "en-US"),
+      "so I'm thinking",
+    );
+    assert.equal(
+      removeFillers("we we\u2019re late", "en-US"),
+      "we\u2019re late",
+    );
   });
 
   it("sentence-cases and terminates text", () => {
@@ -135,6 +158,10 @@ describe("local refinement", () => {
     assert.equal(
       cleanTranscript("كيف حالك؟", { language: "ar-SA" }),
       "كيف حالك؟",
+    );
+    assert.equal(
+      cleanTranscript("il va peut-être être en retard", { language: "fr-FR" }),
+      "Il va peut-être être en retard.",
     );
   });
 
