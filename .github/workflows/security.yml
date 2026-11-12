@@ -19,7 +19,7 @@ concurrency:
 jobs:
   semgrep:
     name: Semgrep SAST (code, Dockerfiles, Terraform, workflows)
-    runs-on: instabox-medium
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
@@ -67,7 +67,7 @@ jobs:
 
   osv-scanner:
     name: OSV-Scanner SCA (pnpm + Cargo lockfiles)
-    runs-on: instabox-medium
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
@@ -113,7 +113,7 @@ jobs:
 
   cargo-audit:
     name: cargo-audit (desktop Rust crates)
-    runs-on: instabox-medium
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
       run:
@@ -135,7 +135,7 @@ jobs:
 
   npm-audit:
     name: pnpm audit gate
-    runs-on: instabox-medium
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -169,7 +169,7 @@ jobs:
     # Security). Set the repository variable ENABLE_DEPENDENCY_REVIEW=true
     # once it is enabled in Settings > Code security.
     if: github.event_name == 'pull_request' && vars.ENABLE_DEPENDENCY_REVIEW == 'true'
-    runs-on: instabox-medium
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read

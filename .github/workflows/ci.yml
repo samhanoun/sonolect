@@ -24,7 +24,7 @@ env:
 jobs:
   quality:
     name: Quality (${{ matrix.node-version }})
-    runs-on: instabox-medium
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -58,7 +58,7 @@ jobs:
 
   mobile-bundle:
     name: Mobile web bundle
-    runs-on: instabox-medium
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -91,7 +91,7 @@ jobs:
 
   mobile-android:
     name: Mobile Android build
-    runs-on: instabox-medium
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - name: Checkout
@@ -243,7 +243,7 @@ jobs:
   desktop-e2e:
     name: Desktop Playwright E2E
     # Playwright 1.59 cannot install browser deps on ubuntu-latest (26.04) yet.
-    runs-on: instabox-medium
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -270,7 +270,7 @@ jobs:
 
   desktop-rust:
     name: Desktop Rust (fmt, clippy, test)
-    runs-on: instabox-medium
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
       run:
@@ -301,7 +301,7 @@ jobs:
 
   config-validation:
     name: Config validation
-    runs-on: instabox-medium
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -413,7 +413,7 @@ jobs:
 
   terraform:
     name: Terraform formatting
-    runs-on: instabox-medium
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: infra/terraform
@@ -431,7 +431,7 @@ jobs:
 
   security:
     name: Dependency and secret scanning
-    runs-on: instabox-medium
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
