@@ -9,8 +9,11 @@ Studio palette (forest `#1F3429`, lime `#DDF39A`).
 
 - **Speech to text** uses `expo-speech-recognition` (Apple Speech on iOS,
   Android SpeechRecognizer). With privacy set to _Local first_ or _Ephemeral_,
-  the app asks for on-device recognition; when the phone can't do that, the
-  capture screen says the system speech service is used.
+  dictation runs on the device when the phone can do it for the chosen
+  language. Otherwise Sonolect asks before using the system speech service,
+  which may send the audio to Apple or Google, unless the user turned on
+  _Use the system speech service_ in Settings. _Standard_ always uses the
+  system speech service, and Settings and the capture screen say so.
 - **Long dictations**: below Android 13 the recognizer ends at every pause,
   and Apple's server recognizer ends after about a minute. The capture loop
   (`src/captureLoop.ts`) starts it again and keeps all the text, until Done,
@@ -19,23 +22,34 @@ Studio palette (forest `#1F3429`, lime `#DDF39A`).
   the `expo-speech-recognition` README only works on Android 13+. The screen
   stays on while dictating; leaving the app stops the dictation and keeps
   its text.
-- **Refinement** runs locally (filler removal, casing, dictionary, snippets,
-  summary, task list). _Rewrite_ and _Reply_ need a model on the Sonolect API
-  (`/v1/polish`), so the phone-only build does not offer them. The app never
-  invents text.
+- **Refinement** is local only in this build (filler removal, casing,
+  dictionary, snippets, summary, task list): no text leaves the phone for it.
+  _Rewrite_ and _Reply_ need a model on the Sonolect API (`/v1/polish`), so
+  the phone-only build does not offer them. The app never invents text.
 - **Sync** is off in the phone-only build (see below): notes stay on the phone
   and nothing is sent to a Sonolect API. With the API turned back on, sync
   needs an API URL in Settings (`https://`, or `http://` on localhost / private
   LAN) and the sync switch. The optional access token is then kept in
   SecureStore (Keychain/Keystore), on this device only and outside backups.
 - **Storage**: settings, notes, dictionary and snippets in AsyncStorage, one
-  key per note and no limit on how many are kept (`src/storageCore.ts`). A
-  value that can't be read is never deleted: the app says so and reads it
-  again at the next launch. _Ephemeral_ mode and turning history off delete
-  stored notes. Recordings and recorder files left in the app cache are
-  deleted at each start, on _Clear history_ and on _Erase all data_. On
-  Android the AsyncStorage database may grow to 64 MB
+  key per note and no limit on how many are kept (`src/storageCore.ts`). No
+  recordings are kept: each one is deleted once read, and what is left in
+  the app cache is deleted at each start, on _Clear history_ and on _Erase
+  all data_. A value that can't be read is never deleted: the app says so
+  and reads it again at the next launch. Choosing _Ephemeral_ or turning
+  history off deletes the stored notes, after a confirmation that says how
+  many. On Android the AsyncStorage database may grow to 64 MB
   (`plugins/withAsyncStorageSize.js`).
+- **Languages**: on a first run (and after _Erase all data_) the app
+  language and the dictation language follow the phone's preferred
+  languages (`src/firstRun.ts`). The iOS microphone and speech prompts are
+  translated in `locales/fr.json`. The layout stays left-to-right on phones
+  set to a right-to-left language, because the app has no right-to-left UI
+  yet (`expo-localization` plugin, `supportsRTL: false`).
+- **Privacy policy**: Settings and the onboarding card link to the policy at
+  `SONOLECT_PRIVACY_POLICY_URL`. Development builds may leave it unset and
+  show no link; release builds fail without it (`config/release.cjs`, see
+  [docs/mobile-release.md](../../docs/mobile-release.md)).
 
 ## Phone-only build
 
@@ -115,6 +129,15 @@ phone-readiness audit, so they are parked here. Fix them first:
       token found at startup should also be saved once more, so it gets the
       `WHEN_UNLOCKED_THIS_DEVICE_ONLY` class (`saveApiToken` deletes and
       re-creates the item with it).
+- [ ] security-4: split the sync switch into "Sync transcripts" and "Upload
+      audio for cloud transcription", say in Settings that the API refines
+      text with Google Vertex AI Gemini, and ask before turning sync on
+      uploads the existing notes. Update the privacy copy and
+      `docs/mobile-release.md` (store declarations, privacy policy) to match.
+- [ ] ux-22: the API URL placeholder `https://api.example.com` suggests a
+      public cloud URL (use a LAN example such as `http://192.168.1.20:8080`),
+      and the token placeholder `••••••••` looks like a saved token (use an
+      i18n "Optional").
 
 ## Run it
 

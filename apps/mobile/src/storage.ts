@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
+import { getLocales } from "expo-localization";
 import * as SecureStore from "expo-secure-store";
 
 import type {
@@ -8,7 +9,8 @@ import type {
   Snippet,
   TranscriptTurn,
 } from "./domain";
-import { normalizeSettings } from "./domain";
+import { DEFAULT_SETTINGS, normalizeSettings } from "./domain";
+import { resolveInitialSettings } from "./firstRun";
 import type { NotesLoad } from "./storageCore";
 import {
   INDEX_KEY,
@@ -87,6 +89,24 @@ function migrateLegacySecureStore(): Promise<void> {
   return legacyMigration;
 }
 
+/**
+ * The settings of a first run: the defaults, with the app and dictation
+ * languages taken from the device's preferred languages (ux-5). Also what
+ * Erase all data goes back to.
+ */
+export function deviceDefaultSettings(): CompanionSettings {
+  let locales: ReturnType<typeof getLocales> | [] = [];
+  try {
+    locales = getLocales();
+  } catch {
+    // English defaults.
+  }
+  return normalizeSettings(undefined, {
+    ...DEFAULT_SETTINGS,
+    ...resolveInitialSettings(locales),
+  });
+}
+
 /** What a load read. ok false: a read failed and nothing was deleted. */
 export interface Loaded<T> {
   ok: boolean;
@@ -106,7 +126,10 @@ export const mobileStorage = {
     const saved = read.ok ? asRecord(read.value) : undefined;
     return {
       ok: read.ok,
-      value: normalizeSettings(saved as Partial<CompanionSettings> | undefined),
+      // Nothing stored (or nothing usable): a first run follows the device.
+      value: saved
+        ? normalizeSettings(saved as Partial<CompanionSettings>)
+        : deviceDefaultSettings(),
     };
   },
 

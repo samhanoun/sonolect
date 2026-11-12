@@ -108,19 +108,63 @@ export function isDictationLanguage(
   );
 }
 
-/** Coerces persisted settings from older app versions into the current shape. */
+/** The privacy levels, in the order Settings shows them. */
+export const PRIVACY_LEVELS = [
+  "standard",
+  "local_first",
+  "ephemeral",
+] as const satisfies readonly PrivacyLevel[];
+
+function isPrivacyLevel(value: unknown): value is PrivacyLevel {
+  return (
+    typeof value === "string" &&
+    (PRIVACY_LEVELS as readonly string[]).includes(value)
+  );
+}
+
+/** Whether captures are saved to the phone's library. */
+export function keepsHistory(
+  settings: Pick<CompanionSettings, "saveHistory" | "privacyLevel">,
+): boolean {
+  return settings.saveHistory && settings.privacyLevel !== "ephemeral";
+}
+
+const BOOLEAN_SETTINGS = [
+  "allowSystemService",
+  "saveHistory",
+  "cloudSyncEnabled",
+  "hapticsEnabled",
+  "onboarded",
+] as const satisfies readonly (keyof CompanionSettings)[];
+
+/**
+ * Coerces persisted settings from older app versions into the current shape.
+ * `base` fills what is missing or invalid: DEFAULT_SETTINGS, or on a first
+ * run the defaults derived from the device language (firstRun.ts).
+ */
 export function normalizeSettings(
   saved: Partial<CompanionSettings> | undefined,
+  base: CompanionSettings = DEFAULT_SETTINGS,
 ): CompanionSettings {
-  const merged = { ...DEFAULT_SETTINGS, ...(saved ?? {}) };
+  const merged = { ...base, ...(saved ?? {}) };
   if (!isDictationLanguage(merged.language)) {
-    merged.language = DEFAULT_SETTINGS.language;
+    merged.language = isDictationLanguage(base.language)
+      ? base.language
+      : DEFAULT_SETTINGS.language;
   }
   if (merged.uiLanguage !== "en" && merged.uiLanguage !== "fr") {
-    merged.uiLanguage = DEFAULT_SETTINGS.uiLanguage;
+    merged.uiLanguage =
+      base.uiLanguage === "en" || base.uiLanguage === "fr"
+        ? base.uiLanguage
+        : DEFAULT_SETTINGS.uiLanguage;
   }
-  if (typeof merged.allowSystemService !== "boolean") {
-    merged.allowSystemService = false;
+  if (!isPrivacyLevel(merged.privacyLevel)) {
+    merged.privacyLevel = DEFAULT_SETTINGS.privacyLevel;
+  }
+  // A value that isn't a boolean (a string such as "false" is truthy) falls
+  // back to the default instead of deciding whether notes are kept.
+  for (const key of BOOLEAN_SETTINGS) {
+    if (typeof merged[key] !== "boolean") merged[key] = DEFAULT_SETTINGS[key];
   }
   if (
     typeof merged.speechRate !== "number" ||

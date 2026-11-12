@@ -11,7 +11,7 @@ import type {
   Snippet,
   TranscriptTurn,
 } from "./domain";
-import { DEFAULT_SETTINGS, createId } from "./domain";
+import { createId, keepsHistory } from "./domain";
 import {
   API_FEATURES_ENABLED,
   apiConfig,
@@ -56,7 +56,7 @@ import {
   planRecognition,
   systemServicePlan,
 } from "./speechPolicy";
-import { mobileStorage } from "./storage";
+import { deviceDefaultSettings, mobileStorage } from "./storage";
 import { isUnreadableValueError } from "./storageCore";
 import { setTtsPlaybackGuard, ttsController } from "./tts";
 
@@ -148,10 +148,6 @@ function keepScreenAwake(on: boolean): void {
         : deactivateKeepAwake(KEEP_AWAKE_TAG),
     )
     .catch(() => undefined);
-}
-
-function keepsHistory(settings: CompanionSettings): boolean {
-  return settings.saveHistory && settings.privacyLevel !== "ephemeral";
 }
 
 /**
@@ -464,7 +460,8 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
 
   return {
     hydrated: false,
-    settings: DEFAULT_SETTINGS,
+    // Until hydrate reads the stored settings, and if it cannot.
+    settings: deviceDefaultSettings(),
     history: [],
     dictionary: [],
     snippets: [],
@@ -719,7 +716,8 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         return;
       }
       set({
-        settings: DEFAULT_SETTINGS,
+        // Back to a first run, which follows the device language (ux-5).
+        settings: deviceDefaultSettings(),
         history: [],
         latest: undefined,
         dictionary: [],

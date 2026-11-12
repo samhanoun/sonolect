@@ -134,6 +134,8 @@ const en = {
       tasks: "Tasks",
     },
     empty: "Nothing here yet. Your captures will appear in this list.",
+    historyOff:
+      "History is off, so captures aren't kept. Turn it on in Settings.",
     noMatch: "No transcripts match your search.",
     items: (n: number) => `${n} ${n === 1 ? "ITEM" : "ITEMS"}`,
     pin: "Pin",
@@ -177,11 +179,11 @@ const en = {
     },
     privacyHelp: {
       standard:
-        "Saves history. Uses the best recognizer available, on device or not.",
+        "Saves notes on this phone. Dictation uses the system speech service, which may send audio to Google or Apple.",
       local_first:
-        "Saves history on this phone and asks for on-device recognition.",
+        "Saves notes on this phone and dictates on the device when it can. Sonolect asks before using an online speech service, unless you allowed it.",
       ephemeral:
-        "Nothing is saved. Captures disappear when you leave the screen.",
+        "Nothing is saved: captures disappear when Sonolect closes. Dictation stays on the device unless you allow the speech service.",
     },
     allowSystemService:
       "Use the system speech service when on-device dictation isn't available",
@@ -215,13 +217,25 @@ const en = {
     remove: "Remove",
     data: "DATA",
     clearHistory: "Clear history",
+    clearHistoryConfirm: (n: number) =>
+      n === 1
+        ? "Delete the note from this phone?"
+        : `Delete all ${n} notes from this phone?`,
+    clearButton: "Delete",
+    historyOffConfirm: (n: number) =>
+      `Turn off saved history? This deletes ${n} ${n === 1 ? "note" : "notes"} saved on this phone.`,
+    ephemeralConfirm: (n: number) =>
+      `Switch to Ephemeral? This deletes ${n} ${n === 1 ? "note" : "notes"} saved on this phone.`,
+    deleteNotes: "Delete notes",
     eraseAll: "Erase all data",
     eraseConfirm: "Erase all Sonolect data on this phone?",
-    about: "Sonolect mobile · local-first voice capture",
+    eraseButton: "Erase",
+    about: "Sonolect mobile · your notes stay on this phone",
+    privacyPolicy: "Privacy policy",
   },
   onboarding: {
     title: "Speak. Refine. Act.",
-    body: "Sonolect turns your voice into clean text. It runs on your phone first, and nothing leaves it unless you connect the Sonolect API.",
+    body: "Sonolect turns your voice into clean text. Your notes stay on this phone. When on-device dictation isn't available, Sonolect asks before using the system speech service, which may send audio to Google or Apple.",
     allow: "Allow microphone",
     continue: "Continue",
     skip: "Not now",
@@ -383,6 +397,8 @@ const fr: Strings = {
       tasks: "Tâches",
     },
     empty: "Rien pour l'instant. Vos captures apparaîtront ici.",
+    historyOff:
+      "L'historique est désactivé : les captures ne sont pas conservées. Activez-le dans Réglages.",
     noMatch: "Aucune transcription ne correspond.",
     items: (n: number) => `${n} ÉLÉMENT${n > 1 ? "S" : ""}`,
     pin: "Épingler",
@@ -425,11 +441,12 @@ const fr: Strings = {
       ephemeral: "Éphémère",
     },
     privacyHelp: {
-      standard: "Conserve l'historique. Utilise le meilleur moteur disponible.",
+      standard:
+        "Enregistre les notes sur ce téléphone. La dictée utilise le service vocal du système, qui peut envoyer l'audio à Google ou Apple.",
       local_first:
-        "Conserve l'historique sur ce téléphone et privilégie la reconnaissance locale.",
+        "Enregistre les notes sur ce téléphone et dicte sur l'appareil quand c'est possible. Sonolect demande avant d'utiliser un service vocal en ligne, sauf si vous l'avez autorisé.",
       ephemeral:
-        "Rien n'est enregistré. Les captures disparaissent en quittant l'écran.",
+        "Rien n'est enregistré : les captures disparaissent à la fermeture de Sonolect. La dictée reste sur l'appareil sauf si vous autorisez le service vocal.",
     },
     allowSystemService:
       "Utiliser le service vocal du système si la dictée sur l'appareil n'est pas disponible",
@@ -463,13 +480,25 @@ const fr: Strings = {
     remove: "Retirer",
     data: "DONNÉES",
     clearHistory: "Effacer l'historique",
+    clearHistoryConfirm: (n: number) =>
+      n === 1
+        ? "Supprimer la note de ce téléphone ?"
+        : `Supprimer les ${n} notes de ce téléphone ?`,
+    clearButton: "Supprimer",
+    historyOffConfirm: (n: number) =>
+      `Désactiver l'historique ? Cela supprime ${n} note${n > 1 ? "s" : ""} enregistrée${n > 1 ? "s" : ""} sur ce téléphone.`,
+    ephemeralConfirm: (n: number) =>
+      `Passer en mode éphémère ? Cela supprime ${n} note${n > 1 ? "s" : ""} enregistrée${n > 1 ? "s" : ""} sur ce téléphone.`,
+    deleteNotes: "Supprimer les notes",
     eraseAll: "Effacer toutes les données",
     eraseConfirm: "Effacer toutes les données Sonolect de ce téléphone ?",
-    about: "Sonolect mobile · capture vocale locale d'abord",
+    eraseButton: "Effacer",
+    about: "Sonolect mobile · vos notes restent sur ce téléphone",
+    privacyPolicy: "Politique de confidentialité",
   },
   onboarding: {
     title: "Parlez. Raffinez. Agissez.",
-    body: "Sonolect transforme votre voix en texte propre. Tout se passe d'abord sur votre téléphone, et rien n'en sort sauf si vous connectez l'API Sonolect.",
+    body: "Sonolect transforme votre voix en texte propre. Vos notes restent sur ce téléphone. Si la dictée sur l'appareil n'est pas disponible, Sonolect vous demande avant d'utiliser le service vocal du système, qui peut envoyer l'audio à Google ou Apple.",
     allow: "Autoriser le micro",
     continue: "Continuer",
     skip: "Plus tard",

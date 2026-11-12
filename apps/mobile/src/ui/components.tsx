@@ -379,25 +379,56 @@ export function ToggleRow({
   value,
   onChange,
   last,
+  disabled,
 }: {
   label: string;
   value: boolean;
   onChange: (value: boolean) => void;
   last?: boolean;
+  /** Shown but not changeable, such as Save history in Ephemeral mode. */
+  disabled?: boolean;
 }) {
   return (
     <View style={[styles.toggleRow, !last && styles.toggleRowBorder]}>
-      <Text style={[styles.body, styles.toggleLabel]}>{label}</Text>
+      <Text
+        style={[styles.body, styles.toggleLabel, disabled && styles.mutedText]}
+      >
+        {label}
+      </Text>
       <Switch
         accessibilityLabel={label}
         value={value}
         onValueChange={onChange}
+        disabled={Boolean(disabled)}
         trackColor={{ false: colors.lineInteractive, true: colors.lime }}
         thumbColor={value ? colors.onLime : colors.muted}
         ios_backgroundColor={colors.lineInteractive}
         {...({ activeThumbColor: colors.onLime } as object)}
       />
     </View>
+  );
+}
+
+/**
+ * A text link that opens a web page, such as the privacy policy. It is read
+ * as a link, and its touch area reaches the minimum size.
+ */
+export function TextLink({
+  label,
+  onPress,
+}: {
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="link"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [styles.link, pressed && styles.pressed]}
+    >
+      <Text style={styles.linkText}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -661,6 +692,18 @@ export const styles = StyleSheet.create({
   },
   // A long label wraps instead of pushing the switch off the screen.
   toggleLabel: { flexShrink: 1 },
+  mutedText: { color: colors.muted },
+  link: {
+    minHeight: MIN_TOUCH_SIZE,
+    justifyContent: "center",
+    alignSelf: "flex-start",
+  },
+  linkText: {
+    fontFamily: fonts.bodyMedium,
+    fontSize: 14,
+    color: colors.lime,
+    textDecorationLine: "underline",
+  },
   toggleRowBorder: { borderBottomWidth: 1, borderBottomColor: colors.line },
   segmented: {
     flexDirection: "row",

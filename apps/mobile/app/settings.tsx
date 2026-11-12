@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -10,11 +10,21 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { DICTATION_LANGUAGES, type PrivacyLevel } from "../src/domain";
+import { openPrivacyPolicy, privacyPolicyUrl } from "../src/appInfo";
+import {
+  DICTATION_LANGUAGES,
+  type CompanionSettings,
+  type PrivacyLevel,
+} from "../src/domain";
 import { API_FEATURES_ENABLED } from "../src/features";
 import { LANGUAGE_NAMES, strings } from "../src/i18n";
 import { isAllowedApiUrl } from "../src/localApi";
 import { noticeText, storageBanner } from "../src/notices";
+import {
+  clearHistoryTitle,
+  historyOffConfirmation,
+  historyOffTitle,
+} from "../src/settingsPolicy";
 import { useCompanionStore } from "../src/store";
 import {
   Button,
@@ -23,6 +33,7 @@ import {
   Label,
   NoticeBanner,
   Segmented,
+  TextLink,
   Title,
   ToggleRow,
   inputColors,
@@ -32,8 +43,12 @@ import { colors, fonts, radius, space } from "../src/ui/theme";
 
 type TestState = "idle" | "testing" | "ok" | "fail";
 
+/** Fixed for the build (app.config.js); null hides the link. */
+const POLICY_URL = privacyPolicyUrl();
+
 export default function SettingsScreen() {
   const settings = useCompanionStore((s) => s.settings);
+  const history = useCompanionStore((s) => s.history);
   const apiToken = useCompanionStore((s) => s.apiToken);
   const dictionary = useCompanionStore((s) => s.dictionary);
   const snippets = useCompanionStore((s) => s.snippets);
@@ -63,6 +78,42 @@ export default function SettingsScreen() {
   const [body, setBody] = useState("");
 
   const urlValid = !url.trim() || isAllowedApiUrl(url.trim());
+
+  // One confirmation at a time: a second tap while it is open does nothing.
+  const confirming = useRef(false);
+
+  /**
+   * Applies a settings change. A change that turns history off deletes the
+   * saved notes, so it asks first; Cancel leaves the settings as they were
+   * (data-4, ux-7).
+   */
+  const changeSettings = async (patch: Partial<CompanionSettings>) => {
+    if (confirming.current) return;
+    const state = useCompanionStore.getState();
+    const confirmation = historyOffConfirmation(
+      state.settings,
+      { ...state.settings, ...patch },
+      state.history.length,
+      state.storageDegraded,
+    );
+    if (confirmation) {
+      confirming.current = true;
+      try {
+        const confirmed = await confirm({
+          title: historyOffTitle(t, confirmation),
+          confirmLabel: t.settings.deleteNotes,
+          cancelLabel: t.common.cancel,
+          destructive: true,
+        });
+        if (!confirmed) return;
+      } finally {
+        confirming.current = false;
+      }
+    }
+    await updateSettings(patch);
+  };
+
+  const clearTitle = clearHistoryTitle(t, history.length, storageDegraded);
 
   const saveApi = async () => {
     if (!urlValid) return;
@@ -124,7 +175,7 @@ export default function SettingsScreen() {
               accessibilityLabel={t.settings.privacy}
               options={privacyOptions}
               value={settings.privacyLevel}
-              onChange={(privacyLevel) => void updateSettings({ privacyLevel })}
+              onChange={(privacyLevel) => void changeSettings({ privacyLevel })}
             />
             <Text style={styles.help}>
               {t.settings.privacyHelp[settings.privacyLevel]}
@@ -154,7 +205,9 @@ export default function SettingsScreen() {
               value={
                 settings.saveHistory && settings.privacyLevel !== "ephemeral"
               }
-              onChange={(saveHistory) => void updateSettings({ saveHistory })}
+              // Ephemeral never saves: the switch would only snap back.
+              disabled={settings.privacyLevel === "ephemeral"}
+              onChange={(saveHistory) => void changeSettings({ saveHistory })}
             />
             <ToggleRow
               label={t.settings.haptics}
@@ -384,14 +437,17 @@ export default function SettingsScreen() {
                 variant="danger"
                 icon="trash"
                 label={t.settings.clearHistory}
+                // Nothing to delete: no notes, and none that couldn't be read.
+                disabled={clearTitle === null}
                 onPress={async () => {
                   if (
-                    await confirm({
-                      title: t.settings.clearHistory,
-                      confirmLabel: t.common.confirm,
+                    clearTitle !== null &&
+                    (await confirm({
+                      title: clearTitle,
+                      confirmLabel: t.settings.clearButton,
                       cancelLabel: t.common.cancel,
                       destructive: true,
-                    })
+                    }))
                   )
                     await clearHistory();
                 }}
@@ -403,7 +459,7 @@ export default function SettingsScreen() {
                   if (
                     await confirm({
                       title: t.settings.eraseConfirm,
-                      confirmLabel: t.common.confirm,
+                      confirmLabel: t.settings.eraseButton,
                       cancelLabel: t.common.cancel,
                       destructive: true,
                     })
@@ -416,6 +472,12 @@ export default function SettingsScreen() {
               />
             </View>
             <Text style={styles.help}>{t.settings.about}</Text>
+            {POLICY_URL ? (
+              <TextLink
+                label={t.settings.privacyPolicy}
+                onPress={() => openPrivacyPolicy(POLICY_URL)}
+              />
+            ) : null}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

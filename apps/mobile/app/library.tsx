@@ -4,7 +4,7 @@ import { useLocales } from "expo-localization";
 import { useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import type { TranscriptTurn } from "../src/domain";
+import { keepsHistory, type TranscriptTurn } from "../src/domain";
 import { exportNotes } from "../src/exportNotes";
 import { API_FEATURES_ENABLED } from "../src/features";
 import { strings } from "../src/i18n";
@@ -290,7 +290,11 @@ export default function LibraryScreen() {
         }
         ListEmptyComponent={
           <Text style={styles.empty}>
-            {history.length === 0 ? t.library.empty : t.library.noMatch}
+            {history.length > 0
+              ? t.library.noMatch
+              : keepsHistory(settings)
+                ? t.library.empty
+                : t.library.historyOff}
           </Text>
         }
       />

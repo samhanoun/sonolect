@@ -16,6 +16,7 @@ import * as Haptics from "expo-haptics";
 import { useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { openPrivacyPolicy, privacyPolicyUrl } from "../src/appInfo";
 import { apiConfig, availableRefinementModes } from "../src/features";
 import { strings } from "../src/i18n";
 import { formatDuration } from "../src/library";
@@ -31,6 +32,7 @@ import {
   Icon,
   Label,
   MicOrb,
+  TextLink,
   Waveform,
   inputColors,
 } from "../src/ui/components";
@@ -43,6 +45,9 @@ function openAppSettings() {
   if (typeof Linking.openSettings !== "function") return;
   void Linking.openSettings().catch(() => undefined);
 }
+
+/** Fixed for the build (app.config.js); null hides the link. */
+const POLICY_URL = privacyPolicyUrl();
 
 /** Cancel asks first once a dictation is longer than this. */
 const CONFIRM_CANCEL_AFTER_MS = 15_000;
@@ -338,6 +343,12 @@ export default function CaptureScreen() {
             <Card style={styles.onboarding}>
               <Text style={styles.onboardingTitle}>{t.onboarding.title}</Text>
               <Text style={styles.muted}>{t.onboarding.body}</Text>
+              {POLICY_URL ? (
+                <TextLink
+                  label={t.settings.privacyPolicy}
+                  onPress={() => openPrivacyPolicy(POLICY_URL)}
+                />
+              ) : null}
               <View style={styles.row}>
                 <Button
                   variant="primary"

@@ -13,6 +13,10 @@
       "supportsTablet": true,
       "config": {
         "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "CFBundleDevelopmentRegion": "en",
+        "CFBundleLocalizations": ["en", "fr"]
       }
     },
     "android": {
@@ -34,9 +38,13 @@
       "output": "single",
       "favicon": "./assets/favicon.png"
     },
+    "locales": {
+      "fr": "./locales/fr.json"
+    },
     "plugins": [
       ["expo-router", { "sitemap": false }],
       "expo-font",
+      ["expo-localization", { "supportsRTL": false }],
       "expo-secure-store",
       [
         "expo-speech-recognition",
