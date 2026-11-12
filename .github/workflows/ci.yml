@@ -108,17 +108,45 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Read the Android versions React Native builds with
+        id: android-versions
+        working-directory: apps/mobile
+        # Expo's Gradle plugin takes compileSdk, build-tools and the NDK from
+        # React Native's version catalog. Installing exactly those means an
+        # Expo SDK upgrade needs no edit here.
+        run: |
+          catalog="$(node -p "require('path').join(require('path').dirname(require.resolve('react-native/package.json')), 'gradle', 'libs.versions.toml')")"
+          read_version() { sed -n "s/^$1 = \"\([^\"]*\)\"$/\1/p" "$catalog"; }
+          compile_sdk="$(read_version compileSdk)"
+          build_tools="$(read_version buildTools)"
+          ndk="$(read_version ndkVersion)"
+          if [ -z "$compile_sdk" ] || [ -z "$build_tools" ] || [ -z "$ndk" ]; then
+            echo "::error::Could not read the Android versions from $catalog"
+            exit 1
+          fi
+          # From Android 17 (API 37) the SDK platform package names the minor
+          # version (platforms;android-37.0). Older platforms have no suffix
+          # (platforms;android-36), and a minor release in the catalog already
+          # carries one (36.1).
+          case "$compile_sdk" in
+            *.*) platform="android-$compile_sdk" ;;
+            *) if [ "$compile_sdk" -ge 37 ]; then platform="android-$compile_sdk.0"; else platform="android-$compile_sdk"; fi ;;
+          esac
+          echo "React Native wants compileSdk $compile_sdk ($platform), build-tools $build_tools, NDK $ndk"
+          echo "platform=$platform" >> "$GITHUB_OUTPUT"
+          echo "packages=platform-tools platforms;$platform build-tools;$build_tools ndk;$ndk cmake;3.22.1" >> "$GITHUB_OUTPUT"
+
       - name: Setup Android SDK
         # GitHub images ship the SDK; self-hosted runners may not. The action's
         # default list includes the obsolete "tools" package, which a fresh SDK
-        # cannot install, so list what this build needs (Expo SDK 52 / RN 0.76).
+        # cannot install, so list what this build needs.
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
           log-accepted-android-sdk-licenses: false
-          packages: platform-tools platforms;android-35 build-tools;35.0.0 ndk;26.1.10909125 cmake;3.22.1
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          packages: ${{ steps.android-versions.outputs.packages }}
 
       - name: Generate the Android project
         run: pnpm --filter @sonolect/mobile exec expo prebuild --no-install --clean --platform android
@@ -128,10 +156,12 @@ jobs:
         # APK installs on any Android phone for testing (not for the store).
         # arm64-v8a covers current phones and halves native compile time.
         working-directory: apps/mobile/android
+        env:
+          ANDROID_PLATFORM: ${{ steps.android-versions.outputs.platform }}
         run: |
           # Point Gradle at the SDK that setup-android installed (a fresh
           # self-hosted SDK lives under $HOME), and fail early if it is missing.
-          test -d "$ANDROID_HOME/platforms/android-35" || { echo "::error::No Android SDK platform 35 under $ANDROID_HOME"; exit 1; }
+          test -d "$ANDROID_HOME/platforms/$ANDROID_PLATFORM" || { echo "::error::No Android SDK platform $ANDROID_PLATFORM under $ANDROID_HOME"; exit 1; }
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
 
