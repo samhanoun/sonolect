@@ -114,7 +114,14 @@ pub async fn download_local_model(app: tauri::AppHandle) -> Result<ModelStatus, 
             }
             file.sync_all().map_err(|e| e.to_string())?;
             drop(file);
-            if downloaded != MODEL_SIZE || format!("{:x}", hash.finalize()) != MODEL_SHA {
+            if downloaded != MODEL_SIZE
+                || hash
+                    .finalize()
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>()
+                    != MODEL_SHA
+            {
                 return Err("Model checksum failed. Please retry the download.".into());
             }
             fs::rename(&partial, &path).map_err(|e| e.to_string())?;
