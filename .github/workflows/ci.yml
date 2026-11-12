@@ -13,10 +13,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Runner selection: GitHub-hosted by default. Set the repository variable
-# LINUX_RUNNER (e.g. ["self-hosted","Linux","laptop"]) and/or WINDOWS_RUNNER
-# to a JSON label list to route jobs to self-hosted runners; delete the
-# variable to switch back. Fork PRs always stay on GitHub-hosted runners.
+# All jobs run on GitHub-hosted runners (free for this public repo).
 
 env:
   PNPM_VERSION: 9.15.0
@@ -271,7 +268,7 @@ jobs:
 
   release-package-validation:
     name: Release package validation (${{ matrix.os }})
-    runs-on: ${{ matrix.os == 'windows-latest' && vars.WINDOWS_RUNNER != '' && github.event.pull_request.head.repo.fork != true && fromJSON(vars.WINDOWS_RUNNER) || matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
