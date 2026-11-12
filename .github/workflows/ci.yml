@@ -127,9 +127,17 @@ jobs:
             echo "::error::Could not read the Android versions from $catalog"
             exit 1
           fi
-          echo "React Native wants compileSdk $compile_sdk, build-tools $build_tools, NDK $ndk"
-          echo "compile-sdk=$compile_sdk" >> "$GITHUB_OUTPUT"
-          echo "packages=platform-tools platforms;android-$compile_sdk build-tools;$build_tools ndk;$ndk cmake;3.22.1" >> "$GITHUB_OUTPUT"
+          # From Android 17 (API 37) the SDK platform package names the minor
+          # version (platforms;android-37.0). Older platforms have no suffix
+          # (platforms;android-36), and a minor release in the catalog already
+          # carries one (36.1).
+          case "$compile_sdk" in
+            *.*) platform="android-$compile_sdk" ;;
+            *) if [ "$compile_sdk" -ge 37 ]; then platform="android-$compile_sdk.0"; else platform="android-$compile_sdk"; fi ;;
+          esac
+          echo "React Native wants compileSdk $compile_sdk ($platform), build-tools $build_tools, NDK $ndk"
+          echo "platform=$platform" >> "$GITHUB_OUTPUT"
+          echo "packages=platform-tools platforms;$platform build-tools;$build_tools ndk;$ndk cmake;3.22.1" >> "$GITHUB_OUTPUT"
 
       - name: Setup Android SDK
         # GitHub images ship the SDK; self-hosted runners may not. The action's
@@ -149,11 +157,11 @@ jobs:
         # arm64-v8a covers current phones and halves native compile time.
         working-directory: apps/mobile/android
         env:
-          COMPILE_SDK: ${{ steps.android-versions.outputs.compile-sdk }}
+          ANDROID_PLATFORM: ${{ steps.android-versions.outputs.platform }}
         run: |
           # Point Gradle at the SDK that setup-android installed (a fresh
           # self-hosted SDK lives under $HOME), and fail early if it is missing.
-          test -d "$ANDROID_HOME/platforms/android-$COMPILE_SDK" || { echo "::error::No Android SDK platform $COMPILE_SDK under $ANDROID_HOME"; exit 1; }
+          test -d "$ANDROID_HOME/platforms/$ANDROID_PLATFORM" || { echo "::error::No Android SDK platform $ANDROID_PLATFORM under $ANDROID_HOME"; exit 1; }
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
 
