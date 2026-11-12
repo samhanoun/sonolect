@@ -637,40 +637,45 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       if (!source) return;
       set({ refining: true, notice: null });
 
-      const context = { language: source.language, dictionary, snippets };
-      let refinedText = refineLocally(source.rawText, mode, context);
+      let refined: TranscriptTurn;
       let notice: Notice | null = null;
+      try {
+        const context = { language: source.language, dictionary, snippets };
+        let refinedText = refineLocally(source.rawText, mode, context);
 
-      const config = apiConfig(settings, apiToken);
-      if (config.apiUrl) {
-        const result = await refineWithApi(
-          source.rawText,
-          stylePresetForMode(mode),
-          config,
-          {
-            locale: source.language,
-            dictionary: dictionary.map((entry) => ({
-              spoken: entry.spoken,
-              written: entry.replacement,
-            })),
-          },
-        );
-        if (result.status === "completed") refinedText = result.text;
-        else if (modeNeedsModel(mode)) notice = noticeFor("needsModel");
-      } else if (modeNeedsModel(mode)) {
-        notice = noticeFor("needsModel");
+        const config = apiConfig(settings, apiToken);
+        if (config.apiUrl) {
+          const result = await refineWithApi(
+            source.rawText,
+            stylePresetForMode(mode),
+            config,
+            {
+              locale: source.language,
+              dictionary: dictionary.map((entry) => ({
+                spoken: entry.spoken,
+                written: entry.replacement,
+              })),
+            },
+          );
+          if (result.status === "completed") refinedText = result.text;
+          else if (modeNeedsModel(mode)) notice = noticeFor("needsModel");
+        } else if (modeNeedsModel(mode)) {
+          notice = noticeFor("needsModel");
+        }
+
+        refined = {
+          ...source,
+          mode,
+          refinedText,
+          syncState:
+            source.syncState === "synced" || source.syncState === "queued"
+              ? "queued"
+              : source.syncState,
+        };
+      } finally {
+        // Clear the busy state even when a refinement throws.
+        set({ refining: false, notice });
       }
-
-      const refined: TranscriptTurn = {
-        ...source,
-        mode,
-        refinedText,
-        syncState:
-          source.syncState === "synced" || source.syncState === "queued"
-            ? "queued"
-            : source.syncState,
-      };
-      set({ refining: false, notice });
       if (get().latest?.id === turnId) set({ latest: refined });
       if (history.some((turn) => turn.id === turnId)) {
         await replaceTurn(refined);

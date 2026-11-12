@@ -7,13 +7,35 @@ import type { DictionaryEntry, RefinementMode, Snippet } from "./domain";
  * Sonolect API is configured; see `refineWithApi` in localApi.ts.
  */
 
+// Only sounds that are never content words. "you know", "i mean", "like,",
+// fr "ben" (also a name) and es "este" ("this") carry meaning too often.
 const FILLERS: Record<string, string[]> = {
-  en: ["um", "uh", "erm", "er", "uhm", "you know", "i mean", "like,"],
-  fr: ["euh", "heu", "bah", "ben", "genre,", "du coup,"],
-  es: ["eh", "este", "o sea,", "pues,"],
+  en: ["um", "uh", "erm", "er", "uhm"],
+  fr: ["euh", "heu", "bah", "genre,", "du coup,"],
+  es: ["eh", "o sea,", "pues,"],
   de: ["äh", "ähm", "halt,"],
   ar: [],
 };
+
+// Words that are legitimately said twice in a row ("nous nous sommes vus",
+// "he had had enough", "dass die die Zeitung liest", "oh là là", "así así");
+// never collapsed.
+const DOUBLED_WORDS: Record<string, readonly string[]> = {
+  en: ["that", "had", "is"],
+  fr: ["nous", "vous", "là"],
+  es: ["que", "así"],
+  de: ["die", "der", "das", "sie"],
+};
+
+// Arabic doubles any noun to mean "one by one" (خطوة خطوة, "step by step"),
+// so its repetitions are never collapsed.
+const KEEPS_ALL_REPETITIONS: readonly string[] = ["ar"];
+
+// A word repeated right after itself ("the the"). JS \b is ASCII-only even
+// with the u flag, so the boundaries are Unicode letters, marks and digits;
+// marks keep a word with combining accents or Arabic vowel signs whole.
+const REPEATED_WORD =
+  /(?<![\p{L}\p{M}\p{N}])(\p{L}[\p{L}\p{M}]*)(?:\s+\1)+(?![\p{L}\p{M}\p{N}])/giu;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -24,7 +46,8 @@ function baseLanguage(language: string): string {
 }
 
 export function removeFillers(text: string, language = "en-US"): string {
-  const fillers = FILLERS[baseLanguage(language)] ?? FILLERS.en ?? [];
+  const base = baseLanguage(language);
+  const fillers = FILLERS[base] ?? FILLERS.en ?? [];
   let result = text;
   for (const filler of fillers) {
     const pattern = new RegExp(
@@ -33,8 +56,14 @@ export function removeFillers(text: string, language = "en-US"): string {
     );
     result = result.replace(pattern, "$1");
   }
-  // Collapse immediate word repetitions ("the the" → "the").
-  result = result.replace(/\b(\p{L}+)(\s+\1\b)+/giu, "$1");
+  // Collapse immediate word repetitions ("the the" → "the"), except words
+  // that the language legitimately doubles.
+  if (!KEEPS_ALL_REPETITIONS.includes(base)) {
+    const doubled = DOUBLED_WORDS[base] ?? DOUBLED_WORDS.en ?? [];
+    result = result.replace(REPEATED_WORD, (match: string, word: string) =>
+      doubled.includes(word.toLowerCase()) ? match : word,
+    );
+  }
   return collapseWhitespace(result);
 }
 
@@ -46,19 +75,27 @@ export function collapseWhitespace(text: string): string {
     .trim();
 }
 
+/**
+ * Capitalizes the first letter of each sentence and ends the text with a
+ * period when it has no closing mark. Sentences end with . ! ? (Latin), ؟
+ * (Arabic) or 。！？ (full width, which need no space after them); Spanish
+ * ¿ and ¡ may open a sentence before its first letter. Scripts without
+ * letter case, such as Arabic, are left as they are.
+ */
 export function sentenceCase(text: string): string {
   const trimmed = collapseWhitespace(text);
   if (!trimmed) return "";
   const capitalized = trimmed.replace(
-    /(^|[.!?]\s+|\n)(\p{Ll})/gu,
-    (_match, lead: string, letter: string) => `${lead}${letter.toUpperCase()}`,
+    /(^|[.!?؟]\s+|[。！？]\s*|\n)([¿¡]*)(\p{Ll})/gu,
+    (_match, lead: string, opener: string, letter: string) =>
+      `${lead}${opener}${letter.toUpperCase()}`,
   );
-  return /[.!?…:]$/.test(capitalized) ? capitalized : `${capitalized}.`;
+  return /[.!?…:؟。！？]$/.test(capitalized) ? capitalized : `${capitalized}.`;
 }
 
 export function splitSentences(text: string): string[] {
   return collapseWhitespace(text)
-    .split(/(?<=[.!?…])\s+|\n+/)
+    .split(/(?<=[.!?…؟])\s+|(?<=[。！？])(?![。！？])\s*|\n+/)
     .map((sentence) => sentence.trim())
     .filter(Boolean);
 }

@@ -9,6 +9,7 @@ import {
   refineLocally,
   removeFillers,
   sentenceCase,
+  splitSentences,
 } from "./refine";
 
 describe("local refinement", () => {
@@ -23,6 +24,70 @@ describe("local refinement", () => {
     );
   });
 
+  it("keeps words that only sound like fillers", () => {
+    assert.equal(
+      removeFillers("quiero este coche y no ese", "es-ES"),
+      "quiero este coche y no ese",
+    );
+    assert.equal(
+      removeFillers("do you know where the keys are", "en-US"),
+      "do you know where the keys are",
+    );
+    assert.equal(
+      removeFillers("I mean it, this has to ship on Friday", "en-US"),
+      "I mean it, this has to ship on Friday",
+    );
+    assert.equal(
+      removeFillers("I like, really like it", "en-US"),
+      "I like, really like it",
+    );
+    assert.equal(
+      removeFillers("j'ai vu Ben hier", "fr-FR"),
+      "j'ai vu Ben hier",
+    );
+    assert.equal(removeFillers("este año", "es-ES"), "este año");
+  });
+
+  it("collapses repeated words but keeps legitimate doubles", () => {
+    assert.equal(
+      removeFillers("nous nous sommes vus", "fr-FR"),
+      "nous nous sommes vus",
+    );
+    assert.equal(
+      removeFillers("vous vous êtes trompés", "fr-FR"),
+      "vous vous êtes trompés",
+    );
+    assert.equal(removeFillers("oh là là", "fr-FR"), "oh là là");
+    assert.equal(
+      removeFillers("he had had enough", "en-US"),
+      "he had had enough",
+    );
+    assert.equal(
+      removeFillers("I know that that is true", "en-US"),
+      "I know that that is true",
+    );
+    assert.equal(removeFillers("the the plan", "en-US"), "the plan");
+    assert.equal(removeFillers("The the plan", "en-US"), "The plan");
+    assert.equal(removeFillers("the theory", "en-US"), "the theory");
+    assert.equal(removeFillers("été été", "fr-FR"), "été");
+    assert.equal(removeFillers("été été chaud", "fr-FR"), "été chaud");
+    assert.equal(removeFillers("un café cafés", "fr-FR"), "un café cafés");
+    assert.equal(removeFillers("die die", "de-DE"), "die die");
+    assert.equal(
+      removeFillers("dass die die Zeitung liest", "de-DE"),
+      "dass die die Zeitung liest",
+    );
+    assert.equal(removeFillers("está estábamos", "es-ES"), "está estábamos");
+    assert.equal(removeFillers("así así", "es-ES"), "así así");
+    // Combining accents (NFD) stay part of their word.
+    assert.equal(
+      removeFillers("e\u0301te\u0301 e\u0301te\u0301", "fr-FR"),
+      "e\u0301te\u0301",
+    );
+    // Arabic doubles a noun to mean "one by one": خطوة خطوة is "step by step".
+    assert.equal(removeFillers("خطوة خطوة", "ar-SA"), "خطوة خطوة");
+  });
+
   it("sentence-cases and terminates text", () => {
     assert.equal(
       sentenceCase("hello there. how are you"),
@@ -30,6 +95,47 @@ describe("local refinement", () => {
     );
     assert.equal(sentenceCase("already done!"), "Already done!");
     assert.equal(sentenceCase("   "), "");
+  });
+
+  it("punctuates Spanish, Arabic and full-width text", () => {
+    assert.equal(sentenceCase("¿qué tal?"), "¿Qué tal?");
+    assert.equal(sentenceCase("¡hola! ¿vienes?"), "¡Hola! ¿Vienes?");
+    assert.equal(sentenceCase("كيف حالك؟"), "كيف حالك؟");
+    assert.equal(sentenceCase("hola. ¿vienes?"), "Hola. ¿Vienes?");
+    assert.equal(sentenceCase("bonjour。ça va？"), "Bonjour。Ça va？");
+    assert.equal(sentenceCase("c'est fini！"), "C'est fini！");
+    assert.equal(sentenceCase("مرحبا"), "مرحبا.");
+  });
+
+  it("splits sentences after Arabic and full-width marks", () => {
+    assert.deepEqual(splitSentences("Bonjour。Ça va？"), [
+      "Bonjour。",
+      "Ça va？",
+    ]);
+    assert.deepEqual(splitSentences("كيف حالك؟ أنا بخير."), [
+      "كيف حالك؟",
+      "أنا بخير.",
+    ]);
+    assert.deepEqual(splitSentences("本当？！ はい。"), ["本当？！", "はい。"]);
+    assert.deepEqual(splitSentences("Version 3.5 ships. Done"), [
+      "Version 3.5 ships.",
+      "Done",
+    ]);
+  });
+
+  it("cleans a transcript without adding a period after a question", () => {
+    assert.equal(
+      cleanTranscript("quiero este coche y no ese", { language: "es-ES" }),
+      "Quiero este coche y no ese.",
+    );
+    assert.equal(
+      cleanTranscript("¿qué hora es? este libro", { language: "es-ES" }),
+      "¿Qué hora es? Este libro.",
+    );
+    assert.equal(
+      cleanTranscript("كيف حالك؟", { language: "ar-SA" }),
+      "كيف حالك؟",
+    );
   });
 
   it("applies dictionary replacements on word boundaries only", () => {
