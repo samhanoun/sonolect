@@ -105,7 +105,7 @@ function currentOsVersion(): number {
 function warn(message: string, detail?: unknown): void {
   // Native messages are English and may name locales or services: they are
   // for developers only and never reach the UI.
-  if (__DEV__) console.warn(`[speech] ${message}`, detail ?? "");
+  if (__DEV__) console.warn("[speech] %s", message, detail ?? "");
 }
 
 function safely<T>(read: () => T, fallback: T): T {

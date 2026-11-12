@@ -53,7 +53,7 @@ function loadSessionModule(): AudioSessionModule | null {
 }
 
 function warn(message: string, detail: unknown): void {
-  if (__DEV__) console.warn(`[tts] ${message}`, detail);
+  if (__DEV__) console.warn("[tts] %s", message, detail);
 }
 
 /** Read-aloud has the session, between beforeSpeak and afterSpeak. */
