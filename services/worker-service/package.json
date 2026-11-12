@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",
-    "@fastify/helmet": "^12.0.1",
+    "@fastify/helmet": "^13.2.0",
     "@sonolect/config": "workspace:*",
     "@sonolect/types": "workspace:*",
     "@sonolect/validation": "workspace:*",
