@@ -7,6 +7,26 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    ignore:
+      # The Expo SDK fixes these versions for the mobile app, and bumping one
+      # alone breaks the native build. They move together in an Expo SDK
+      # upgrade (`npx expo install --fix` in apps/mobile) instead.
+      - dependency-name: "expo"
+      - dependency-name: "expo-*"
+      - dependency-name: "@expo/*"
+      - dependency-name: "react-native"
+      - dependency-name: "react-native-*"
+      - dependency-name: "@react-native-async-storage/*"
+      # React must match the renderer inside React Native, and the desktop app
+      # stays on the same React, so React also moves with the Expo SDK.
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "@types/react"
+        update-types:
+          ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@types/react-dom"
+        update-types:
+          ["version-update:semver-major", "version-update:semver-minor"]
     groups:
       dev-tooling:
         dependency-type: development

@@ -8,6 +8,7 @@ import {
   Switch,
   Text,
   View,
+  type ColorValue,
   type PressableProps,
   type StyleProp,
   type TextStyle,
@@ -43,7 +44,7 @@ export function Icon({
 }: {
   name: IconName;
   size?: number;
-  color?: string;
+  color?: ColorValue;
 }) {
   const stroke = {
     stroke: color,
