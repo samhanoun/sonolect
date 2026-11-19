@@ -13,7 +13,12 @@ export type NativeShortcutRegistration = {
 
 export type NativeInsertionResult = {
   ok: boolean;
-  method: "native-insert" | "clipboard-fallback";
+  /**
+   * native-insert: pasted. clipboard-only: on the clipboard but the paste
+   * keystroke failed (the user can press Ctrl+V). clipboard-fallback: nothing
+   * happened natively, so copy it from the web layer.
+   */
+  method: "native-insert" | "clipboard-only" | "clipboard-fallback";
   status: string;
 };
 
