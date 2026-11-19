@@ -13,7 +13,8 @@ export type NativeShortcutRegistration = {
 
 export type NativeInsertionResult = {
   ok: boolean;
-  method: "native-insert" | "clipboard-fallback";
+  /** clipboard-only: the text is on the clipboard but the paste keystroke failed. */
+  method: "native-insert" | "clipboard-fallback" | "clipboard-only";
   status: string;
 };
 

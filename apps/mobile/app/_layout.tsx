@@ -19,6 +19,7 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
+import { syncVoiceKeyboardPreferences } from "../modules/sonolect-voice-keyboard";
 import { strings } from "../src/i18n";
 import { useCompanionStore } from "../src/store";
 import { Icon, type IconName } from "../src/ui/components";
@@ -50,11 +51,23 @@ export default function RootLayout() {
   const hydrate = useCompanionStore((s) => s.hydrate);
   const hydrated = useCompanionStore((s) => s.hydrated);
   const uiLanguage = useCompanionStore((s) => s.settings.uiLanguage);
+  const privacyLevel = useCompanionStore((s) => s.settings.privacyLevel);
+  const dictationLanguage = useCompanionStore((s) => s.settings.language);
   const t = strings(uiLanguage);
 
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
+
+  // The Android voice keyboard follows the app's privacy and language settings.
+  useEffect(() => {
+    if (hydrated) {
+      syncVoiceKeyboardPreferences({
+        privacyLevel,
+        language: dictationLanguage,
+      });
+    }
+  }, [hydrated, privacyLevel, dictationLanguage]);
 
   const ready = (fontsLoaded || Boolean(fontError)) && hydrated;
   useEffect(() => {
@@ -97,6 +110,17 @@ export default function RootLayout() {
         <Tabs.Screen
           name="settings"
           options={{ title: t.tabs.settings, tabBarIcon: tabIcon("settings") }}
+        />
+        <Tabs.Screen
+          name="dictate"
+          options={{
+            // Reachable by link (sonolect://dictate) but not shown as a tab.
+            // `href: null` would make expo-router redirect away from it.
+            tabBarButton: () => null,
+            tabBarItemStyle: { display: "none" },
+            title: "Quick dictation",
+            tabBarStyle: { display: "none" },
+          }}
         />
       </Tabs>
     </SafeAreaProvider>

@@ -408,7 +408,7 @@ export function StudioTranscribe({
           <div className="studio-editor-actions">
             <button
               className="studio-button"
-              onClick={state.toggleRecording}
+              onClick={() => state.toggleRecording()}
               disabled={busy || state.recordingState === "uploading"}
             >
               <Mic size={17} />

@@ -1,8 +1,20 @@
 import { useEffect, useState } from "react";
-import { Cpu, Shield, Download, CheckCircle2 } from "lucide-react";
+import { Cpu, Shield, Download, CheckCircle2, Mic } from "lucide-react";
 import { useDesktopStore } from "../store/appStore";
 import { isTauriRuntime } from "../desktopNative";
 import { STT_LANGUAGES } from "../sttLanguages";
+import { loadBubbleVisibility, saveBubbleVisibility } from "../bubbleBridge";
+import {
+  DEFAULT_PUSH_TO_TALK_SHORTCUT,
+  DEFAULT_TOGGLE_SHORTCUT,
+} from "../desktopNative";
+import { displayAccelerator, type BubbleVisibility } from "../dictationBubble";
+
+const BUBBLE_OPTIONS: Array<{ value: BubbleVisibility; label: string }> = [
+  { value: "always", label: "Always" },
+  { value: "dictating", label: "While dictating" },
+  { value: "off", label: "Off" },
+];
 
 type ModelStatus = { path: string; ready: boolean; sizeBytes: number };
 export default function LocalSettingsPanel() {
@@ -13,7 +25,11 @@ export default function LocalSettingsPanel() {
     setSttLanguage,
     whisperConfig,
     setWhisperConfig,
+    autoInsertDictation,
+    setAutoInsertDictation,
   } = useDesktopStore();
+  const [bubbleVisibility, setBubbleVisibility] =
+    useState(loadBubbleVisibility);
   const [status, setStatus] = useState<ModelStatus>();
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -94,6 +110,41 @@ export default function LocalSettingsPanel() {
             ? "Dictation stays on this device. If local recognition fails, no cloud upload is attempted."
             : "Try the local model first. If unavailable, the configured cloud service may process your audio and text."}
         </p>
+      </section>
+      <section className={card} aria-labelledby="bubble-heading">
+        <h3 id="bubble-heading" className="flex gap-2 items-center">
+          <Mic size={18} /> Dictation bubble
+        </h3>
+        <p className="text-sm text-slate-400">
+          Press {displayAccelerator(DEFAULT_TOGGLE_SHORTCUT)} in any app (or
+          hold {displayAccelerator(DEFAULT_PUSH_TO_TALK_SHORTCUT)}) to dictate.
+          A floating bubble shows that Sonolect is listening, and the text is
+          pasted where your cursor is. Esc cancels.
+        </p>
+        <div className="flex gap-3" role="group" aria-label="Show the bubble">
+          {BUBBLE_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              onClick={() => {
+                setBubbleVisibility(option.value);
+                saveBubbleVisibility(option.value);
+              }}
+              aria-pressed={bubbleVisibility === option.value}
+              className={`px-5 py-3 rounded-xl border ${bubbleVisibility === option.value ? "bg-white text-black" : "border-white/20"}`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <label className="flex gap-3 items-center text-sm">
+          <input
+            type="checkbox"
+            checked={autoInsertDictation}
+            onChange={(event) => setAutoInsertDictation(event.target.checked)}
+          />
+          Paste the dictation into the active app automatically (otherwise it is
+          copied to the clipboard)
+        </label>
       </section>
       <section className={card}>
         <h3 className="flex gap-2 items-center">

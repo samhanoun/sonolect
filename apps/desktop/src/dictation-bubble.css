@@ -1,0 +1,253 @@
+/* Floating dictation bubble (the always-on-top "recorder" window).
+   Glass pill in the Studio palette: forest #1F3429, lime #DDF39A. */
+
+html.bubble-window,
+html.bubble-window body,
+html.bubble-window #root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent !important;
+  /* A dark color-scheme paints an opaque canvas behind a transparent page. */
+  color-scheme: normal !important;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: "Inter", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+}
+
+html.bubble-window #root {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.bubble-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 6px;
+}
+
+.bubble {
+  --glass-top: rgba(46, 70, 56, 0.92);
+  --glass-bottom: rgba(14, 22, 17, 0.94);
+  --lime: #ddf39a;
+  --ink: #eef2ea;
+  --muted: #a7b3aa;
+  position: relative;
+  display: flex;
+  align-items: center;
+  border: 0;
+  color: var(--ink);
+  border-radius: 999px;
+  background:
+    radial-gradient(
+      120% 140% at 50% -40%,
+      rgba(221, 243, 154, 0.16),
+      transparent 60%
+    ),
+    linear-gradient(180deg, var(--glass-top), var(--glass-bottom));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 0 0 1px rgba(221, 243, 154, 0.14),
+    0 6px 18px rgba(0, 0, 0, 0.35);
+  animation: bubble-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.94);
+  }
+}
+
+/* ── Idle: tiny pill ─────────────────────────────────────────── */
+
+.bubble--idle {
+  height: 30px;
+  margin-bottom: 5px;
+  padding: 0 12px 0 4px;
+  gap: 8px;
+  cursor: pointer;
+  opacity: 0.78;
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.bubble--idle:hover,
+.bubble--idle:focus-visible {
+  opacity: 1;
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.bubble__orb {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  color: #0b120e;
+  background: radial-gradient(circle at 35% 30%, #f4fbd9, var(--lime) 60%);
+  box-shadow: 0 0 10px rgba(221, 243, 154, 0.45);
+}
+
+.bubble__hint {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ── Active pill ─────────────────────────────────────────────── */
+
+.bubble--active {
+  width: 272px;
+  height: 52px;
+  padding: 0 8px;
+  gap: 8px;
+  box-sizing: border-box;
+}
+
+.bubble--listening {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    inset 0 0 0 1px rgba(221, 243, 154, 0.3),
+    0 0 22px rgba(221, 243, 154, 0.22),
+    0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.bubble--error {
+  --lime: #f49a8e;
+}
+
+.bubble__icon-btn,
+.bubble__stop {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    transform 140ms ease;
+}
+
+.bubble__icon-btn {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.bubble__icon-btn:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.bubble__stop {
+  color: #0b120e;
+  background: radial-gradient(circle at 35% 30%, #f4fbd9, var(--lime) 65%);
+  box-shadow: 0 0 14px rgba(221, 243, 154, 0.5);
+}
+
+.bubble__stop:hover {
+  transform: scale(1.06);
+}
+
+.bubble__icon-btn:active,
+.bubble__stop:active {
+  transform: scale(0.94);
+}
+
+.bubble__center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bubble__wave {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 26px;
+}
+
+.bubble__wave span {
+  width: 3px;
+  height: 26px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #f4fbd9, var(--lime));
+  transform-origin: center;
+  transition: transform 90ms linear;
+}
+
+.bubble__wave.is-thinking span {
+  animation: bubble-think 1.1s ease-in-out infinite;
+  opacity: 0.8;
+}
+
+@keyframes bubble-think {
+  0%,
+  100% {
+    transform: scaleY(0.2);
+  }
+  50% {
+    transform: scaleY(0.7);
+  }
+}
+
+.bubble__timer {
+  flex: none;
+  min-width: 34px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  text-align: right;
+}
+
+.bubble__spacer {
+  width: 34px;
+  flex: none;
+}
+
+.bubble__result {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lime);
+}
+
+.bubble__detail {
+  margin: 0;
+  max-width: 272px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--ink, #eef2ea);
+  background: rgba(11, 18, 14, 0.82);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble,
+  .bubble__wave.is-thinking span {
+    animation: none;
+  }
+  .bubble__wave span {
+    transition: none;
+  }
+}

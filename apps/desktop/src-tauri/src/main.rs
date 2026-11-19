@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+mod bubble;
 mod local_engine;
 mod local_history;
 mod online;
@@ -450,7 +451,11 @@ fn main() {
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .on_window_event(bubble::on_window_event)
         .invoke_handler(tauri::generate_handler![
+            bubble::bubble_show,
+            bubble::bubble_hide,
+            bubble::bubble_open_main,
             transcribe_audio,
             online::save_provider_key,
             online::provider_key_status,

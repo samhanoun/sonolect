@@ -1,0 +1,19 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!-- Sonolect voice keyboard. Only the system can bind to it
+         (BIND_INPUT_METHOD), and the user has to enable it in
+         Settings > System > Keyboard before it can see any text field. -->
+    <service
+      android:name="expo.modules.sonolectvoicekeyboard.SonolectVoiceIme"
+      android:label="@string/sonolect_voice_keyboard_label"
+      android:permission="android.permission.BIND_INPUT_METHOD"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.view.InputMethod" />
+      </intent-filter>
+      <meta-data
+        android:name="android.view.im"
+        android:resource="@xml/sonolect_voice_method" />
+    </service>
+  </application>
+</manifest>

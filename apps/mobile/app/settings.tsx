@@ -25,6 +25,7 @@ import {
   ToggleRow,
 } from "../src/ui/components";
 import { colors, fonts, radius, space } from "../src/ui/theme";
+import { VoiceKeyboardCard } from "../src/ui/VoiceKeyboardCard";
 
 function confirm(
   message: string,
@@ -158,6 +159,8 @@ export default function SettingsScreen() {
               last
             />
           </Card>
+
+          <VoiceKeyboardCard />
 
           <View style={styles.section}>
             <Label>{t.settings.dictation}</Label>
