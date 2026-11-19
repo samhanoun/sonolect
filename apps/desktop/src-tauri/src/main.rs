@@ -255,6 +255,7 @@ fn main() {
             local_history::list_local_captures,
             local_history::delete_local_capture,
             local_history::retry_local_capture,
+            local_history::purge_local_captures,
             insertion::insert_text_into_active_app,
             check_accessibility_permission,
             open_accessibility_settings,
