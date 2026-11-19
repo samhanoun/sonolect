@@ -29,6 +29,25 @@ export function aiConfigured(): boolean {
 
 export type DictionaryHint = { spoken: string; written: string };
 
+/**
+ * Both routes spend money with Google on every call, and any signed-in
+ * account can call them, so each account gets a request budget and the
+ * polish input is bounded. Limits are per API instance (in memory).
+ */
+export type AiRouteLimits = {
+  /** Requests per account per window, for each route. */
+  maxRequests: number;
+  windowMs: number;
+};
+export const DEFAULT_AI_ROUTE_LIMITS: AiRouteLimits = {
+  maxRequests: 30,
+  windowMs: 60_000,
+};
+export const MAX_POLISH_CHARS = 20_000;
+export const MAX_DICTIONARY_ENTRIES = 200;
+const MAX_HINT_CHARS = 100;
+const MAX_OPTION_CHARS = 64;
+
 export async function transcribeAudio(
   audio: Buffer,
   languageCode = "en-US",
@@ -116,116 +135,162 @@ const getQueryLanguage = (request: FastifyRequest): string => {
   return typeof language === "string" && language.trim() ? language : "en-US";
 };
 
+const rateLimitConfig = (limits: AiRouteLimits) => ({
+  rateLimit: {
+    max: limits.maxRequests,
+    timeWindow: limits.windowMs,
+    // The verified account, so one user cannot exhaust another's budget and
+    // switching IP addresses does not reset it.
+    keyGenerator: (request: FastifyRequest) =>
+      request.actor?.userId ? `user:${request.actor.userId}` : request.ip,
+    errorResponseBuilder: (
+      _request: FastifyRequest,
+      context: { after: string; statusCode: number },
+    ) => ({
+      statusCode: context.statusCode,
+      ...errorBody(
+        "rate_limited",
+        `Too many requests. Try again in ${context.after}.`,
+        true,
+      ),
+    }),
+  },
+});
+
+const isShortString = (value: unknown, max: number): value is string =>
+  typeof value === "string" && value.length > 0 && value.length <= max;
+
 /**
  * Registers POST /v1/transcribe and POST /v1/polish on an existing Fastify app.
  * Audio bodies are parsed by the app's audio content-type parser (Buffer).
+ * The app must have @fastify/rate-limit registered (createApp does).
  */
-export function registerAiRoutes(app: FastifyInstance): void {
-  app.post("/v1/transcribe", async (request, reply): Promise<unknown> => {
-    if (!aiConfigured()) {
-      return reply
-        .status(503)
-        .send(
-          errorBody(
-            "not_configured",
-            "Cloud transcription is not configured (GCP_PROJECT_ID missing).",
-            false,
-          ),
+export function registerAiRoutes(
+  app: FastifyInstance,
+  limits: AiRouteLimits = DEFAULT_AI_ROUTE_LIMITS,
+): void {
+  const config = rateLimitConfig(limits);
+  app.post(
+    "/v1/transcribe",
+    { config },
+    async (request, reply): Promise<unknown> => {
+      if (!aiConfigured()) {
+        return reply
+          .status(503)
+          .send(
+            errorBody(
+              "not_configured",
+              "Cloud transcription is not configured (GCP_PROJECT_ID missing).",
+              false,
+            ),
+          );
+      }
+      if (!Buffer.isBuffer(request.body)) {
+        return reply
+          .status(400)
+          .send(
+            errorBody(
+              "invalid_audio",
+              "Send audio bytes with an audio/* Content-Type.",
+              false,
+            ),
+          );
+      }
+      try {
+        const result = await transcribeAudio(
+          request.body,
+          getQueryLanguage(request),
         );
-    }
-    if (!Buffer.isBuffer(request.body)) {
-      return reply
-        .status(400)
-        .send(
-          errorBody(
-            "invalid_audio",
-            "Send audio bytes with an audio/* Content-Type.",
-            false,
-          ),
-        );
-    }
-    try {
-      const result = await transcribeAudio(
-        request.body,
-        getQueryLanguage(request),
-      );
-      return result;
-    } catch (error) {
-      return reply
-        .status(503)
-        .send(
-          errorBody(
-            "transcribe_failed",
-            error instanceof Error ? error.message : "Transcription failed.",
-            true,
-          ),
-        );
-    }
-  });
+        return result;
+      } catch (error) {
+        // Provider errors can name projects and quotas: log them, don't return them.
+        request.log.error({ err: error }, "cloud transcription failed");
+        return reply
+          .status(503)
+          .send(errorBody("transcribe_failed", "Transcription failed.", true));
+      }
+    },
+  );
 
-  app.post("/v1/polish", async (request, reply): Promise<unknown> => {
-    const body = request.body as
-      | {
-          transcript?: unknown;
-          stylePreset?: unknown;
-          dictionary?: unknown;
-          locale?: unknown;
-        }
-      | undefined;
-    if (
-      !body ||
-      typeof body.transcript !== "string" ||
-      !body.transcript.trim()
-    ) {
-      return reply
-        .status(400)
-        .send(
-          errorBody(
-            "invalid_request",
-            "A non-empty transcript is required.",
-            false,
-          ),
-        );
-    }
-    if (!aiConfigured()) {
-      return reply
-        .status(503)
-        .send(
-          errorBody(
-            "not_configured",
-            "Cloud polish is not configured (GCP_PROJECT_ID missing).",
-            false,
-          ),
-        );
-    }
-    try {
-      const dictionary = Array.isArray(body.dictionary)
-        ? (body.dictionary as DictionaryHint[]).filter(
-            (entry) =>
-              entry &&
-              typeof entry.spoken === "string" &&
-              typeof entry.written === "string",
-          )
-        : undefined;
-      const result = await polishTranscript({
-        transcript: body.transcript,
-        ...(typeof body.stylePreset === "string"
-          ? { stylePreset: body.stylePreset }
-          : {}),
-        ...(dictionary ? { dictionary } : {}),
-        ...(typeof body.locale === "string" ? { locale: body.locale } : {}),
-      });
-      return result;
-    } catch (error) {
-      return reply
-        .status(503)
-        .send(
-          errorBody(
-            "polish_failed",
-            error instanceof Error ? error.message : "Polish failed.",
-            true,
-          ),
-        );
-    }
-  });
+  app.post(
+    "/v1/polish",
+    { config },
+    async (request, reply): Promise<unknown> => {
+      const body = request.body as
+        | {
+            transcript?: unknown;
+            stylePreset?: unknown;
+            dictionary?: unknown;
+            locale?: unknown;
+          }
+        | undefined;
+      if (
+        !body ||
+        typeof body.transcript !== "string" ||
+        !body.transcript.trim()
+      ) {
+        return reply
+          .status(400)
+          .send(
+            errorBody(
+              "invalid_request",
+              "A non-empty transcript is required.",
+              false,
+            ),
+          );
+      }
+      if (
+        body.transcript.length > MAX_POLISH_CHARS ||
+        (Array.isArray(body.dictionary) &&
+          body.dictionary.length > MAX_DICTIONARY_ENTRIES)
+      ) {
+        return reply
+          .status(413)
+          .send(
+            errorBody(
+              "too_large",
+              `Send at most ${MAX_POLISH_CHARS} characters and ${MAX_DICTIONARY_ENTRIES} dictionary entries.`,
+              false,
+            ),
+          );
+      }
+      if (!aiConfigured()) {
+        return reply
+          .status(503)
+          .send(
+            errorBody(
+              "not_configured",
+              "Cloud polish is not configured (GCP_PROJECT_ID missing).",
+              false,
+            ),
+          );
+      }
+      try {
+        const dictionary = Array.isArray(body.dictionary)
+          ? (body.dictionary as DictionaryHint[]).filter(
+              (entry) =>
+                entry &&
+                isShortString(entry.spoken, MAX_HINT_CHARS) &&
+                isShortString(entry.written, MAX_HINT_CHARS),
+            )
+          : undefined;
+        const result = await polishTranscript({
+          transcript: body.transcript,
+          ...(isShortString(body.stylePreset, MAX_OPTION_CHARS)
+            ? { stylePreset: body.stylePreset }
+            : {}),
+          ...(dictionary ? { dictionary } : {}),
+          ...(isShortString(body.locale, MAX_OPTION_CHARS)
+            ? { locale: body.locale }
+            : {}),
+        });
+        return result;
+      } catch (error) {
+        request.log.error({ err: error }, "cloud polish failed");
+        return reply
+          .status(503)
+          .send(errorBody("polish_failed", "Polish failed.", true));
+      }
+    },
+  );
 }
