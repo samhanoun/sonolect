@@ -162,7 +162,7 @@ describe("recordLive", () => {
 });
 
 /** A system-audio feed that reports what the test tells it to. */
-function fakeFeed(calls: string[], failStart?: string) {
+function fakeFeed(calls: string[], failStart?: string, endsAtStart?: string) {
   const state: {
     level?: (level: number) => void;
     ended?: (event: SystemAudioEnded) => void;
@@ -178,6 +178,8 @@ function fakeFeed(calls: string[], failStart?: string) {
     start: async (captureId) => {
       if (failStart) throw new Error(failStart);
       calls.push(`feed start ${captureId}`);
+      // The recorder process can exit before its start is acknowledged.
+      if (endsAtStart) state.ended?.({ id: captureId, message: endsAtStart });
     },
     stop: async () => void calls.push("feed stop"),
   };
@@ -249,6 +251,29 @@ describe("recordSystemAudio", () => {
       "listen",
       "begin",
       "feed listen",
+      "feed unlisten",
+      "feed stop",
+      "cancel",
+      "unlisten",
+    ]);
+  });
+
+  it("treats a feed that ends while starting as a failed start, with the reason", async () => {
+    const { transport, calls } = fakeTransport();
+    const { feed } = fakeFeed(calls, undefined, "System audio stopped.");
+    const stalled: string[] = [];
+    await assert.rejects(
+      recordSystemAudio(
+        {},
+        { onStalled: (message) => stalled.push(message) },
+        transport,
+        feed,
+      ),
+      /System audio stopped\./,
+    );
+    // Nobody is told to stop a recording that never began.
+    assert.deepEqual(stalled, []);
+    assert.deepEqual(calls.slice(-4), [
       "feed unlisten",
       "feed stop",
       "cancel",

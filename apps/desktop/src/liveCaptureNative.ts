@@ -290,6 +290,8 @@ export async function recordSystemAudio(
   const session = await LiveCaptureSession.start(transport, settings, handlers);
   let unlisten = () => {};
   let startedAt = 0;
+  let started = false;
+  let endedEarly: string | undefined;
   let over = false;
   const close = async () => {
     over = true;
@@ -304,10 +306,16 @@ export async function recordSystemAudio(
       },
       onEnded: (event) => {
         if (over || event.id !== session.captureId) return;
-        handlers.onStalled?.(localizeNativeMessage(event.message));
+        const message = localizeNativeMessage(event.message);
+        if (started) handlers.onStalled?.(message);
+        else endedEarly ??= message;
       },
     });
     await feed.start(session.captureId);
+    // A recorder that exits at once (its process can end before the start
+    // is acknowledged) never started: say why instead of recording nothing.
+    if (endedEarly !== undefined) throw new Error(endedEarly);
+    started = true;
     startedAt = now();
   } catch (error) {
     await close();
