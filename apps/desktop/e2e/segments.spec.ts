@@ -5,11 +5,9 @@ import {
   type MockCapture,
 } from "./support/mockTauri";
 
+/** A navigation entry; its label may be followed by a description. */
 function nav(page: Page, name: string) {
-  return page
-    .getByRole("navigation")
-    .getByRole("button", { name: new RegExp(`^${name}`) })
-    .first();
+  return page.getByRole("navigation").getByRole("button", { name }).first();
 }
 
 const segmentList = (page: Page) =>
