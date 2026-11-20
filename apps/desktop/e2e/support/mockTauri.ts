@@ -242,8 +242,7 @@ export async function emitNativeEvent(
     __sonolectE2eListening: (event: string) => boolean;
   };
   await page.waitForFunction(
-    (event) =>
-      (window as typeof window & Hooks).__sonolectE2eListening(event),
+    (event) => (window as typeof window & Hooks).__sonolectE2eListening(event),
     event,
   );
   await page.evaluate(

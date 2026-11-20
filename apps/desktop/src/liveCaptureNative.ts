@@ -73,7 +73,11 @@ export async function openPcmSource(
   }
   source.connect(node);
   node.connect(sink);
-  if (context.state === "suspended") await context.resume();
+  // Not awaited: started without a click in the window (a global hotkey),
+  // a webview may keep the context suspended and never settle this promise.
+  // The caller notices that no audio arrives.
+  if (context.state === "suspended")
+    void context.resume().catch(() => undefined);
 
   return {
     sampleRate,
@@ -124,18 +128,25 @@ export type LiveRecording = {
   cancel: () => Promise<void>;
 };
 
+/** How long the first block of microphone audio may take to arrive. */
+const FIRST_AUDIO_MS = 1500;
+
 /**
  * Records a microphone stream through the native recorder: no length limit
  * short of four hours, and text arrives while the user is still speaking.
  * Resolves with `undefined` when the recorder or the audio capture cannot
- * start, so the caller can fall back to the short-recording path. The stream
- * itself stays the caller's to stop.
+ * start, or when no audio arrives (a webview may refuse to run audio
+ * processing for a recording started without a click), so the caller can
+ * fall back to the short-recording path. The stream itself stays the
+ * caller's to stop.
  */
 export async function recordLive(
   stream: MediaStream,
   settings: LiveCaptureSettings,
   handlers: LiveCaptureHandlers = {},
   transport: LiveCaptureTransport = nativeLiveCapture,
+  open: typeof openPcmSource = openPcmSource,
+  firstAudioMs = FIRST_AUDIO_MS,
 ): Promise<LiveRecording | undefined> {
   let session: LiveCaptureSession;
   try {
@@ -143,12 +154,30 @@ export async function recordLive(
   } catch {
     return undefined;
   }
+  let heard = () => {};
+  const firstAudio = new Promise<boolean>((resolve) => {
+    heard = () => resolve(true);
+  });
   let source: PcmSource;
   try {
-    source = await openPcmSource(stream, (block, sampleRate) =>
-      session.push(block, sampleRate),
-    );
+    source = await open(stream, (block, sampleRate) => {
+      heard();
+      session.push(block, sampleRate);
+    });
   } catch {
+    await session.cancel().catch(() => undefined);
+    return undefined;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const flowing = await Promise.race([
+    firstAudio,
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), firstAudioMs);
+    }),
+  ]);
+  clearTimeout(timer);
+  if (!flowing) {
+    await source.close().catch(() => undefined);
     await session.cancel().catch(() => undefined);
     return undefined;
   }

@@ -88,8 +88,14 @@ test.describe("dictation with the app's recorder", () => {
     await emitNativeEvent(page, BUBBLE_ACTION, "finish");
     await expect(dock).toContainText("Your words are ready");
 
+    // The paste follows the transcript by a moment.
+    await expect
+      .poll(
+        async () =>
+          (await nativeCalls(page, "insert_text_into_active_app")).length,
+      )
+      .toBe(1);
     const pasted = await nativeCalls(page, "insert_text_into_active_app");
-    expect(pasted).toHaveLength(1);
     expect((pasted[0]!.args as { text: string }).text).toMatch(
       /^Part 1\. Part 2\./,
     );
@@ -132,10 +138,48 @@ test.describe("dictation with the app's recorder", () => {
     expect(await nativeCalls(page, "capture_append")).toEqual([]);
   });
 
+  test("falls back to the short path when the webview keeps audio suspended", async ({
+    page,
+  }) => {
+    // What a webview may do to a recording started by a global hotkey, with
+    // no click in the window: the audio context never runs.
+    await page.addInitScript(() => {
+      const Real = window.AudioContext;
+      window.AudioContext = class extends Real {
+        constructor(options?: AudioContextOptions) {
+          super(options);
+          void super.suspend();
+        }
+        resume() {
+          return new Promise<void>(() => {});
+        }
+      };
+    });
+    await installMockTauri(page, []);
+    await page.goto("/");
+    await emitNativeEvent(page, BUBBLE_ACTION, "toggle");
+    const dock = page.locator(".studio-recording-dock");
+    // The recorder waits a moment for audio, then the short path takes over.
+    await expect(dock).toContainText("Listening…", { timeout: 10_000 });
+    expect(await nativeCalls(page, "capture_begin")).toHaveLength(1);
+    expect(await nativeCalls(page, "capture_append")).toEqual([]);
+    expect(await nativeCalls(page, "capture_cancel")).toHaveLength(1);
+    await emitNativeEvent(page, BUBBLE_ACTION, "finish");
+    // The short recording reaches the native transcriber.
+    await expect
+      .poll(async () => (await nativeCalls(page, "transcribe_audio")).length)
+      .toBe(1);
+  });
+
   test("the meter on the overview follows the microphone", async ({ page }) => {
     await installMockTauri(page, []);
     await page.goto("/");
+    // Starting a dictation opens the editor; the meter is on the overview.
     await page.getByRole("button", { name: /Start dictating/ }).click();
+    await expect(page.locator(".studio-recording-dock")).toContainText(
+      "Listening…",
+    );
+    await nav(page, "Overview").click();
     const bars = page.locator(".studio-signal-bars");
     await expect(page.locator(".studio-signal.live")).toBeVisible();
     // The synthetic microphone beeps: the level is set and moves.
@@ -150,10 +194,7 @@ test.describe("dictation with the app's recorder", () => {
         { timeout: 10_000, intervals: [50] },
       )
       .toBeGreaterThan(0.3);
-    await page
-      .getByRole("button", { name: /Stop recording/ })
-      .first()
-      .click();
+    await page.locator(".studio-recording-dock button").click();
     await expect(page.locator(".studio-signal.live")).toHaveCount(0);
   });
 });
