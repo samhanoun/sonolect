@@ -1124,3 +1124,32 @@ body {
   font-size: 13px;
   color: var(--studio-muted);
 }
+
+/* Microphone test */
+.studio-mic-test {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+}
+.studio-mic-test .studio-button {
+  flex: none;
+}
+.studio-mic-meter {
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  background: #e3ead9;
+  overflow: hidden;
+  opacity: 0.55;
+}
+.studio-mic-meter.live {
+  opacity: 1;
+}
+.studio-mic-meter > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #43663a;
+  transition: width 80ms linear;
+}

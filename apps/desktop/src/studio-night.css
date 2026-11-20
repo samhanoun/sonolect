@@ -775,3 +775,11 @@ button.studio-segment-time:hover {
     grid-row: 2;
   }
 }
+
+/* Microphone test */
+.studio-mic-meter {
+  background: var(--n-line-strong);
+}
+.studio-mic-meter > i {
+  background: var(--n-accent);
+}

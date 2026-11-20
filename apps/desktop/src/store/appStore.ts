@@ -25,6 +25,11 @@ import {
   clearTranscriptDraft,
 } from "../persistence";
 import {
+  loadMicDeviceId,
+  openMicrophone,
+  saveMicDeviceId,
+} from "../microphone";
+import {
   assignSpeakerLabel,
   mergeSegmentRun,
   moveTranscriptSegment,
@@ -134,6 +139,9 @@ export type DesktopState = {
   setSttLanguage: (lang: string) => void;
   whisperConfig: WhisperConfig;
   setWhisperConfig: (config: WhisperConfig) => void;
+  /** The microphone that records; empty for the system default. */
+  micDeviceId: string;
+  setMicDeviceId: (deviceId: string) => void;
   setCommandOpen: (open: boolean) => void;
   /** Where the current/last capture was started from. Bubble and hotkey
    * captures are pasted into the focused app when transcription finishes. */
@@ -513,6 +521,11 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     saveSettings(SETTINGS_KEYS.whisperConfig, serializeWhisperConfig(config));
     set({ whisperConfig: config });
   },
+  micDeviceId: loadMicDeviceId(),
+  setMicDeviceId: (deviceId) => {
+    saveMicDeviceId(deviceId);
+    set({ micDeviceId: deviceId });
+  },
   setCommandOpen: (open) => set({ commandOpen: open }),
   toggleRecording: (source = "app") => {
     const {
@@ -572,7 +585,8 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     });
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const { stream, fellBack } = await openMicrophone(get().micDeviceId);
+      if (fellBack) get().addToast("toast.micFellBack");
       if (permissionCancelled) {
         stream.getTracks().forEach((track) => track.stop());
         set({ recordingState: "idle" });

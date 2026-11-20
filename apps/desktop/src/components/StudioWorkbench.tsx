@@ -25,6 +25,7 @@ import {
   rewriteUsingProvider,
   transcribeUsingProvider,
 } from "../providerSettings";
+import { MicrophoneSettings } from "./StudioMicrophone";
 import { StudioModelSelector } from "./StudioModels";
 import { SegmentEditor, useCapturePlayer } from "./StudioSegments";
 import {
@@ -1520,6 +1521,7 @@ export function StudioSettings() {
           </select>
         </label>
       </section>
+      <MicrophoneSettings />
       <PrivacyControls />
       <section className="studio-card">
         <h3>{t("studio.settings.shortcutsTitle")}</h3>

@@ -752,6 +752,20 @@ export const en = {
   "studio.transcribe.fileTooLargeApp": "Choose an audio file under 100 MB.",
   "studio.transcribe.reading": "Reading the audio file…",
   "studio.transcribe.progress": "Transcribing… {done} of {total}",
+  "studio.mic.title": "Microphone",
+  "studio.mic.meta": "Which input records your voice",
+  "studio.mic.choose": "Record with",
+  "studio.mic.systemDefault": "System default",
+  "studio.mic.numbered": "Microphone {position}",
+  "studio.mic.notConnected": "Chosen microphone (not connected)",
+  "studio.mic.notConnectedHint": "The microphone you chose is not connected. Until it is back, recordings use the system default.",
+  "studio.mic.namesHint": "Microphone names appear once access is allowed. Run a test to allow it.",
+  "studio.mic.test": "Test microphone",
+  "studio.mic.stopTest": "Stop test",
+  "studio.mic.testHint": "Speak normally: the bar should move with your voice. Nothing is recorded.",
+  "studio.mic.level": "Microphone level",
+  "studio.mic.fellBack": "The chosen microphone is not connected, so the system default is used.",
+  "toast.micFellBack": "Chosen microphone not found. Recording with the system default.",
 } as const;
 
 export type LocaleKeys = keyof typeof en;
