@@ -87,12 +87,10 @@ export async function createApp(
     frameworkErrors: (error, _request, genericReply) => {
       const reply = genericReply as unknown as FastifyReply;
       void (error.code === "FST_ERR_MAX_PARAM_LENGTH"
-        ? reply
-            .code(404)
-            .send({
-              error: SYNC_ERROR_CODES.notFound,
-              message: "no such route",
-            })
+        ? reply.code(404).send({
+            error: SYNC_ERROR_CODES.notFound,
+            message: "no such route",
+          })
         : reply.code(400).send({
             error: SYNC_ERROR_CODES.badRequest,
             message: "malformed request",

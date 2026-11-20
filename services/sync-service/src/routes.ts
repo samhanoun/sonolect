@@ -177,12 +177,10 @@ export async function vaultRoutes(
         .send({ error: rawError.code, message: rawError.message });
     }
     if (rawError instanceof VaultGoneError)
-      return reply
-        .status(410)
-        .send({
-          error: SYNC_ERROR_CODES.vaultDeleted,
-          message: "this sync was deleted",
-        });
+      return reply.status(410).send({
+        error: SYNC_ERROR_CODES.vaultDeleted,
+        message: "this sync was deleted",
+      });
     const status = (rawError as { statusCode?: unknown }).statusCode;
     if (status === 413)
       return reply.status(413).send({
@@ -192,12 +190,10 @@ export async function vaultRoutes(
     if (typeof status === "number" && status >= 400 && status < 500)
       // Fastify's own client errors (malformed JSON, wrong content type).
       // Their messages can quote the body, so none is sent back or logged.
-      return reply
-        .status(status)
-        .send({
-          error: SYNC_ERROR_CODES.badRequest,
-          message: "malformed request",
-        });
+      return reply.status(status).send({
+        error: SYNC_ERROR_CODES.badRequest,
+        message: "malformed request",
+      });
     request.log.error({ err: rawError }, "sync request failed");
     return reply
       .status(500)
