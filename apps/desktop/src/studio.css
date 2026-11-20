@@ -830,6 +830,29 @@ body {
   padding: 10px;
   border-radius: 8px;
 }
+.studio-shell .studio-export-format {
+  width: auto;
+  margin-top: 0;
+  padding: 9px 10px;
+}
+.studio-card.studio-privacy {
+  margin: 20px 0;
+}
+.studio-privacy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 14px;
+  margin-top: 4px;
+}
+.studio-privacy-actions label {
+  flex: 1 1 220px;
+}
+.studio-button.danger {
+  background: #8f2f22;
+  border-color: #8f2f22;
+  color: #fff;
+}
 .studio-editor-tools {
   display: grid;
   gap: 18px;

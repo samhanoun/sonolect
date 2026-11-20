@@ -1,0 +1,6 @@
+{
+  "ios": {
+    "NSMicrophoneUsageDescription": "Sonolect utilise le micro pour transformer votre voix en texte.",
+    "NSSpeechRecognitionUsageDescription": "Sonolect utilise la reconnaissance vocale pour transcrire ce que vous dictez."
+  }
+}

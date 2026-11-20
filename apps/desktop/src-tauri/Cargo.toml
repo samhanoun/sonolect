@@ -16,6 +16,9 @@ base64 = "0.23"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3.6", features = ["windows-native"] }
+# In-process paste: clipboard write kept out of clipboard history, then Ctrl+V via SendInput.
+arboard = { version = "3.7", default-features = false }
+enigo = { version = "0.6", default-features = false }
 # Dictation bubble: remember the app being dictated into and give focus back to it.
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",

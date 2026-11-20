@@ -17,6 +17,19 @@
 | User content | audio, transcripts, agent outputs        | tenant/user scoped rules, private buckets, deletion workflows |
 | Secrets      | API keys, JWT keys, provider credentials | Secret Manager, no repository storage, rotation runbooks      |
 
+## Desktop app boundary
+
+- The bundled interface runs under a Content Security Policy (`app.security.csp` in `apps/desktop/src-tauri/tauri.conf.json`): scripts and styles only from the app itself, and network connections only to Tauri IPC and loopback (`localhost`/`127.0.0.1`, for a local `VITE_SONOLECT_API_URL`). Every online request (OpenRouter, OpenCode, Edge voices) goes through the Rust side, which refuses it while **Local only** is selected. If a build points `VITE_SONOLECT_API_URL` at a remote host, add that origin to `connect-src`.
+- File paths are chosen natively: recordings and system-audio captures live in the app's local data folder, and a model path from the interface must be a GGML Whisper file before it reaches whisper.cpp.
+- Dictations pasted into other apps are kept out of Windows clipboard history and the cloud clipboard, and the previous clipboard text is restored afterwards.
+- Settings > Privacy & retention deletes recordings after a chosen number of days, and **Delete all my data** removes recordings, transcripts, saved provider keys, dictionary, snippets and preferences.
+
+## API cost controls
+
+The paid `/v1/transcribe` and `/v1/polish` routes are limited per verified account (30 requests per minute by default, `aiRouteLimits` in `createApp`), polish input is capped at 20,000 characters and 200 dictionary entries, and provider errors are logged rather than returned. The limit is held in memory per instance, so with several Cloud Run instances the effective budget is per instance; move it to a shared store (Firestore or Redis) before relying on it for billing.
+
+The `agent`, `audio`, `billing` and `sync` services have no authentication and are not deployed by Terraform. Do not expose them until they verify callers the way the API does.
+
 ## Firebase rules
 
 Rules live in `infra/firebase`:

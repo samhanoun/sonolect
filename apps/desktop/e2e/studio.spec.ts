@@ -80,6 +80,43 @@ test.describe("Sonolect studio", () => {
     );
   });
 
+  test("transcripts export as subtitles with timed cues", async ({ page }) => {
+    await nav(page, "Transcribe").click();
+    await page
+      .getByLabel("Transcript editor")
+      .fill("Hello there. This is a subtitle test.");
+    await page.getByLabel("Export format").selectOption("srt");
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export transcript" }).click();
+    const file = await download;
+    expect(file.suggestedFilename()).toBe("sonolect-transcript.srt");
+    const { readFile } = await import("node:fs/promises");
+    const content = await readFile((await file.path())!, "utf8");
+    expect(content).toContain("1\n00:00:00,000 --> ");
+    expect(content).toContain("This is a subtitle test.");
+  });
+
+  test("privacy settings keep a retention choice and delete all data", async ({
+    page,
+  }) => {
+    await nav(page, "Settings").click();
+    await page.getByLabel("Keep recordings").selectOption("30");
+    await page.reload();
+    await nav(page, "Settings").click();
+    await expect(page.getByLabel("Keep recordings")).toHaveValue("30");
+
+    page.once("dialog", (dialog) => void dialog.accept());
+    const reloaded = page.waitForEvent("load");
+    await page.getByRole("button", { name: "Delete all my data" }).click();
+    await reloaded;
+    const remaining = await page.evaluate(() =>
+      Object.keys(localStorage).filter((key) => key.startsWith("sonolect.")),
+    );
+    expect(remaining).toEqual([]);
+    await nav(page, "Settings").click();
+    await expect(page.getByLabel("Keep recordings")).toHaveValue("0");
+  });
+
   test("dictionary entries are saved and applied by cleanup", async ({
     page,
   }) => {

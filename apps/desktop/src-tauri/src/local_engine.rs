@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use std::{
     fs,
     io::{Cursor, Read, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
 };
 use tauri::{Emitter, Manager};
@@ -41,6 +41,63 @@ fn default_model(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .join("ggml-base.bin"))
 }
 
+/// A regular file over 1 MB that starts with the GGML magic number. Checked
+/// before a path chosen in the web layer reaches whisper.cpp's C++ loader.
+fn is_ggml_model(path: &Path) -> bool {
+    let size = fs::metadata(path)
+        .map(|m| if m.is_file() { m.len() } else { 0 })
+        .unwrap_or(0);
+    size > 1_000_000
+        && fs::File::open(path)
+            .and_then(|mut f| {
+                let mut magic = [0; 4];
+                f.read_exact(&mut magic)?;
+                Ok(u32::from_le_bytes(magic) == 0x67676d6c)
+            })
+            .unwrap_or(false)
+}
+
+/// Runs `work` with the loaded model, loading (or switching) it first.
+fn with_engine<T>(
+    model_path: &Path,
+    work: impl FnOnce(&WhisperContext) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut engine = ENGINE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .map_err(|_| "Speech engine lock failed")?;
+    if engine
+        .as_ref()
+        .map(|(path, _)| path != model_path)
+        .unwrap_or(true)
+    {
+        let mut config = WhisperContextParameters::default();
+        config.use_gpu(false);
+        let context = WhisperContext::new_with_params(
+            model_path.to_str().ok_or("Invalid model path")?,
+            config,
+        )
+        .map_err(|e| format!("Cannot load speech model: {e}"))?;
+        *engine = Some((model_path.to_path_buf(), context));
+    }
+    work(&engine.as_ref().ok_or("Speech engine unavailable")?.1)
+}
+
+/// Loads the installed model in the background at startup, so the first
+/// dictation does not wait for ~150 MB to be read and initialised. A dictation
+/// that starts meanwhile waits on the same lock instead of loading it twice.
+pub fn prewarm(app: &tauri::AppHandle) {
+    let Ok(path) = default_model(app) else {
+        return;
+    };
+    if !is_ggml_model(&path) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let _ = with_engine(&path, |_| Ok(()));
+    });
+}
+
 #[tauri::command]
 pub fn local_model_status(
     app: tauri::AppHandle,
@@ -51,14 +108,7 @@ pub fn local_model_status(
         None => default_model(&app)?,
     };
     let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-    let ready = fs::File::open(&path)
-        .and_then(|mut f| {
-            let mut magic = [0; 4];
-            f.read_exact(&mut magic)?;
-            Ok(u32::from_le_bytes(magic) == 0x67676d6c)
-        })
-        .unwrap_or(false)
-        && size > 1_000_000;
+    let ready = is_ggml_model(&path);
     Ok(ModelStatus {
         path: path.to_string_lossy().into(),
         ready,
@@ -178,6 +228,9 @@ pub fn transcribe_with_model(
     if !model_path.is_file() {
         return Err("Install the local speech model in Settings first.".into());
     }
+    if !is_ggml_model(&model_path) {
+        return Err("The selected file is not a Whisper model (.bin in GGML format).".into());
+    }
     // Exact/near-digital silence should never manufacture a transcript.
     if samples.iter().all(|s| s.abs() < 0.0001) {
         return Ok(super::WhisperResult {
@@ -186,29 +239,19 @@ pub fn transcribe_with_model(
             language: payload.language,
         });
     }
-    let mut engine = ENGINE
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .map_err(|_| "Speech engine lock failed")?;
-    if engine
-        .as_ref()
-        .map(|(path, _)| path != &model_path)
-        .unwrap_or(true)
-    {
-        let mut config = WhisperContextParameters::default();
-        config.use_gpu(false);
-        let context = WhisperContext::new_with_params(
-            model_path.to_str().ok_or("Invalid model path")?,
-            config,
-        )
-        .map_err(|e| format!("Cannot load speech model: {e}"))?;
-        *engine = Some((model_path, context));
-    }
-    let context = &engine.as_ref().ok_or("Speech engine unavailable")?.1;
+    with_engine(&model_path, |context| {
+        run(context, &samples, payload.language)
+    })
+}
+
+fn run(
+    context: &WhisperContext,
+    samples: &[f32],
+    requested_language: Option<String>,
+) -> Result<super::WhisperResult, String> {
     let mut state = context.create_state().map_err(|e| e.to_string())?;
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-    let language = payload
-        .language
+    let language = requested_language
         .as_deref()
         .filter(|l| *l != "auto")
         .map(|l| l.split('-').next().unwrap_or(l));
@@ -227,7 +270,7 @@ pub fn transcribe_with_model(
             .unwrap_or(4)
             .min(8) as i32,
     );
-    state.full(params, &samples).map_err(|e| e.to_string())?;
+    state.full(params, samples).map_err(|e| e.to_string())?;
     let mut segments = vec![];
     for index in 0..state.full_n_segments() {
         let segment = state.get_segment(index).ok_or("Missing speech segment")?;
