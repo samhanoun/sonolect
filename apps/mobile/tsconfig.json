@@ -2,6 +2,10 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "paths": {
+      "@sonolect/sync-core": ["../../packages/sync-core/src/index.ts"],
+      "@sonolect/sync-core/testing": [
+        "../../packages/sync-core/src/testing.ts"
+      ],
       "@sonolect/types": ["../../packages/types/src/index.ts"],
       "react": ["./node_modules/@types/react"],
       "react/*": ["./node_modules/@types/react/*"]
