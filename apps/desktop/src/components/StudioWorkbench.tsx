@@ -33,6 +33,7 @@ import {
 } from "../segmentEditor";
 import { submitCapturedAudioCloud } from "../voiceApi";
 import { prepareLocalAudio } from "../localAudio";
+import { copyTranscript } from "../richClipboard";
 import { STT_LANGUAGES } from "../sttLanguages";
 import {
   exportTranscript,
@@ -535,8 +536,7 @@ export function StudioTranscribe({
               className="studio-button secondary"
               disabled={!state.transcript}
               onClick={() =>
-                void navigator.clipboard
-                  .writeText(state.transcript)
+                void copyTranscript(state.transcript, state.transcriptSegments)
                   .then(() => setMessage(t("studio.transcribe.copied")))
                   .catch(() => setMessage(t("studio.transcribe.copyBlocked")))
               }
@@ -1012,8 +1012,7 @@ export function StudioLibrary({
                   className="studio-link"
                   disabled={!item.transcript}
                   onClick={() =>
-                    void navigator.clipboard
-                      .writeText(item.transcript || "")
+                    void copyTranscript(item.transcript || "", item.segments)
                       .then(() => setMessage(t("studio.transcribe.copied")))
                       .catch(() => setMessage(t("studio.library.copyBlocked")))
                   }

@@ -181,6 +181,52 @@ test.describe("segment editor", () => {
     expect(errors).toEqual([]);
   });
 
+  test("copy keeps formatting and speaker names", async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    const copied = () =>
+      page.evaluate(async () => {
+        const [item] = await navigator.clipboard.read();
+        const read = async (type: string) => (await item!.getType(type)).text();
+        return {
+          text: await read("text/plain"),
+          html: await read("text/html"),
+        };
+      });
+    await page.goto("/");
+    await nav(page, "Transcribe").click();
+    const editor = page.getByLabel("Transcript editor");
+    const copy = page.getByRole("button", { name: "Copy", exact: true });
+
+    await editor.fill("# Notes\n\n- Ship **Friday**\n- Call Ana");
+    await copy.click();
+    await expect(page.getByText("Transcript copied.")).toBeVisible();
+    let clipboard = await copied();
+    expect(clipboard.text).toBe("# Notes\n\n- Ship **Friday**\n- Call Ana");
+    expect(clipboard.html).toContain(
+      "<h1>Notes</h1><ul><li>Ship <strong>Friday</strong></li><li>Call Ana</li></ul>",
+    );
+
+    await editor.fill("Good morning.\n\nShall we start?");
+    await page.getByRole("button", { name: "Segments", exact: true }).click();
+    const speaker = page.getByLabel("Speaker of segment 1", { exact: true });
+    await speaker.fill("Ana");
+    await speaker.press("Enter");
+    await copy.click();
+    // The read can land in the middle of the write; it is simply retried.
+    await expect
+      .poll(() =>
+        copied().then(
+          (content) => content.text,
+          () => "",
+        ),
+      )
+      .toBe("Ana: Good morning.\n\nShall we start?");
+    clipboard = await copied();
+    expect(clipboard.html).toContain(
+      "<p><strong>Ana:</strong> Good morning.</p><p>Shall we start?</p>",
+    );
+  });
+
   test("the segment editor is in French when the interface is", async ({
     browser,
   }) => {
