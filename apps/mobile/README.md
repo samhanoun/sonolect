@@ -152,7 +152,9 @@ pnpm --filter @sonolect/mobile exec expo run:android   # or run:ios on macOS
 ```
 
 Browser preview (uses the Web Speech API where the browser has it; Export
-downloads the file, since most desktop browsers have no share sheet):
+downloads the file, since most desktop browsers have no share sheet, and in
+such a browser a note's Share button becomes Download and saves the note as a
+text file):
 
 ```bash
 pnpm --filter @sonolect/mobile web

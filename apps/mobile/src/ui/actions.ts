@@ -2,6 +2,8 @@ import * as Clipboard from "expo-clipboard";
 import { Alert, Linking, Platform, Share } from "react-native";
 
 import type { Strings } from "../i18n";
+import { EXPORT_FILE_TYPES, noteFileName } from "../library";
+import { shareTarget, type ShareTarget } from "../shareTarget";
 
 /**
  * Copy and share for the Capture and Library screens. A failure is said
@@ -48,8 +50,58 @@ export function isShareDismissal(error: unknown): boolean {
   );
 }
 
-/** Opens the share sheet with text; false when it could not open. */
-export async function shareText(text: string, t: Strings): Promise<boolean> {
+/** Saves text as a file from a browser (web only). */
+export function downloadInBrowser(
+  content: string,
+  name: string,
+  mimeType: string,
+): void {
+  const url = URL.createObjectURL(new Blob([content], { type: mimeType }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // The download has the data by then; the address is no longer needed.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * What a note's Share button does here: open the share sheet, or, in a
+ * browser without one, save the note as a text file (its label then says
+ * Download).
+ */
+export function currentShareTarget(): ShareTarget {
+  return shareTarget(
+    Platform.OS,
+    typeof navigator === "undefined" ? undefined : navigator,
+  );
+}
+
+/**
+ * Shares a note's text; false when it could not. In a browser without a
+ * share dialog the note is saved as a text file named after createdAt.
+ */
+export async function shareText(
+  text: string,
+  t: Strings,
+  createdAt?: string,
+): Promise<boolean> {
+  if (currentShareTarget() === "download") {
+    try {
+      const date = createdAt ? new Date(createdAt) : new Date();
+      downloadInBrowser(
+        text,
+        noteFileName(Number.isNaN(date.getTime()) ? new Date() : date),
+        EXPORT_FILE_TYPES.text.mimeType,
+      );
+      return true;
+    } catch {
+      showFailure(t.capture.downloadFailed);
+      return false;
+    }
+  }
   try {
     await Share.share({ message: text });
     return true;

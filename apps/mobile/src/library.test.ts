@@ -15,6 +15,7 @@ import {
   formatDuration,
   formatNoteDate,
   formattingLocale,
+  noteFileName,
   sortHistory,
 } from "./library";
 import { isAllowedApiUrl } from "./localApi";
@@ -134,6 +135,17 @@ describe("library", () => {
     assert.equal(
       exportFileName(new Date(2026, 10, 12, 0, 1)),
       "sonolect-notes-2026-11-12.md",
+    );
+  });
+
+  it("names a note saved from a browser with its local date and time", () => {
+    assert.equal(
+      noteFileName(new Date(2026, 0, 5, 9, 7)),
+      "sonolect-note-2026-01-05-0907.txt",
+    );
+    assert.equal(
+      noteFileName(new Date(2026, 10, 20, 23, 59)),
+      "sonolect-note-2026-11-20-2359.txt",
     );
   });
 
