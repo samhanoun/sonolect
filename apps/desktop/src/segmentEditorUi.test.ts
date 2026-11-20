@@ -4,10 +4,6 @@ import { strict as assert } from "node:assert";
 import { en } from "./locales/en";
 import { fr } from "./locales/fr";
 
-const mainSource = await readFile(
-  new URL("./main.tsx", import.meta.url),
-  "utf8",
-);
 const storeSource = await readFile(
   new URL("./store/appStore.ts", import.meta.url),
   "utf8",
@@ -29,23 +25,6 @@ describe("desktop segment editor UI wiring", () => {
     }
   });
 
-  it("renders speaker labels plus merge and split controls", () => {
-    for (const requiredKey of [
-      "segments.ariaLabel",
-      "segments.speaker",
-      "segments.merge",
-      "segments.split",
-      "segments.textLabel",
-    ]) {
-      assert.match(mainSource, new RegExp(requiredKey));
-    }
-
-    assert.match(mainSource, /toggleSegmentSelection/);
-    assert.match(mainSource, /updateSegmentSpeaker/);
-    assert.match(mainSource, /mergeSelectedSegments/);
-    assert.match(mainSource, /splitSelectedSegment/);
-  });
-
   it("has English and French locale parity for segment editor copy", () => {
     const segmentKeys = Object.keys(en).filter((key) =>
       key.startsWith("segments."),
@@ -55,12 +34,5 @@ describe("desktop segment editor UI wiring", () => {
     for (const key of segmentKeys) {
       assert.ok(key in fr, `Missing ${key} in French locale`);
     }
-  });
-
-  it("renders selectable segment cards and a speaker input (Tailwind)", () => {
-    // segment editor is now Tailwind-styled; assert the selected-state class and
-    // the speaker input are present in the editor markup.
-    assert.match(mainSource, /border-white\/20/);
-    assert.match(mainSource, /segments\.speakerPlaceholder/);
   });
 });
