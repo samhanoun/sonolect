@@ -7,9 +7,11 @@ import {
   bubbleDetailFor,
   bubblePhaseFor,
   bubbleSizeFor,
+  canCancel,
   displayAccelerator,
   formatElapsed,
   isBubbleAction,
+  isDictation,
   levelFromSamples,
   parseBubbleVisibility,
   previewDetail,
@@ -169,6 +171,38 @@ describe("dictation bubble phases", () => {
       bubbleDetailFor("error", undefined, "Backend offline", t),
       "Backend offline",
     );
+  });
+});
+
+describe("cancelling from the bubble", () => {
+  it("tells a dictation from a recording made in the Studio", () => {
+    assert.equal(isDictation("bubble"), true);
+    assert.equal(isDictation("hotkey"), true);
+    assert.equal(isDictation("app"), false);
+  });
+
+  it("cancels a dictation while it listens or transcribes", () => {
+    assert.equal(canCancel("listening", true), true);
+    assert.equal(canCancel("transcribing", true), true);
+  });
+
+  it("never cancels a recording made in the Studio", () => {
+    for (const phase of [
+      "idle",
+      "listening",
+      "transcribing",
+      "inserted",
+      "copied",
+      "error",
+    ] as const) {
+      assert.equal(canCancel(phase, false), false, phase);
+    }
+  });
+
+  it("has nothing to cancel once a dictation is over", () => {
+    for (const phase of ["idle", "inserted", "copied", "error"] as const) {
+      assert.equal(canCancel(phase, true), false, phase);
+    }
   });
 });
 

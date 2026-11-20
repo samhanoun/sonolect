@@ -53,6 +53,11 @@ export type BubbleState = {
    * i18n store, so the main window tells it which language to speak.
    */
   locale: SupportedLocale;
+  /**
+   * The capture is a dictation into the app in front (started from the bubble
+   * or a global hotkey), not a recording made in the Studio.
+   */
+  dictation: boolean;
 };
 
 export type BubbleAction = "toggle" | "finish" | "cancel" | "open-app";
@@ -105,6 +110,22 @@ export function bubblePhaseFor(
     default:
       return "idle";
   }
+}
+
+/** A dictation is pasted into the app in front; a Studio recording is not. */
+export function isDictation(source: DictationSource): boolean {
+  return source !== "app";
+}
+
+/**
+ * Whether what the bubble shows can be cancelled from outside the Studio,
+ * with Esc or the bubble's ✕. Cancelling throws the audio away, and Esc is a
+ * global shortcut that every other app loses while it is registered, so only
+ * a dictation in progress qualifies. A recording made in the Studio can be
+ * stopped from the bubble, never discarded.
+ */
+export function canCancel(phase: BubblePhase, dictation: boolean): boolean {
+  return dictation && (phase === "listening" || phase === "transcribing");
 }
 
 const DETAIL_MAX = 64;
