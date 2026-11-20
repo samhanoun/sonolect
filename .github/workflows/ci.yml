@@ -456,9 +456,12 @@ jobs:
       - name: Start it in production mode and check /health
         run: |
           set -euo pipefail
+          # The sync service refuses to start in production without a
+          # durable store; SQLite also proves node:sqlite runs in the image.
           docker run -d --name service -p 8080:8080 \
             -e FIREBASE_PROJECT_ID=sonolect-ci \
             -e SONOLECT_SERVICE_TOKENS="$(openssl rand -hex 24)" \
+            -e SONOLECT_SYNC_STORE=sqlite:/tmp/sonolect-sync.db \
             "sonolect-${SERVICE}"
           for attempt in $(seq 1 30); do
             if curl --fail --silent --show-error http://127.0.0.1:8080/health; then
@@ -470,6 +473,53 @@ jobs:
           done
           docker logs service
           exit 1
+
+  sync-service-firestore:
+    name: Sync service (Firestore emulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The Firestore emulator is a Java program; firebase-tools 15 needs Java 21.
+      - name: Setup Java
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the sync service
+        run: pnpm --filter @sonolect/sync-service build
+
+      # A demo- project needs no Google account. The store and route tests run
+      # on Firestore, then the built service starts on it (NODE_ENV=production)
+      # and does one create, write, read and delete over HTTP.
+      - name: Test on the Firestore emulator
+        env:
+          GCLOUD_PROJECT: demo-sonolect
+          SONOLECT_SYNC_STORE: firestore
+        run: >-
+          npx --yes firebase-tools@15.37.0 emulators:exec
+          --only firestore --project demo-sonolect
+          "pnpm --filter @sonolect/sync-service test:firestore
+          && pnpm --filter @sonolect/sync-service smoke"
 
   security:
     name: Dependency and secret scanning

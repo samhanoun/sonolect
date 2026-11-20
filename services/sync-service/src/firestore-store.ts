@@ -46,6 +46,11 @@ const MAX_CHUNK = 100;
 /** Tombstones removed per purge transaction, and transactions per purge. */
 const PURGE_BATCH = 300;
 const PURGE_ROUNDS = 5;
+/**
+ * Attempts per transaction. Devices of one vault rarely write at once, but
+ * when they do their transactions contend on the vault document.
+ */
+const TRANSACTION = { maxAttempts: 10 };
 
 export interface FirestoreStoreOptions {
   /** Project; by default from the environment or the metadata server. */
@@ -155,7 +160,7 @@ export class FirestoreStore implements VaultStore {
         touchedAt: now,
       });
       return { outcome: "created", epoch };
-    });
+    }, TRANSACTION);
   }
 
   async getVault(vaultId: string): Promise<VaultMeta | undefined> {
@@ -243,7 +248,7 @@ export class FirestoreStore implements VaultStore {
           touchedAt: now,
         });
       return results;
-    });
+    }, TRANSACTION);
   }
 
   async deleteVault(vaultId: string, now: number): Promise<void> {
@@ -258,7 +263,7 @@ export class FirestoreStore implements VaultStore {
         deletedAt: toMeta(snap.data()!).deletedAt ?? now,
       });
       return true;
-    });
+    }, TRANSACTION);
     if (exists) await this.db.recursiveDelete(this.recordsOf(vaultId));
   }
 
@@ -301,7 +306,7 @@ export class FirestoreStore implements VaultStore {
           purgedAt: now,
         });
         return { removed: count, done: found.size < PURGE_BATCH };
-      });
+      }, TRANSACTION);
       total += removed;
       if (done) break;
     }
