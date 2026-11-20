@@ -27,6 +27,11 @@ updates:
       - dependency-name: "@types/react-dom"
         update-types:
           ["version-update:semver-major", "version-update:semver-minor"]
+      # @types/node follows the oldest Node the code runs on (Node 22: CI
+      # matrix [22, 24], LOCAL-BUILD.md, esbuild target node22). Bump its
+      # major by hand when that floor moves.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       dev-tooling:
         dependency-type: development
