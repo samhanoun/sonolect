@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import type { TranscriptTurn } from "./domain";
 import { applyRetention } from "./retention";
+import { sanitizeTurn, UNKNOWN_DATE } from "./storageCore";
 
 const NOW = Date.parse("2026-11-20T12:00:00.000Z");
 const DAY = 24 * 60 * 60 * 1000;
@@ -83,5 +84,36 @@ describe("note retention", () => {
     );
     assert.equal(result.kept.length, 1);
     assert.equal(result.expired.length, 0);
+  });
+
+  it("keeps a stored note whose date was missing or unreadable", () => {
+    // What launch does: storage reads the note first and gives it the
+    // unknown date, then retention runs on the result.
+    const stored = [
+      { id: "no-date", rawText: "kept", refinedText: "kept" },
+      { id: "bad-date", rawText: "kept", refinedText: "kept", createdAt: "?" },
+      {
+        id: "old",
+        rawText: "gone",
+        refinedText: "gone",
+        createdAt: new Date(NOW - 40 * DAY).toISOString(),
+      },
+    ];
+    const history = stored
+      .map((value) => sanitizeTurn(value, NOW))
+      .filter((turn): turn is TranscriptTurn => turn !== null);
+    assert.deepEqual(history.map((turn) => turn.createdAt).slice(0, 2), [
+      UNKNOWN_DATE,
+      UNKNOWN_DATE,
+    ]);
+    const result = applyRetention(history, 1, NOW);
+    assert.deepEqual(
+      result.kept.map((turn) => turn.id),
+      ["no-date", "bad-date"],
+    );
+    assert.deepEqual(
+      result.expired.map((turn) => turn.id),
+      ["old"],
+    );
   });
 });
