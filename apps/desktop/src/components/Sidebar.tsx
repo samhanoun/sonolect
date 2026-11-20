@@ -61,7 +61,7 @@ export default function Sidebar() {
 
       <button
         type="button"
-        onClick={toggleRecording}
+        onClick={() => toggleRecording()}
         id="sidebar-record-cta"
         className={`mb-6 flex items-center justify-between gap-2 px-4 py-3 rounded-xl text-[11px] font-bold uppercase tracking-widest transition-all ${
           isRecording

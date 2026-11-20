@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+mod bubble;
 mod insertion;
 mod ipc_audio;
 mod local_engine;
@@ -240,11 +241,16 @@ fn main() {
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(bubble::init())
         .setup(|app| {
             local_engine::prewarm(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            bubble::bubble_show,
+            bubble::bubble_hide,
+            bubble::bubble_open_main,
+            bubble::bubble_restore_target,
             transcribe_audio,
             online::save_provider_key,
             online::provider_key_status,

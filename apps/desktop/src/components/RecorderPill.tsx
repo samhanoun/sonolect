@@ -99,7 +99,7 @@ export default function RecorderPill() {
       <button
         type="button"
         disabled={isProcessing}
-        onClick={toggleRecording}
+        onClick={() => toggleRecording()}
         className="w-7 h-7 rounded-full flex items-center justify-center bg-white text-black hover:bg-slate-200 disabled:opacity-40 transition-all"
         aria-label={isRecording ? "Finish" : "Record again"}
       >

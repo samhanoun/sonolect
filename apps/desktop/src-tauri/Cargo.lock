@@ -3396,6 +3396,7 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "tempfile",
  "whisper-rs",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -41,6 +41,7 @@ import { confirm } from "../src/ui/confirm";
 import { FadeIn, GlassScreen } from "../src/ui/glass";
 import { useTabBarClearance } from "../src/ui/GlassTabBar";
 import { colors, fonts, glass, radius, space } from "../src/ui/theme";
+import { VoiceKeyboardCard } from "../src/ui/VoiceKeyboardCard";
 
 type TestState = "idle" | "testing" | "ok" | "fail";
 
@@ -236,7 +237,9 @@ export default function SettingsScreen() {
             ) : null}
           </Card>
 
-          <FadeIn index={3} style={styles.section}>
+          <VoiceKeyboardCard enterIndex={3} />
+
+          <FadeIn index={4} style={styles.section}>
             <Label heading>{t.settings.dictation}</Label>
             <View style={styles.chips}>
               {DICTATION_LANGUAGES.map((language) => (
@@ -250,7 +253,7 @@ export default function SettingsScreen() {
             </View>
           </FadeIn>
 
-          <FadeIn index={4} style={styles.section}>
+          <FadeIn index={5} style={styles.section}>
             <Label heading>{t.settings.interface}</Label>
             <Segmented
               accessibilityLabel={t.settings.interface}

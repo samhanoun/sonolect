@@ -1,10 +1,4 @@
-import React, {
-  useEffect,
-  useMemo,
-  useState,
-  useRef,
-  useCallback,
-} from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import { create } from "zustand";
 import type { SonolectMode } from "@sonolect/types";
@@ -78,13 +72,8 @@ import {
   isTauriRuntime,
   registerNativeDictationShortcuts,
 } from "./desktopNative";
-import {
-  showRecorderWindow,
-  hideRecorderWindow,
-  resizeRecorderWindow,
-} from "./tauriWindowManager";
-import { FloatingRecorderOverlay } from "./FloatingRecorder";
-import type { RecordingState as FloatingRecordingState } from "./recordingStateMachine";
+import DictationBubble from "./components/DictationBubble";
+import { useDictationBubbleBridge } from "./bubbleBridge";
 import { ReaderView } from "./ReaderView";
 import { TeamView } from "./TeamView";
 import { processTranscriptWithCommands } from "./voiceCommandIntegration";
@@ -96,7 +85,6 @@ import {
 } from "./contextSpelling";
 import { preprocessAudio, AUDIO_PRESETS } from "./audioPreprocessing";
 import "./tailwind.css";
-import "./floating-recorder.css";
 import DictionaryPanel from "./components/DictionaryPanel";
 import SnippetsPanel from "./components/SnippetsPanel";
 import SettingsPanel from "./components/LocalSettingsPanel";
@@ -113,11 +101,16 @@ import {
   API_URL,
   type ViewId,
   type TranscriptSession,
-  type RecordingState,
 } from "./store/appStore";
 /* ── App Shell ───────────────────────────────────────────────── */
 
+/** Hotkey captures paste into the focused app, unless Sonolect itself has focus. */
+function hotkeySource(): "app" | "hotkey" {
+  return document.hasFocus() ? "app" : "hotkey";
+}
+
 function App() {
+  useDictationBubbleBridge();
   const commandOpen = useDesktopStore((state) => state.commandOpen);
   const setCommandOpen = useDesktopStore((state) => state.setCommandOpen);
   const toggleRecording = useDesktopStore((state) => state.toggleRecording);
@@ -219,7 +212,7 @@ function App() {
         if (rs === "completed" || rs === "error") {
           useDesktopStore.getState().resetVoiceCapture();
         }
-        void useDesktopStore.getState().startVoiceCapture();
+        void useDesktopStore.getState().startVoiceCapture(hotkeySource());
       }
     };
     const stopPushToTalk = () => {
@@ -230,7 +223,8 @@ function App() {
     };
 
     void registerNativeDictationShortcuts({
-      onToggle: () => useDesktopStore.getState().toggleRecording(),
+      onToggle: () =>
+        useDesktopStore.getState().toggleRecording(hotkeySource()),
       onPushToTalkStart: startPushToTalk,
       onPushToTalkStop: stopPushToTalk,
     }).then((registration) => {
@@ -682,120 +676,13 @@ function ToastContainer() {
   );
 }
 
-/* ── Recorder window shell (rendered when ?window=recorder) ──── */
-
-function RecorderWindowShell() {
-  const [state, setState] = useState<FloatingRecordingState>("idle");
-  const [durationMs, setDurationMs] = useState(0);
-  const [peaks, setPeaks] = useState<number[]>([]);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [minimized, setMinimized] = useState(true);
-
-  useEffect(() => {
-    const handler = (event: MessageEvent) => {
-      const data = event.data as Record<string, unknown> | undefined;
-      if (!data || data.type !== "sonolect-recorder-sync") return;
-      if (typeof data.state === "string")
-        setState(data.state as FloatingRecordingState);
-      if (typeof data.durationMs === "number") setDurationMs(data.durationMs);
-      if (Array.isArray(data.peaks)) setPeaks(data.peaks as number[]);
-      if (typeof data.preview === "string" || data.preview === null)
-        setPreview(data.preview as string | null);
-    };
-    window.addEventListener("message", handler);
-    return () => window.removeEventListener("message", handler);
-  }, []);
-
-  const handleMinimize = useCallback(() => {
-    const next = !minimized;
-    setMinimized(next);
-    void resizeRecorderWindow(!next);
-  }, [minimized]);
-
-  return (
-    <FloatingRecorderOverlay
-      recordingState={state}
-      durationMs={durationMs}
-      waveformPeaks={peaks}
-      polishedPreview={preview}
-      minimized={minimized}
-      onCancel={() =>
-        window.postMessage({
-          type: "sonolect-recorder-action",
-          action: "cancel",
-        })
-      }
-      onFinish={() =>
-        window.postMessage({
-          type: "sonolect-recorder-action",
-          action: "finish",
-        })
-      }
-      onInsert={() =>
-        window.postMessage({
-          type: "sonolect-recorder-action",
-          action: "insert",
-        })
-      }
-      onMinimize={handleMinimize}
-    />
-  );
-}
-
-/* ── Recording window lifecycle hook ───────────────────────────── */
-
-function useRecorderWindowLifecycle() {
-  const recordingState = useDesktopStore((s) => s.recordingState);
-  const prevStateRef = useRef<RecordingState>("idle");
-
-  useEffect(() => {
-    const prev = prevStateRef.current;
-    prevStateRef.current = recordingState;
-
-    // Show the recorder window when recording starts
-    if (
-      prev === "idle" &&
-      (recordingState === "requesting-permission" ||
-        recordingState === "recording")
-    ) {
-      void showRecorderWindow();
-    }
-
-    // Hide the recorder window after a brief delay when recording completes or resets
-    if (
-      (recordingState === "idle" || recordingState === "completed") &&
-      prev !== "idle" &&
-      prev !== "completed"
-    ) {
-      const timer = setTimeout(() => void hideRecorderWindow(), 600);
-      return () => clearTimeout(timer);
-    }
-
-    return undefined;
-  }, [recordingState]);
-}
-
 /* ── Mount ───────────────────────────────────────────────────── */
 
-const isRecorderWindow =
+const isBubbleWindow =
   new URLSearchParams(window.location.search).get("window") === "recorder";
 
-if (isRecorderWindow) {
-  createRoot(document.getElementById("root")!).render(
-    <React.StrictMode>
-      <RecorderWindowShell />
-    </React.StrictMode>,
-  );
-} else {
-  // Wrap App to include the recorder window lifecycle hook
-  function AppWithRecorderWindow() {
-    // Use the in-window recorder until cross-window state and focus are verified.
-    return <App />;
-  }
-
-  createRoot(document.getElementById("root")!).render(
-    <React.StrictMode>
-      <AppWithRecorderWindow />
-    </React.StrictMode>,
-  );
-}
+createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    {isBubbleWindow ? <DictationBubble /> : <App />}
+  </React.StrictMode>,
+);

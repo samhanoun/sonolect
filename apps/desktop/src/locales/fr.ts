@@ -482,6 +482,14 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.settings.shortcutToggle": "Démarrer ou arrêter l'enregistrement",
   "studio.settings.shortcutHold": "Maintenir pour parler",
   "studio.settings.shortcutNav": "Navigation rapide",
+  "studio.settings.shortcutCancel": "Annuler la dictée",
+  "studio.settings.bubbleTitle": "Bulle de dictée",
+  "studio.settings.bubbleHint":
+    "Appuyez sur {toggle} (ou maintenez {hold}) dans n'importe quelle application. Une bulle flottante indique que Sonolect écoute, puis vos mots sont collés à l'emplacement du curseur. Cliquez sur la bulle pour démarrer ou arrêter, {cancel} pour annuler, clic droit pour ouvrir Sonolect.",
+  "studio.settings.bubbleShow": "Afficher la bulle",
+  "studio.settings.bubbleAlways": "Toujours (petite pastille au repos)",
+  "studio.settings.bubbleDictating": "Seulement pendant la dictée",
+  "studio.settings.bubbleOff": "Jamais",
   "studio.settings.storageHint":
     "Les enregistrements sont limités à trois minutes et conservés sur cet appareil pendant la durée choisie ci-dessus. Les clés API utilisent le Gestionnaire d'identification Windows.",
   "studio.settings.previewNotice":
@@ -616,6 +624,35 @@ export const fr: Record<LocaleKeys, string> = {
   "voice.unreachableBecause":
     "Sonolect est injoignable, votre enregistrement est donc resté sur cet appareil ({reason}).",
   "studio.keys.shift": "Maj",
+  "studio.keys.esc": "Échap",
+  // Bulle de dictée (la pastille flottante, dans sa propre fenêtre)
+  "bubble.start": "Démarrer la dictée ({hotkey})",
+  "bubble.idleTitle":
+    "Cliquez ou appuyez sur {hotkey} pour dicter. Clic droit pour ouvrir Sonolect.",
+  "bubble.dictate": "Dicter",
+  "bubble.cancel": "Annuler la dictée",
+  "bubble.dismiss": "Fermer",
+  "bubble.cancelTitle": "Annuler ({key})",
+  "bubble.stop": "Arrêter et insérer",
+  "bubble.phase.idle": "Prêt",
+  "bubble.phase.listening": "Écoute",
+  "bubble.phase.transcribing": "Transcription",
+  "bubble.phase.inserted": "Inséré",
+  "bubble.phase.copied": "Copié",
+  "bubble.phase.error": "Dictée impossible",
+  "bubble.copiedDetail": "Copié. Appuyez sur Ctrl+V pour coller.",
+  "bubble.pasteFailed":
+    "Collage impossible. Vos mots sont enregistrés dans Sonolect.",
+  "bubble.error.generic": "Une erreur s'est produite.",
+  "bubble.error.micUnavailable": "Aucun micro détecté.",
+  "bubble.error.micPermissionDenied": "L'accès au micro a été refusé.",
+  "bubble.error.mediaRecorderUnsupported":
+    "L'enregistrement n'est pas pris en charge ici.",
+  "bubble.error.recordingError":
+    "L'enregistrement s'est arrêté de façon inattendue.",
+  "bubble.error.sendFailed": "La transcription a échoué.",
+  "bubble.status.inserted": "Dictée insérée dans l'application active.",
+  "bubble.status.copied": "Dictée copiée dans le presse-papiers. {status}",
   "studio.privacy.problemRecordings": "Enregistrements\u00a0: {reason}",
   "studio.privacy.problemSettings": "Réglages\u00a0: {reason}",
   "native.downloadRunning": "Un téléchargement de modèle est déjà en cours.",

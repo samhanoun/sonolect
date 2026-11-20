@@ -35,6 +35,8 @@ import { submitCapturedAudioCloud } from "../voiceApi";
 import { prepareLocalAudio } from "../localAudio";
 import { copyTranscript } from "../richClipboard";
 import { STT_LANGUAGES } from "../sttLanguages";
+import { loadBubbleVisibility, saveBubbleVisibility } from "../bubbleBridge";
+import type { BubbleVisibility } from "../dictationBubble";
 import {
   exportTranscript,
   type TranscriptExportFormat,
@@ -524,7 +526,7 @@ export function StudioTranscribe({
           <div className="studio-editor-actions">
             <button
               className="studio-button"
-              onClick={state.toggleRecording}
+              onClick={() => state.toggleRecording()}
               disabled={busy || state.recordingState === "uploading"}
             >
               <Mic size={17} />
@@ -1289,6 +1291,8 @@ function PrivacyControls() {
 export function StudioSettings() {
   const state = useDesktopStore();
   const t = useT();
+  const [bubbleVisibility, setBubbleVisibility] =
+    useState<BubbleVisibility>(loadBubbleVisibility);
   const [model, setModel] = useState<{ ready: boolean; path: string }>(),
     [busy, setBusy] = useState(false),
     [progress, setProgress] = useState(0),
@@ -1444,6 +1448,33 @@ export function StudioSettings() {
           <p className="studio-muted">{t("studio.settings.modeHint")}</p>
         </section>
       </div>
+      <section className="studio-card" aria-labelledby="bubble-settings">
+        <h3 id="bubble-settings">{t("studio.settings.bubbleTitle")}</h3>
+        <p className="studio-muted">
+          {t("studio.settings.bubbleHint", {
+            toggle: `Ctrl + ${t("studio.keys.shift")} + M`,
+            hold: `Ctrl + ${t("studio.keys.shift")} + V`,
+            cancel: t("studio.keys.esc"),
+          })}
+        </p>
+        <label>
+          {t("studio.settings.bubbleShow")}
+          <select
+            value={bubbleVisibility}
+            onChange={(e) => {
+              const next = e.target.value as BubbleVisibility;
+              setBubbleVisibility(next);
+              saveBubbleVisibility(next);
+            }}
+          >
+            <option value="always">{t("studio.settings.bubbleAlways")}</option>
+            <option value="dictating">
+              {t("studio.settings.bubbleDictating")}
+            </option>
+            <option value="off">{t("studio.settings.bubbleOff")}</option>
+          </select>
+        </label>
+      </section>
       <PrivacyControls />
       <section className="studio-card">
         <h3>{t("studio.settings.shortcutsTitle")}</h3>
@@ -1454,6 +1485,10 @@ export function StudioSettings() {
         <div className="studio-workflow-row">
           <span>{t("studio.settings.shortcutHold")}</span>
           <kbd>Ctrl + {t("studio.keys.shift")} + V</kbd>
+        </div>
+        <div className="studio-workflow-row">
+          <span>{t("studio.settings.shortcutCancel")}</span>
+          <kbd>{t("studio.keys.esc")}</kbd>
         </div>
         <div className="studio-workflow-row">
           <span>{t("studio.settings.shortcutNav")}</span>
