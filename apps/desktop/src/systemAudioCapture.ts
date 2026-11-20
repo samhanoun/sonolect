@@ -5,6 +5,8 @@ export interface SystemAudioState {
   status: AudioCaptureStatus;
   error?: string;
   startedAt?: string;
+  /** Where the native recorder writes; chosen by the app, never by the caller. */
+  outputPath?: string;
   sampleRate: number;
   channels: number;
 }
@@ -35,14 +37,13 @@ export async function checkSystemAudioAvailable(): Promise<boolean> {
   }
 }
 
-export async function startSystemAudioCapture(
-  outputPath: string,
-): Promise<SystemAudioState> {
+export async function startSystemAudioCapture(): Promise<SystemAudioState> {
   try {
-    await invoke("start_system_audio_capture", { outputPath });
+    const outputPath = await invoke<string>("start_system_audio_capture");
     return {
       status: "capturing",
       startedAt: new Date().toISOString(),
+      outputPath,
       sampleRate: 44100,
       channels: 1,
     };

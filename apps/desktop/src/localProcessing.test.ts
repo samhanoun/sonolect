@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { submitCapturedAudio, submitCapturedAudioCloud } from "./voiceApi";
-import { createDesktopWhisperPayload } from "./desktopWhisper";
+import { createDesktopWhisperRequest } from "./desktopWhisper";
 import { polishDictation } from "./wisprWorkflow";
 
 const audio = new Blob([new Uint8Array([1])], { type: "audio/wav" });
@@ -52,15 +52,18 @@ describe("local processing boundary", () => {
   });
 
   it("passes the selected model path to the native engine", () => {
-    const payload = createDesktopWhisperPayload(
+    const request = createDesktopWhisperRequest(
       new Uint8Array([1]),
       metadata,
       "fr",
       // New native model argument must replace the environment-only setup.
       "C:/Models/ggml-base.bin",
     );
-    assert.equal(payload.modelPath, "C:/Models/ggml-base.bin");
-    assert.equal(payload.language, "fr");
+    assert.equal(
+      decodeURIComponent(request.headers["x-sonolect-model-path"] ?? ""),
+      "C:/Models/ggml-base.bin",
+    );
+    assert.equal(request.headers["x-sonolect-language"], "fr");
   });
 });
 

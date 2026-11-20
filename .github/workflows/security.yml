@@ -155,11 +155,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Gate on high/critical advisories (desktop, services, packages)
-        # apps/mobile is excluded because its Expo/React Native toolchain is
-        # being replaced; the CI security job still gates it on critical.
-        # Accepted advisories are listed in scripts/audit-gate.mjs and
-        # docs/security-scan-triage.md.
+      - name: Gate on high/critical advisories (all workspaces, mobile included)
+        # Covers apps/mobile too, which ships to the stores. Advisories that
+        # reach only build-time tooling (Expo CLI, Metro) are accepted per
+        # GHSA id and dependency chain in scripts/audit-gate.mjs, and each is
+        # listed in docs/security-scan-triage.md. Any other high or critical
+        # advisory fails this job.
         run: node scripts/audit-gate.mjs
 
   dependency-review:
