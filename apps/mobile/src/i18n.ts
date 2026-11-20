@@ -117,6 +117,7 @@ const en = {
     listening: "Listening…",
     polishing: "Polishing…",
     copied: "Copied",
+    ready: "Ready to copy",
     failed: "Couldn't dictate",
     speakHint: "Speak naturally. Tap the orb when you're done.",
     tapToStart: "Tap the orb to start.",
@@ -274,7 +275,7 @@ const en = {
       quick:
         "Quick dictation opens straight into listening, then copies your words so you can paste them anywhere.",
       shortcutTip:
-        "Tip: in Shortcuts, add “Open URL” with sonolect://dictate and assign it to the Action button or Back Tap.",
+        "Tip: in Shortcuts, add “Open URLs” with sonolect://dictate and assign it to the Action button or Back Tap.",
       tryQuick: "Try Quick dictation",
     },
   },
@@ -424,6 +425,7 @@ const fr: Strings = {
     listening: "Écoute…",
     polishing: "Mise en forme…",
     copied: "Copié",
+    ready: "Prêt à copier",
     failed: "Dictée impossible",
     speakHint: "Parlez naturellement. Touchez l'orbe quand vous avez terminé.",
     tapToStart: "Touchez l'orbe pour commencer.",
@@ -580,7 +582,7 @@ const fr: Strings = {
       quick:
         "La dictée rapide écoute dès l'ouverture, puis copie vos mots pour que vous les colliez où vous voulez.",
       shortcutTip:
-        "Astuce : dans Raccourcis, ajoutez « Ouvrir les URL » avec sonolect://dictate et associez-le au bouton Action ou à Toucher le dos.",
+        "Astuce : dans Raccourcis, ajoutez « Ouvrir les URL » avec sonolect://dictate et associez-le au bouton Action ou à « Toucher le dos de l'appareil ».",
       tryQuick: "Essayer la dictée rapide",
     },
   },

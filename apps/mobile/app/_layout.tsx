@@ -84,6 +84,32 @@ function NoticeAnnouncer() {
   return null;
 }
 
+/**
+ * Screen readers hear a dictation start, stop and end once, on Capture and
+ * on Quick dictation alike, instead of every partial result.
+ */
+function CaptureAnnouncer() {
+  const status = useCompanionStore((s) => s.capture.status);
+  const latest = useCompanionStore((s) => s.latest);
+  const announced = useRef(status);
+  useEffect(() => {
+    const previous = announced.current;
+    announced.current = status;
+    if (previous === status) return;
+    const t = strings(useCompanionStore.getState().settings.uiLanguage);
+    if (status === "listening") {
+      AccessibilityInfo.announceForAccessibility(t.capture.a11yStarted);
+    } else if (status === "processing") {
+      AccessibilityInfo.announceForAccessibility(t.capture.a11yStopped);
+    } else if (status === "ready" && latest) {
+      AccessibilityInfo.announceForAccessibility(
+        `${t.capture.a11yResult} ${latest.refinedText.slice(0, 300)}`,
+      );
+    }
+  }, [status, latest]);
+  return null;
+}
+
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts(FONTS);
   const hydrate = useCompanionStore((s) => s.hydrate);
@@ -129,6 +155,7 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <StatusBar style="light" />
       <NoticeAnnouncer />
+      <CaptureAnnouncer />
       <Tabs
         // A floating glass capsule over the page; it hides itself while the
         // keyboard is up (android-9).

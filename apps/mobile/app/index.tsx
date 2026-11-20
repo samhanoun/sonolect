@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  AccessibilityInfo,
   Animated,
   BackHandler,
   KeyboardAvoidingView,
@@ -90,7 +89,6 @@ export default function CaptureScreen() {
   const typingY = useRef<number | null>(null);
   /** The typing card scrolls into view once it is laid out. */
   const scrollToTyping = useRef(false);
-  const announcedStatus = useRef(capture.status);
 
   const listening = capture.status === "listening";
   const processing = capture.status === "processing";
@@ -149,22 +147,6 @@ export default function CaptureScreen() {
   useEffect(() => {
     if (listening) setTyping(false);
   }, [listening]);
-
-  // Screen readers hear each change once instead of every partial result.
-  useEffect(() => {
-    const previous = announcedStatus.current;
-    announcedStatus.current = capture.status;
-    if (previous === capture.status) return;
-    if (capture.status === "listening") {
-      AccessibilityInfo.announceForAccessibility(t.capture.a11yStarted);
-    } else if (capture.status === "processing") {
-      AccessibilityInfo.announceForAccessibility(t.capture.a11yStopped);
-    } else if (capture.status === "ready" && latest) {
-      AccessibilityInfo.announceForAccessibility(
-        `${t.capture.a11yResult} ${latest.refinedText.slice(0, 300)}`,
-      );
-    }
-  }, [capture.status, latest, t]);
 
   // Android Back while dictating stops it and keeps the text, instead of
   // leaving the screen with the microphone on.
