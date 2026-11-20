@@ -177,6 +177,26 @@ describe("bubble window configuration", () => {
     assert.equal(bubble.transparent, true);
   });
 
+  it("keeps the Linux window list in step with the main config", () => {
+    // GTK keeps a non-resizable window at its content's natural size
+    // (200×200 for a webview) whatever size is asked for, so on Linux the
+    // bubble is resizable. A platform config replaces the whole windows
+    // array, so everything else has to match the main config.
+    const linux = JSON.parse(
+      readFileSync(
+        new URL("../src-tauri/tauri.linux.conf.json", import.meta.url),
+        "utf8",
+      ),
+    ) as { app: { windows: Array<Record<string, unknown>> } };
+    assert.equal(bubble?.resizable, false);
+    assert.deepEqual(
+      linux.app.windows,
+      config.app.windows.map((w) =>
+        w.label === "recorder" ? { ...w, resizable: true } : w,
+      ),
+    );
+  });
+
   it("grants the bubble window events only", () => {
     const capability = JSON.parse(
       readFileSync(

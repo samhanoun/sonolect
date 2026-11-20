@@ -451,8 +451,7 @@ fn main() {
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .setup(bubble::setup)
-        .on_window_event(bubble::on_window_event)
+        .plugin(bubble::init())
         .invoke_handler(tauri::generate_handler![
             bubble::bubble_show,
             bubble::bubble_hide,

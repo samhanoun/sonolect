@@ -241,12 +241,17 @@ async function deliverDictation(text: string): Promise<DictationOutcome> {
   const result = await insertTextIntoActiveApp(trimmed);
   if (result.ok) return { kind: "inserted", text: trimmed };
   if (result.method === "clipboard-only") {
+    // The native status already says the text is on the clipboard.
     return { kind: "copied", text: trimmed, reason: result.status };
   }
   try {
     // Only works while a Sonolect window has focus; otherwise Chromium refuses.
     await navigator.clipboard.writeText(trimmed);
-    return { kind: "copied", text: trimmed, reason: result.status };
+    return {
+      kind: "copied",
+      text: trimmed,
+      reason: `Copied dictation to the clipboard. ${result.status}`,
+    };
   } catch {
     return {
       kind: "error",
@@ -666,7 +671,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
                 outcome.kind === "inserted"
                   ? "Inserted dictation into the active app."
                   : outcome.kind === "copied"
-                    ? `Copied dictation to the clipboard. ${outcome.reason}`
+                    ? outcome.reason
                     : undefined,
             });
           })

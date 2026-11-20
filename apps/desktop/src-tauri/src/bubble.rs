@@ -5,7 +5,11 @@
 //! away from the app the user is dictating into. These commands size it and
 //! pin it bottom-centre on the monitor under the mouse pointer.
 
-use tauri::{AppHandle, LogicalSize, Manager, Monitor, PhysicalPosition, WebviewWindow};
+use tauri::plugin::TauriPlugin;
+use tauri::{
+    AppHandle, LogicalSize, Manager, Monitor, PhysicalPosition, RunEvent, Runtime, WebviewWindow,
+    WindowEvent,
+};
 
 pub const BUBBLE_LABEL: &str = "recorder";
 const MAIN_LABEL: &str = "main";
@@ -106,10 +110,38 @@ pub async fn bubble_restore_target() -> bool {
     .unwrap_or(false)
 }
 
-/// App setup hook: start tracking which other app was last in front.
-pub fn setup(_app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    focus::install();
-    Ok(())
+/// The bubble's lifecycle hooks, registered with `.plugin(bubble::init())`.
+///
+/// They live in a plugin rather than in `Builder::setup` because a second
+/// `.setup(...)` on the app builder silently replaces the first one, so two
+/// features that each add their own would break one of them without a
+/// compile error.
+///
+/// - On startup, start tracking which other app was last in front (Windows),
+///   so a dictation can be pasted back into it.
+/// - Closing the main window quits the app instead of leaving the hidden
+///   bubble window (and the microphone engine with it) running invisibly.
+pub fn init<R: Runtime>() -> TauriPlugin<R> {
+    tauri::plugin::Builder::new("sonolect-bubble")
+        // Plugins are set up on the main thread, whose event loop pumps the
+        // out-of-context WinEvent messages the focus hook relies on.
+        .setup(|_app, _api| {
+            focus::install();
+            Ok(())
+        })
+        .on_event(|app, event| {
+            if let RunEvent::WindowEvent {
+                label,
+                event: WindowEvent::CloseRequested { .. },
+                ..
+            } = event
+            {
+                if label == MAIN_LABEL {
+                    app.exit(0);
+                }
+            }
+        })
+        .build()
 }
 
 #[cfg(target_os = "windows")]
@@ -154,8 +186,8 @@ mod focus {
 
     pub fn install() {
         // SAFETY: plain Win32 calls. The hook procedure is a static function and
-        // the hook lives for the whole process; setup runs on the main thread,
-        // whose event loop pumps the out-of-context hook messages.
+        // the hook lives for the whole process; plugin setup runs on the main
+        // thread, whose event loop pumps the out-of-context hook messages.
         unsafe {
             let current = GetForegroundWindow();
             if !current.is_null() && !is_own(current) {
@@ -199,16 +231,6 @@ mod focus {
 
     pub fn restore_if_ours() -> bool {
         false
-    }
-}
-
-/// Closing the main window quits the app instead of leaving the hidden
-/// bubble window (and the microphone engine with it) running invisibly.
-pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
-    if window.label() == MAIN_LABEL {
-        if let tauri::WindowEvent::CloseRequested { .. } = event {
-            window.app_handle().exit(0);
-        }
     }
 }
 
