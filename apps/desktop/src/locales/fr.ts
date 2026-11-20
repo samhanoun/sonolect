@@ -879,4 +879,6 @@ export const fr: Record<LocaleKeys, string> = {
   "native.noMonitorSource": "Aucune source de contrôle PulseAudio trouvée.",
   "native.pactlFailed": "Échec de pactl\u00a0: {reason}",
   "native.systemAudioBusy": "Le son de l'ordinateur n'est pas disponible.",
+  "native.ffmpegNeeded":
+    "ffmpeg est nécessaire pour enregistrer le son de l'ordinateur.",
 };

@@ -825,6 +825,7 @@ export const en = {
   "native.noMonitorSource": "No PulseAudio monitor source found.",
   "native.pactlFailed": "pactl failed: {reason}",
   "native.systemAudioBusy": "System audio is unavailable.",
+  "native.ffmpegNeeded": "ffmpeg is needed to record system audio.",
 } as const;
 
 export type LocaleKeys = keyof typeof en;

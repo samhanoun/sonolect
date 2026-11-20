@@ -70,17 +70,36 @@ fn available() -> bool {
     runs("pactl") && runs("parec")
 }
 
+/// Where `ffmpeg` is. An app opened from the Finder does not get the shell's
+/// `PATH`, so the usual Homebrew folders are tried as well.
+#[cfg(target_os = "macos")]
+fn ffmpeg() -> Option<&'static str> {
+    [
+        "ffmpeg",
+        "/opt/homebrew/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+    ]
+    .into_iter()
+    .find(|program| {
+        std::process::Command::new(program)
+            .arg("-version")
+            .output()
+            .is_ok_and(|output| output.status.success())
+    })
+}
+
 #[cfg(target_os = "macos")]
 fn available() -> bool {
-    std::process::Command::new("system_profiler")
-        .arg("SPAudioDataType")
-        .output()
-        .map(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .to_lowercase()
-                .contains("blackhole")
-        })
-        .unwrap_or(false)
+    ffmpeg().is_some()
+        && std::process::Command::new("system_profiler")
+            .arg("SPAudioDataType")
+            .output()
+            .map(|output| {
+                String::from_utf8_lossy(&output.stdout)
+                    .to_lowercase()
+                    .contains("blackhole")
+            })
+            .unwrap_or(false)
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
@@ -135,7 +154,8 @@ fn recorder() -> Result<std::process::Command, String> {
 
 #[cfg(target_os = "macos")]
 fn recorder() -> Result<std::process::Command, String> {
-    let mut command = std::process::Command::new("ffmpeg");
+    let mut command =
+        std::process::Command::new(ffmpeg().ok_or("ffmpeg is needed to record system audio.")?);
     command
         .args(["-nostdin", "-loglevel", "error"])
         .args(["-f", "avfoundation", "-i", ":BlackHole 2ch"])
