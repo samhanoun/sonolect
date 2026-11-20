@@ -138,7 +138,14 @@ only when that store is chosen.
 **Tombstones** are purged 90 days after the delete, at most once a day per
 vault, when the vault is next read or written. Deleting a vault erases its
 records at once and keeps a marker with the verifier, so its id answers 410
-from then on.
+from then on. The service never removes a vault on its own, so the markers
+and abandoned vaults stay until an operator removes them.
+
+**Backups.** A device notices that the store went back in time only while
+the vault's head is still below the highest seq it has seen. After
+restoring a backup, give every vault a new `epoch` (11 random base64url
+characters) before serving traffic again. Every device then runs a full
+resync and uploads what the backup lost.
 
 ## Running it
 
