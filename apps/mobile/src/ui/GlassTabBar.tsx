@@ -7,6 +7,8 @@ import {
   Text,
   View,
   type LayoutChangeEvent,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import type { Tabs } from "expo-router";
@@ -89,6 +91,14 @@ export function GlassTabBar({
   // -1 on a route that has no tab (a hidden screen): no tab is lit.
   const focusedTab = routes.findIndex((route) => route.key === focusedKey);
   const selected = Math.max(0, focusedTab);
+  // A screen asks for no bar the way it would with the stock bar, with
+  // tabBarStyle { display: "none" }, as a full-screen sheet does.
+  const focusedStyle = focusedKey
+    ? StyleSheet.flatten(
+        descriptors[focusedKey]?.options.tabBarStyle as StyleProp<ViewStyle>,
+      )
+    : undefined;
+  const hideBar = keyboardVisible || focusedStyle?.display === "none";
 
   const lens = useRef(new Animated.Value(selected)).current;
   const hidden = useRef(new Animated.Value(0)).current;
@@ -109,13 +119,13 @@ export function GlassTabBar({
 
   useEffect(() => {
     const animation = Animated.timing(hidden, {
-      toValue: keyboardVisible ? 1 : 0,
+      toValue: hideBar ? 1 : 0,
       duration: reduced ? 0 : 180,
       useNativeDriver: true,
     });
     animation.start();
     return () => animation.stop();
-  }, [keyboardVisible, reduced, hidden]);
+  }, [hideBar, reduced, hidden]);
 
   const count = Math.max(routes.length, 1);
   const tabWidth = width / count;
@@ -123,7 +133,9 @@ export function GlassTabBar({
 
   return (
     <Animated.View
-      pointerEvents={keyboardVisible ? "none" : "box-none"}
+      pointerEvents={hideBar ? "none" : "box-none"}
+      // A hidden bar is out of reach of screen readers too.
+      aria-hidden={hideBar}
       style={[
         styles.dock,
         {

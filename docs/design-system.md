@@ -39,6 +39,10 @@ bar that blurs the page under it.
   system blur on older iOS and on the web (`expo-blur`), and a GPU blur of
   the page in front on Android 12 and newer. Android 11 and older get an
   opaque bar instead of a slow software blur.
+- **Hiding the bar**: it slides away while the keyboard is up, and on a
+  screen that sets `tabBarStyle: { display: "none" }` (a full-screen sheet),
+  as the stock bar would. A screen that isn't one of the four tabs lights no
+  tab.
 - **Panels** (cards, notices, the search field) are translucent fills with a
   soft sheen and edges lit from above, drawn with React Native's own
   `backgroundImage` gradients and `boxShadow`, so they add no views.
