@@ -1,9 +1,10 @@
 # Build from the repository root so the workspace packages are available:
 #   docker build -f services/worker-service/Dockerfile -t sonolect-worker-service .
 
-FROM node:22-slim AS build
+FROM node:26-slim AS build
 WORKDIR /repo
-RUN corepack enable
+# Node 25+ images no longer ship corepack; install it from npm first.
+RUN npm install -g corepack@0.36.0 && corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 # pnpm verifies the patches named in package.json on every install.
 COPY patches patches
@@ -16,7 +17,7 @@ RUN pnpm install --frozen-lockfile --filter "@sonolect/worker-service..."
 RUN pnpm --filter "@sonolect/worker-service" build \
   && pnpm --filter "@sonolect/worker-service" deploy --prod /out
 
-FROM node:22-slim
+FROM node:26-slim
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build --chown=node:node /out/package.json ./package.json
