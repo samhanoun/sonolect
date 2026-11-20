@@ -152,6 +152,88 @@ test.describe("compressed recordings", () => {
   });
 });
 
+/** Records the type of every blob the page turns into a URL. */
+async function watchBlobTypes(page: Page) {
+  await page.addInitScript(() => {
+    const types: string[] = [];
+    const create = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = (object: Blob | MediaSource) => {
+      if (object instanceof Blob) types.push(object.type);
+      return create(object);
+    };
+    Object.assign(window, { __sonolectE2eBlobTypes: types });
+  });
+}
+
+function blobTypes(page: Page) {
+  return page.evaluate(
+    () =>
+      (window as typeof window & { __sonolectE2eBlobTypes: string[] })
+        .__sonolectE2eBlobTypes,
+  );
+}
+
+test.describe("playing compressed recordings", () => {
+  const id = "1700000000000-1";
+
+  /** Plays the saved one-second recording from the library to its end. */
+  async function listenToTheEnd(page: Page) {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto("/");
+    await nav(page, "Library").click();
+    const listen = page.locator(".studio-card-actions button").first();
+    await expect(listen).toHaveText("Listen");
+    await listen.click();
+    // The playhead reaches the end of the tone, then playback stops.
+    await expect(listen).toHaveText(/^Listen\s*0:01$/);
+    await expect(page.locator(".studio-notice")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  }
+
+  test("a compressed recording plays from its Opus file", async ({ page }) => {
+    await installMockTauri(page, [capture(id, 1000)], { compressed: [id] });
+    await watchBlobTypes(page);
+    await listenToTheEnd(page);
+    expect(await nativeCalls(page, "read_local_capture_audio")).toEqual([
+      { command: "read_local_capture_audio", args: { id, format: "ogg" } },
+    ]);
+    expect(await blobTypes(page)).toEqual(["audio/ogg"]);
+  });
+
+  test("an Opus file the webview cannot play is read again as WAV", async ({
+    page,
+  }) => {
+    await installMockTauri(page, [capture(id, 1000)], {
+      compressed: [id],
+      unplayableOpus: true,
+    });
+    await watchBlobTypes(page);
+    await listenToTheEnd(page);
+    expect(await nativeCalls(page, "read_local_capture_audio")).toEqual([
+      { command: "read_local_capture_audio", args: { id, format: "ogg" } },
+      { command: "read_local_capture_audio", args: { id, format: "wav" } },
+    ]);
+    expect(await blobTypes(page)).toEqual(["audio/ogg", "audio/wav"]);
+  });
+
+  test("a webview without Opus asks for WAV", async ({ page }) => {
+    await installMockTauri(page, [capture(id, 1000)], { compressed: [id] });
+    await page.addInitScript(() => {
+      const canPlayType = HTMLMediaElement.prototype.canPlayType;
+      HTMLMediaElement.prototype.canPlayType = function (type: string) {
+        return /ogg|opus/i.test(type) ? "" : canPlayType.call(this, type);
+      };
+    });
+    await watchBlobTypes(page);
+    await listenToTheEnd(page);
+    expect(await nativeCalls(page, "read_local_capture_audio")).toEqual([
+      { command: "read_local_capture_audio", args: { id, format: "wav" } },
+    ]);
+    expect(await blobTypes(page)).toEqual(["audio/wav"]);
+  });
+});
+
 test.describe("compressed recordings in French", () => {
   test.use({ locale: "fr-FR" });
 

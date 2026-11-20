@@ -21,11 +21,16 @@ export type MockTauriCall = { command: string; args: unknown };
 const toneWav = readFileSync(
   new URL("../fixtures/tone.wav", import.meta.url),
 ).toString("base64");
+/** The same tone as the app compresses it. */
+const toneOpus = readFileSync(
+  new URL("../fixtures/tone.opus", import.meta.url),
+).toString("base64");
 
 /**
  * Makes the page believe it runs inside the desktop app: native commands are
  * answered from an in-page library of saved recordings, and every recording
- * plays the one-second tone fixture.
+ * plays the one-second tone fixture. A compressed recording sends it as Ogg
+ * Opus when the page asks for Ogg, as the app does, and as WAV otherwise.
  *
  * Live recordings are imitated too: audio sent with `capture_append` is
  * counted, and every three seconds of it produces one segment of live text
@@ -35,7 +40,10 @@ const toneWav = readFileSync(
  * refuses more, as the real one does after four hours.
  *
  * `compress_local_captures` compresses each saved recording once and reports
- * what that freed. Pasting into another app always succeeds.
+ * what that freed; `compressed` lists recordings that already are. With
+ * `unplayableOpus`, the Ogg Opus audio sent is damaged, so the page cannot
+ * play it, as in a webview without Opus. Pasting into another app always
+ * succeeds.
  *
  * With `systemAudio`, the computer's sound can be recorded: once started it
  * adds a second of audio to the live recording every 100 ms, with a level.
@@ -50,17 +58,40 @@ export async function installMockTauri(
     recorderLimitMs?: number;
     /** true: this computer's sound can be recorded. */
     systemAudio?: boolean;
+    /** Recordings already kept as Opus. */
+    compressed?: string[];
+    /** true: the Ogg Opus audio sent cannot be played. */
+    unplayableOpus?: boolean;
   } = {},
 ) {
   await page.addInitScript(
-    ({ captures, toneWav, recorder, recorderLimitMs, systemAudio }) => {
+    ({
+      captures,
+      toneWav,
+      toneOpus,
+      recorder,
+      recorderLimitMs,
+      systemAudio,
+      compressedIds,
+      unplayableOpus,
+    }) => {
       window.localStorage.clear();
       const library = structuredClone(captures);
       /** Recordings already turned into Opus. */
-      const compressed = new Set<string>();
+      const compressed = new Set<string>(compressedIds);
       const calls: { command: string; args: unknown }[] = [];
-      const audio = () =>
-        Uint8Array.from(atob(toneWav), (char) => char.charCodeAt(0)).buffer;
+      const bytes = (base64: string) =>
+        Uint8Array.from(atob(base64), (char) => char.charCodeAt(0)).buffer;
+      const audio = (id: unknown, format: unknown) => {
+        format ??= "wav";
+        if (format !== "wav" && format !== "ogg") throw "Invalid audio format.";
+        if (format === "wav" || !compressed.has(id as string))
+          return bytes(toneWav);
+        // Ogg's signature and nothing a decoder can use.
+        if (unplayableOpus)
+          return new TextEncoder().encode("OggS" + "\0".repeat(60)).buffer;
+        return bytes(toneOpus);
+      };
       // Event plumbing, as @tauri-apps/api/event expects it.
       const callbacks = new Map<number, (message: unknown) => void>();
       const listeners = new Map<number, { event: string; handler: number }>();
@@ -203,7 +234,7 @@ export async function installMockTauri(
               case "list_local_captures":
                 return structuredClone(library);
               case "read_local_capture_audio":
-                return audio();
+                return audio(args.id, args.format);
               case "update_local_capture": {
                 const capture = library.find((item) => item.id === args.id);
                 if (!capture)
@@ -247,9 +278,12 @@ export async function installMockTauri(
     {
       captures,
       toneWav,
+      toneOpus,
       recorder: options.recorder ?? true,
       recorderLimitMs: options.recorderLimitMs,
       systemAudio: options.systemAudio ?? false,
+      compressedIds: options.compressed ?? [],
+      unplayableOpus: options.unplayableOpus ?? false,
     },
   );
 }

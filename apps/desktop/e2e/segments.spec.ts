@@ -115,12 +115,16 @@ test.describe("segment editor", () => {
     await nav(page, "Library").click();
     await expect(page.getByText(meeting.transcript!)).toBeVisible();
 
-    // Listening from the library reads the saved audio once.
+    // Listening from the library reads the saved audio once, as Opus when
+    // the webview can play it.
     await page.getByRole("button", { name: /^Listen/ }).click();
     await expect
       .poll(() => nativeCalls(page, "read_local_capture_audio"))
       .toEqual([
-        { command: "read_local_capture_audio", args: { id: meeting.id } },
+        {
+          command: "read_local_capture_audio",
+          args: { id: meeting.id, format: "ogg" },
+        },
       ]);
 
     await page.getByRole("button", { name: /^Open editor/ }).click();
