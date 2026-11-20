@@ -178,12 +178,27 @@ export type SyncNoteInput = {
   [extra: string]: unknown;
 };
 
+/** Optional text fields where an app's empty string means "not set". */
+const OPTIONAL_TEXT_FIELDS = [
+  "updatedAt",
+  "title",
+  "language",
+  "mode",
+  "source",
+] as const;
+
 /**
- * Builds a valid SyncNote from an app's fields (undefined fields are left
- * out). Throws InvalidPayloadError when a field has the wrong type.
+ * Builds a valid SyncNote from an app's fields: undefined fields, and the
+ * optional text fields left empty (updatedAt, title, language, mode,
+ * source), are left out. Throws InvalidPayloadError when a field has the
+ * wrong type.
  */
-export const syncNote = (input: SyncNoteInput): SyncNote =>
-  parseSyncNote(input);
+export function syncNote(input: SyncNoteInput): SyncNote {
+  const fields: Record<string, unknown> = { ...input };
+  for (const key of OPTIONAL_TEXT_FIELDS)
+    if (fields[key] === "") delete fields[key];
+  return parseSyncNote(fields);
+}
 
 /** The fields of `note` that "note/1" does not define, for an app to keep as they are. */
 export function extraFields(note: SyncNote): Record<string, unknown> {

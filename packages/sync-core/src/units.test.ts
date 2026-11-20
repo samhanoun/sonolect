@@ -313,6 +313,29 @@ describe("payload", () => {
     );
   });
 
+  it("builds notes without the optional text fields an app left empty", () => {
+    const built = syncNote({
+      createdAt: "2026-01-01T00:00:00Z",
+      rawText: "hello",
+      durationMs: 0,
+      origin: "mobile",
+      updatedAt: "",
+      title: "",
+      language: "",
+      mode: "",
+      source: "",
+      refinedText: "",
+    });
+    for (const key of ["updatedAt", "title", "language", "mode", "source"])
+      assert.equal(key in built, false, key);
+    // An empty refined text is still text.
+    assert.equal(built.refinedText, "");
+    assert.throws(
+      () => syncNote({ ...built, origin: "" }),
+      InvalidPayloadError,
+    );
+  });
+
   it("rejects notes with fields of the wrong type", () => {
     const good = note("hi");
     for (const bad of [
