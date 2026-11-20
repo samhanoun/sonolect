@@ -100,6 +100,46 @@ describe("registerServiceSecurity", () => {
     await app.close();
   });
 
+  it("reads the bearer scheme leniently and the token strictly", async () => {
+    const app = buildApp({
+      NODE_ENV: "production",
+      SONOLECT_SERVICE_TOKENS: token,
+    });
+    const call = (authorization: string) =>
+      app.inject({
+        method: "GET",
+        url: "/whoami",
+        headers: { authorization, "x-user-id": "user-1" },
+      });
+
+    for (const accepted of [
+      `bearer ${token}`,
+      `BEARER   ${token}`,
+      `Bearer\t${token}`,
+      `  Bearer ${token}  `,
+    ]) {
+      assert.equal((await call(accepted)).statusCode, 200, accepted);
+    }
+    for (const rejected of [
+      token,
+      `Bearer${token}`,
+      `Basic ${token}`,
+      "Bearer",
+      "Bearer    ",
+      `Bearer ${token} extra`,
+      `Token Bearer ${token}`,
+    ]) {
+      assert.equal((await call(rejected)).statusCode, 401, rejected);
+    }
+
+    // A header built to stall a backtracking parser is rejected at once.
+    const started = performance.now();
+    const hostile = await call(`Bearer\t${"\t\t".repeat(50_000)}`);
+    assert.equal(hostile.statusCode, 401);
+    assert.ok(performance.now() - started < 1_000);
+    await app.close();
+  });
+
   it("requires and validates x-user-id when tokens are enforced", async () => {
     const app = buildApp({ SONOLECT_SERVICE_TOKENS: token });
     const headers = { authorization: `Bearer ${token}` };

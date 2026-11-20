@@ -66,10 +66,23 @@ const firstHeader = (
   value: string | string[] | undefined,
 ): string | undefined => (Array.isArray(value) ? value[0] : value);
 
-const parseBearerToken = (authorization: string | undefined) =>
-  authorization
-    ? /^Bearer\s+(.+)$/i.exec(authorization.trim())?.[1]
-    : undefined;
+/**
+ * Reads the token from "Bearer <token>". Parsed by hand, in linear time: the
+ * header is caller-controlled, so it never goes through a backtracking regex.
+ */
+const parseBearerToken = (
+  authorization: string | undefined,
+): string | undefined => {
+  if (!authorization) return undefined;
+  const value = authorization.trim();
+  const scheme = "bearer";
+  if (value.slice(0, scheme.length).toLowerCase() !== scheme) return undefined;
+  const rest = value.slice(scheme.length);
+  // At least one space or tab must separate the scheme from the token.
+  if (rest[0] !== " " && rest[0] !== "\t") return undefined;
+  const token = rest.trimStart();
+  return token || undefined;
+};
 
 export interface ServiceSecurityOptions {
   serviceName: string;

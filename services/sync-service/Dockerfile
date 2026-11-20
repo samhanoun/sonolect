@@ -5,6 +5,8 @@ FROM node:22-slim AS build
 WORKDIR /repo
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+# pnpm verifies the patches named in package.json on every install.
+COPY patches patches
 COPY packages packages
 COPY tooling/service-build tooling/service-build
 COPY services/sync-service services/sync-service
