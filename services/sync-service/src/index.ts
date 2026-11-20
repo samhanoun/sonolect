@@ -17,11 +17,23 @@ import type {
 import {
   syncPullSchema,
   syncPushSchema,
+  userIdSchema,
   type SyncPullInput,
   type SyncPushInput,
 } from "@sonolect/validation";
+import {
+  BoundedMap,
+  registerServiceSecurity,
+  resolveListenOptions,
+  resolveRequestUserId,
+  type ServiceEnv,
+} from "@sonolect/service-kit";
 
 const serviceName = "sonolect-sync-service";
+const MAX_RECORDS = 200_000;
+// A client clock this far ahead is treated as "now", so one device with a
+// wrong clock cannot pin a record in the future and block every later edit.
+const MAX_CLIENT_CLOCK_SKEW_MS = 5 * 60_000;
 
 type StoredSyncRecord = {
   entity: SyncPushChange["entity"];
@@ -36,16 +48,14 @@ interface SyncStores {
   records: Map<string, StoredSyncRecord>;
 }
 
-const createStores = (): SyncStores => ({ records: new Map() });
+const createStores = (): SyncStores => ({
+  records: new BoundedMap(MAX_RECORDS),
+});
 
 const parseBody = <T>(
   schema: { parse: (value: unknown) => T },
   request: FastifyRequest,
 ): T => schema.parse(request.body ?? {});
-const parseQuery = <T>(
-  schema: { parse: (value: unknown) => T },
-  request: FastifyRequest,
-): T => schema.parse(request.query ?? {});
 
 const sendValidationError = (reply: FastifyReply, error: unknown) => {
   if (error instanceof z.ZodError) {
@@ -65,8 +75,10 @@ const optionalProps = (
     Object.entries(value).filter(([, prop]) => prop !== undefined),
   );
 
+// IDs may themselves contain ":", so a joined string could make two different
+// users' records share a key. A JSON tuple cannot collide.
 const recordKey = (userId: string, entity: string, id: string) =>
-  `${userId}:${entity}:${id}`;
+  JSON.stringify([userId, entity, id]);
 
 const toManifestItems = (
   records: StoredSyncRecord[],
@@ -95,7 +107,17 @@ const pullFor = (
         !input.since || Date.parse(record.updatedAt) > Date.parse(input.since),
     )
     .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
-  const limited = records.slice(0, input.limit);
+  // Pages are cut on `updatedAt` and the next pull asks for anything newer
+  // than the cursor. Records written in the same millisecond therefore have
+  // to travel together, or the ones past the cut would never be pulled.
+  let pageEnd = Math.min(input.limit, records.length);
+  while (
+    pageEnd > 0 &&
+    pageEnd < records.length &&
+    records[pageEnd]?.updatedAt === records[pageEnd - 1]?.updatedAt
+  )
+    pageEnd += 1;
+  const limited = records.slice(0, pageEnd);
   const last = limited.at(-1);
   return {
     cursor: last?.updatedAt ?? new Date().toISOString(),
@@ -124,10 +146,11 @@ const pushFor = (
   for (const change of input.changes) {
     const key = recordKey(input.userId, change.entity, change.id);
     const existing = stores.records.get(key);
-    if (
-      existing &&
-      Date.parse(existing.updatedAt) > Date.parse(change.updatedAt)
-    ) {
+    const now = Date.now();
+    const claimedTime = Date.parse(change.updatedAt);
+    const clientTime =
+      claimedTime > now + MAX_CLIENT_CLOCK_SKEW_MS ? now : claimedTime;
+    if (existing && Date.parse(existing.updatedAt) > clientTime) {
       conflicts.push({
         clientChangeId: change.clientChangeId,
         serverVersion: existing,
@@ -135,9 +158,9 @@ const pushFor = (
       });
       continue;
     }
-    const updatedAt = new Date(
-      Math.max(Date.parse(change.updatedAt), Date.now()),
-    ).toISOString();
+    const updatedAt = new Date(Math.max(clientTime, now)).toISOString();
+    // Delete first so a rewritten record becomes the newest entry.
+    stores.records.delete(key);
     stores.records.set(key, {
       entity: change.entity,
       id: change.id,
@@ -158,6 +181,7 @@ const pushFor = (
 export interface CreateAppOptions {
   stores?: SyncStores;
   logger?: boolean;
+  env?: ServiceEnv;
 }
 
 export async function createApp(
@@ -168,6 +192,7 @@ export async function createApp(
 
   await app.register(helmet);
   await app.register(cors, { origin: false });
+  registerServiceSecurity(app, { serviceName, env: options.env });
 
   app.get("/health", async () => ({ status: "ok", service: serviceName }));
 
@@ -177,12 +202,13 @@ export async function createApp(
       try {
         const query = z
           .object({
-            userId: z.string().min(1).default("local-user"),
+            userId: userIdSchema.optional(),
             since: z.string().datetime().optional(),
           })
           .parse(request.query ?? {});
+        const userId = resolveRequestUserId(request, query.userId);
         const records = [...stores.records.values()].filter(
-          (record) => record.userId === query.userId,
+          (record) => record.userId === userId,
         );
         return {
           generatedAt: new Date().toISOString(),
@@ -199,10 +225,11 @@ export async function createApp(
     "/sync/pull",
     async (request, reply): Promise<SyncPullResponse | FastifyReply> => {
       try {
-        return pullFor(
-          stores,
-          parseBody<SyncPullInput>(syncPullSchema, request),
-        );
+        const input = parseBody<SyncPullInput>(syncPullSchema, request);
+        return pullFor(stores, {
+          ...input,
+          userId: resolveRequestUserId(request, input.userId),
+        });
       } catch (error) {
         return sendValidationError(reply, error);
       }
@@ -213,11 +240,13 @@ export async function createApp(
     "/sync/push",
     async (request, reply): Promise<SyncPushResponse | FastifyReply> => {
       try {
-        return reply
-          .status(202)
-          .send(
-            pushFor(stores, parseBody<SyncPushInput>(syncPushSchema, request)),
-          );
+        const input = parseBody<SyncPushInput>(syncPushSchema, request);
+        return reply.status(202).send(
+          pushFor(stores, {
+            ...input,
+            userId: resolveRequestUserId(request, input.userId),
+          }),
+        );
       } catch (error) {
         return sendValidationError(reply, error);
       }
@@ -231,6 +260,5 @@ const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isDirectRun) {
   const app = await createApp();
-  const port = Number(process.env.PORT ?? 8080);
-  await app.listen({ host: "0.0.0.0", port });
+  await app.listen(resolveListenOptions());
 }

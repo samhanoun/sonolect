@@ -69,7 +69,111 @@ export const parseStripeEvent = (
   webhookSecret: string,
 ): StripeEvent | null => {
   if (!verifyStripeSignature(payload, signature, webhookSecret)) return null;
-  return JSON.parse(payload) as StripeEvent;
+  try {
+    const parsed: unknown = JSON.parse(payload);
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      typeof (parsed as StripeEvent).type !== "string"
+    )
+      return null;
+    return parsed as StripeEvent;
+  } catch {
+    return null;
+  }
+};
+
+export type PaidPlan = "pro" | "team";
+
+/** What a verified Stripe event means for a Sonolect account. */
+export interface PlanChange {
+  /** Sonolect user ID from `client_reference_id` or `metadata.userId`. */
+  userId?: string;
+  customerId?: string;
+  /** The plan to apply, or undefined when the event does not change it. */
+  plan?: PaidPlan | "free";
+}
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : {};
+
+const asString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.length > 0 ? value : undefined;
+
+const planFromLookupKey = (
+  lookupKey: string | undefined,
+  lookupKeys: Readonly<Record<string, PaidPlan>>,
+): PaidPlan | undefined =>
+  lookupKey && Object.hasOwn(lookupKeys, lookupKey)
+    ? lookupKeys[lookupKey]
+    : undefined;
+
+const subscriptionLookupKey = (
+  subscription: Record<string, unknown>,
+): string | undefined => {
+  const items = asRecord(subscription.items).data;
+  const first = Array.isArray(items) ? asRecord(items[0]) : {};
+  return asString(asRecord(first.price).lookup_key);
+};
+
+/**
+ * Works out the plan a verified event grants or revokes.
+ *
+ * - `checkout.session.completed` links the Stripe customer to the Sonolect
+ *   user (`client_reference_id`) and applies `metadata.plan` when present.
+ * - Subscription created/updated applies the plan of the price lookup key
+ *   while the subscription is active or trialing, and drops to free once it
+ *   is canceled, unpaid or expired. `past_due` keeps the plan during retries.
+ * - Subscription deleted drops to free.
+ */
+export const resolvePlanChange = (
+  event: StripeEvent,
+  lookupKeys: Readonly<Record<string, PaidPlan>>,
+): PlanChange => {
+  const object = asRecord(event.data?.object);
+  const metadata = asRecord(object.metadata);
+  const change: PlanChange = {};
+  const customerId = asString(object.customer);
+  if (customerId) change.customerId = customerId;
+  const userId =
+    asString(object.client_reference_id) ?? asString(metadata.userId);
+  if (userId) change.userId = userId;
+
+  switch (event.type) {
+    case "checkout.session.completed": {
+      const requested = asString(metadata.plan);
+      const paid = asString(object.payment_status) !== "unpaid";
+      if (paid && (requested === "pro" || requested === "team"))
+        change.plan = requested;
+      break;
+    }
+    case "customer.subscription.created":
+    case "customer.subscription.updated": {
+      const status = asString(object.status);
+      if (status === "active" || status === "trialing") {
+        const plan = planFromLookupKey(
+          subscriptionLookupKey(object),
+          lookupKeys,
+        );
+        if (plan) change.plan = plan;
+      } else if (
+        status === "canceled" ||
+        status === "unpaid" ||
+        status === "incomplete_expired"
+      ) {
+        change.plan = "free";
+      }
+      break;
+    }
+    case "customer.subscription.deleted":
+      change.plan = "free";
+      break;
+    default:
+      break;
+  }
+  return change;
 };
 
 type SubscriptionResult = {

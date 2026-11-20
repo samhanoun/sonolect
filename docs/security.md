@@ -28,7 +28,9 @@
 
 The paid `/v1/transcribe` and `/v1/polish` routes are limited per verified account (30 requests per minute by default, `aiRouteLimits` in `createApp`), polish input is capped at 20,000 characters and 200 dictionary entries, and provider errors are logged rather than returned. The limit is held in memory per instance, so with several Cloud Run instances the effective budget is per instance; move it to a shared store (Firestore or Redis) before relying on it for billing.
 
-The `agent`, `audio`, `billing` and `sync` services have no authentication and are not deployed by Terraform. Do not expose them until they verify callers the way the API does.
+## Internal services
+
+The `agent`, `audio`, `billing`, `sync` and `worker` services are internal: they are called by the API gateway or by background jobs, never by an app. Each one requires a shared service token (`Authorization: Bearer`, configured with `SONOLECT_SERVICE_TOKENS`) and refuses to start in production without one. The end user is named in the `x-user-id` header, and a request whose body or path names a different user is rejected with 403. The Stripe webhook is the one route without a service token; it verifies the Stripe signature on the raw request body instead. Outside production the services stay open for local development and bind to `127.0.0.1` only. Their stores are in memory, so they are scaffolding for the hosted product and are not wired to the apps yet. Only `api` and `worker` are deployed by Terraform.
 
 ## Firebase rules
 
