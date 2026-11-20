@@ -80,6 +80,8 @@ pub struct OpusWriter<W: Write> {
     pre_skip: u64,
     /// Samples of each channel taken so far.
     taken: u64,
+    /// Frames encoded so far.
+    encoded: u64,
     /// Packets handed to the Ogg stream so far.
     packets: usize,
     /// The last packet encoded and its granule position, not written yet.
@@ -154,6 +156,7 @@ impl<W: Write> OpusWriter<W> {
             granule_per_sample,
             pre_skip,
             taken: 0,
+            encoded: 0,
             packets: 0,
             waiting: None,
             packet: [0; MAX_PACKET],
@@ -179,8 +182,24 @@ impl<W: Write> OpusWriter<W> {
         Ok(())
     }
 
-    /// Encodes the frame and writes the packet held back before it. A
-    /// packet's granule position is where the audio taken so far ends.
+    /// Where the audio a decoder has after the frames encoded so far ends,
+    /// in 48 kHz samples: 20 ms a frame, the pre-skip included.
+    fn decodable(&self) -> u64 {
+        self.encoded * (self.frame.len() / self.channels) as u64 * self.granule_per_sample
+    }
+
+    /// Where the audio taken so far ends in the decoder's output, in 48 kHz
+    /// samples: the pre-skip comes first.
+    fn audio_end(&self) -> u64 {
+        self.pre_skip + self.taken * self.granule_per_sample
+    }
+
+    /// Encodes the frame and writes the packet held back before it.
+    ///
+    /// A packet's granule position is where the audio a decoder has after it
+    /// ends (RFC 7845, section 4), so every page ends exactly where its
+    /// audio does. Only the last packet ends earlier, where the real audio
+    /// does, which trims the padding of the last frame.
     fn encode_frame(&mut self) -> Result<(), String> {
         let length = self
             .encoder
@@ -197,9 +216,10 @@ impl<W: Write> OpusWriter<W> {
                 .write_packet(data, SERIAL, end, granule)
                 .map_err(io_error)?;
         }
+        self.encoded += 1;
         self.waiting = Some((
             self.packet[..length].to_vec(),
-            self.pre_skip + self.taken * self.granule_per_sample,
+            self.decodable().min(self.audio_end()),
         ));
         Ok(())
     }
@@ -209,16 +229,19 @@ impl<W: Write> OpusWriter<W> {
     pub fn finish(mut self) -> Result<W, String> {
         self.taken += (self.filled / self.channels) as u64;
         if self.filled > 0 || self.waiting.is_none() {
-            // The last frame is padded with silence; the final granule
-            // position tells the decoder where the real audio ends.
+            // The last frame is padded with silence.
             self.frame[self.filled..].fill(0);
             self.encode_frame()?;
         }
-        // The encoder's look-ahead still holds the end of the audio: one more
-        // frame of silence pushes it out. The granule position stays at the
-        // end of the real audio, so the padding is trimmed on decode.
-        self.frame.fill(0);
-        self.encode_frame()?;
+        // A decoder gives out each frame late, by the encoder's look-ahead
+        // (the pre-skip). Unless the padding already covers it, one more
+        // frame of silence pushes out the end of the audio. The stream ends
+        // with the first packet that reaches the end of the real audio, and
+        // its granule position trims the rest on decode.
+        while self.decodable() < self.audio_end() {
+            self.frame.fill(0);
+            self.encode_frame()?;
+        }
         if let Some((data, granule)) = self.waiting.take() {
             self.output
                 .write_packet(data, SERIAL, ogg::PacketWriteEndInfo::EndStream, granule)
@@ -338,7 +361,10 @@ impl<R: Read + Seek> Samples<R> {
             self.to_skip -= skipped;
             // A page's position is where its last packet ends, so no packet
             // of it goes past that; on the last page it is where the real
-            // audio ends, which trims the padding of the final frame.
+            // audio ends, which trims the padding of the final frame. Files
+            // from earlier versions put every page but the last one pre-skip
+            // later than that, which only moves the limit later: they decode
+            // the same.
             let limit = packet.absgp_page().saturating_sub(self.pre_skip) / GRANULE_PER_SAMPLE;
             let room = limit.saturating_sub(self.emitted) as usize;
             let take = (decoded - skipped).min(room);
@@ -722,8 +748,21 @@ mod tests {
 
     #[test]
     fn keeps_the_exact_length_of_the_recording() {
-        // Whole frames, a partial last frame, a single sample, and nothing.
-        for length in [16_000usize, 16_000 + 37, 320, 319, 1, 0] {
+        // Whole frames, a partial last frame (with padding that covers the
+        // encoder's look-ahead, and with padding that does not, also on the
+        // last frame of a page), a single sample, and nothing.
+        for length in [
+            16_000usize,
+            16_000 + 37,
+            15_780,
+            15_980,
+            320,
+            319,
+            217,
+            216,
+            1,
+            0,
+        ] {
             let samples = speech(2.0)[..length].to_vec();
             let decoded = decode(encoded(&samples)).unwrap();
             assert_eq!(decoded.len(), length, "length {length}");
@@ -878,83 +917,57 @@ mod tests {
         assert!(folder.path().join("773-1.opus").exists());
     }
 
-    /// `encode` as it was written before `OpusWriter`, kept to show that the
-    /// writer makes the same files, byte for byte.
-    fn encode_before_the_writer(samples: &[i16]) -> Vec<u8> {
-        let mut output = Vec::new();
-        let mut encoder =
-            opus::Encoder::new(SAMPLE_RATE, opus::Channels::Mono, opus::Application::Voip).unwrap();
-        encoder.set_bitrate(opus::Bitrate::Bits(BITRATE)).unwrap();
-        let lookahead = encoder.get_lookahead().unwrap().max(0) as u64;
-        let pre_skip = lookahead * GRANULE_PER_SAMPLE;
-        let mut writer = ogg::PacketWriter::new(&mut output);
-        writer
-            .write_packet(
-                opus_head(1, pre_skip as u16, SAMPLE_RATE),
-                SERIAL,
-                ogg::PacketWriteEndInfo::EndPage,
-                0,
-            )
-            .unwrap();
-        writer
-            .write_packet(opus_tags(), SERIAL, ogg::PacketWriteEndInfo::EndPage, 0)
-            .unwrap();
-        let mut frame = [0i16; FRAME];
-        let mut filled = 0;
-        let mut total: u64 = 0;
-        let mut frames = 0usize;
-        let mut waiting: Option<(Vec<u8>, u64)> = None;
-        let mut packet = [0u8; MAX_PACKET];
-        let mut flush = |frame: &[i16; FRAME],
-                         end_granule: u64,
-                         waiting: &mut Option<(Vec<u8>, u64)>,
-                         frames: &mut usize| {
-            let length = encoder.encode(frame, &mut packet).unwrap();
-            if let Some((data, granule)) = waiting.take() {
-                *frames += 1;
-                let end = if (*frames).is_multiple_of(FRAMES_PER_PAGE) {
-                    ogg::PacketWriteEndInfo::EndPage
-                } else {
-                    ogg::PacketWriteEndInfo::NormalPacket
-                };
-                writer.write_packet(data, SERIAL, end, granule).unwrap();
+    /// Checks the granule positions of an Ogg Opus stream of `length`
+    /// samples per channel at `rate` (RFC 7845, section 4): the headers are
+    /// at 0, every other page ends exactly where the audio decoded up to it
+    /// ends, and the stream ends with the first packet that reaches the end
+    /// of the real audio, at that end.
+    fn assert_granules_follow_the_audio(bytes: Vec<u8>, rate: u32, length: usize, case: &str) {
+        let mut reader = ogg::PacketReader::new(std::io::Cursor::new(bytes));
+        let head = reader.read_packet_expected().unwrap();
+        let tags = reader.read_packet_expected().unwrap();
+        assert_eq!((head.absgp_page(), tags.absgp_page()), (0, 0), "{case}");
+        let pre_skip = u64::from(u16::from_le_bytes([head.data[10], head.data[11]]));
+        let end = pre_skip + length as u64 * u64::from(48_000 / rate);
+        // What a decoder has after each packet, in 48 kHz samples.
+        let mut decoded = 0u64;
+        loop {
+            let packet = reader.read_packet_expected().unwrap();
+            let before = decoded;
+            decoded += opus::packet::get_nb_samples(&packet.data, 48_000).unwrap() as u64;
+            if packet.last_in_stream() {
+                assert_eq!(packet.absgp_page(), end, "{case}");
+                assert!(
+                    before < end && end <= decoded,
+                    "{case}: the last packet goes from {before} to {decoded}, the audio ends at {end}"
+                );
+                break;
             }
-            *waiting = Some((packet[..length].to_vec(), end_granule));
-        };
-        for sample in samples {
-            frame[filled] = *sample;
-            filled += 1;
-            total += 1;
-            if filled == FRAME {
-                let end = pre_skip + total * GRANULE_PER_SAMPLE;
-                flush(&frame, end, &mut waiting, &mut frames);
-                filled = 0;
+            if packet.last_in_page() {
+                assert_eq!(packet.absgp_page(), decoded, "{case}");
             }
         }
-        let end = pre_skip + total * GRANULE_PER_SAMPLE;
-        if filled > 0 || waiting.is_none() {
-            frame[filled..].fill(0);
-            flush(&frame, end, &mut waiting, &mut frames);
-        }
-        frame.fill(0);
-        flush(&frame, end, &mut waiting, &mut frames);
-        if let Some((data, granule)) = waiting.take() {
-            writer
-                .write_packet(data, SERIAL, ogg::PacketWriteEndInfo::EndStream, granule)
-                .unwrap();
-        }
-        drop(writer);
-        output
+        assert!(reader.read_packet().unwrap().is_none(), "{case}");
     }
 
     #[test]
-    fn encode_writes_the_same_bytes_as_before_the_writer() {
+    fn every_page_ends_where_its_audio_ends() {
+        // Nothing; whole frames and pages; a last frame whose padding covers
+        // the encoder's look-ahead, or just does, or does not, also when that
+        // frame is the last of a page.
         let audio = speech(5.0);
-        for length in [0usize, 1, 319, 320, 16_000 + 37, audio.len()] {
-            assert!(
-                encoded(&audio[..length]) == encode_before_the_writer(&audio[..length]),
-                "length {length}"
-            );
+        for length in [
+            0usize, 1, 103, 104, 216, 217, 319, 320, 15_780, 15_980, 16_000, 16_037, 80_000,
+        ] {
+            let case = format!("16 kHz mono, {length} samples");
+            assert_granules_follow_the_audio(encoded(&audio[..length]), 16_000, length, &case);
+        }
+        for frames in [0usize, 47_040 + 100, 48_000, 96_037] {
+            let mut writer =
+                OpusWriter::new(Vec::new(), 48_000, 2, 96_000, opus::Application::Audio).unwrap();
+            writer.write(&sweeps(48_000, 2, frames)).unwrap();
+            let case = format!("48 kHz stereo, {frames} samples");
+            assert_granules_follow_the_audio(writer.finish().unwrap(), 48_000, frames, &case);
         }
     }
 
@@ -1061,13 +1074,14 @@ mod tests {
             assert!(lookahead > 0, "{case}");
             assert_eq!(pre_skip, lookahead * granule_per_sample, "{case}");
             reader.read_packet_expected().unwrap();
-            // A page a second, each ending where its second of audio ends;
-            // the last page ends where the audio ends.
+            // A page a second, each ending where the decoder's second of
+            // output ends, pre-skip included; the last page ends where the
+            // real audio ends.
             let (mut pages, mut last) = (0u64, None);
             while let Some(packet) = reader.read_packet().unwrap() {
                 if packet.last_in_page() && !packet.last_in_stream() {
                     pages += 1;
-                    assert_eq!(packet.absgp_page(), pre_skip + pages * 48_000, "{case}");
+                    assert_eq!(packet.absgp_page(), pages * 48_000, "{case}");
                 }
                 last = Some(packet);
             }
@@ -1422,6 +1436,8 @@ mod tests {
         }
         let samples = samples_counted(wav);
         let opus = fs::read(fixtures.join("tone.opus")).unwrap();
+        // Written as the app writes files now.
+        assert_granules_follow_the_audio(opus.clone(), SAMPLE_RATE, samples, "tone.opus");
         let mut reader = ogg::PacketReader::new(std::io::Cursor::new(opus.clone()));
         let head = reader.read_packet_expected().unwrap();
         assert_eq!(&head.data[..8], b"OpusHead");
