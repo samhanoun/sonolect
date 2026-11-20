@@ -19,32 +19,56 @@ import {
 
 describe("dictation bubble phases", () => {
   it("maps capture states to bubble phases", () => {
-    assert.equal(bubblePhaseFor("idle", undefined), "idle");
+    assert.equal(bubblePhaseFor("idle", undefined, "hotkey"), "idle");
     assert.equal(
-      bubblePhaseFor("requesting-permission", undefined),
+      bubblePhaseFor("requesting-permission", undefined, "hotkey"),
       "listening",
     );
-    assert.equal(bubblePhaseFor("recording", undefined), "listening");
-    assert.equal(bubblePhaseFor("uploading", undefined), "transcribing");
-    assert.equal(bubblePhaseFor("error", undefined), "error");
+    assert.equal(bubblePhaseFor("recording", undefined, "app"), "listening");
+    assert.equal(
+      bubblePhaseFor("uploading", undefined, "bubble"),
+      "transcribing",
+    );
+    assert.equal(bubblePhaseFor("error", undefined, "hotkey"), "error");
   });
 
   it("shows the delivery outcome once transcription completes", () => {
     assert.equal(
-      bubblePhaseFor("completed", { kind: "inserted", text: "hi" }),
+      bubblePhaseFor("completed", { kind: "inserted", text: "hi" }, "hotkey"),
       "inserted",
     );
     assert.equal(
-      bubblePhaseFor("completed", { kind: "copied", text: "hi", reason: "x" }),
+      bubblePhaseFor(
+        "completed",
+        { kind: "copied", text: "hi", reason: "x" },
+        "bubble",
+      ),
       "copied",
     );
     assert.equal(
-      bubblePhaseFor("completed", { kind: "error", message: "nope" }),
+      bubblePhaseFor("completed", { kind: "error", message: "no" }, "hotkey"),
       "error",
     );
-    assert.equal(bubblePhaseFor("completed", { kind: "empty" }), "idle");
-    // In-app captures carry no outcome: the bubble goes back to idle.
-    assert.equal(bubblePhaseFor("completed", undefined), "idle");
+    assert.equal(
+      bubblePhaseFor("completed", { kind: "empty" }, "hotkey"),
+      "idle",
+    );
+  });
+
+  it("keeps showing progress while the text is being pasted", () => {
+    // Transcribed but the paste has not reported back yet: no idle flicker.
+    assert.equal(
+      bubblePhaseFor("completed", undefined, "hotkey"),
+      "transcribing",
+    );
+  });
+
+  it("goes idle after in-app captures, which land in the editor", () => {
+    assert.equal(bubblePhaseFor("completed", undefined, "app"), "idle");
+    assert.equal(
+      bubblePhaseFor("completed", { kind: "inserted", text: "x" }, "app"),
+      "idle",
+    );
   });
 
   it("writes short, human detail lines", () => {

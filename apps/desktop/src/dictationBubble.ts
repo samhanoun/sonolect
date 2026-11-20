@@ -25,7 +25,6 @@ export const BUBBLE_READY_EVENT = "sonolect://bubble/ready";
 
 export type BubbleVisibility = "always" | "dictating" | "off";
 export const BUBBLE_VISIBILITY_KEY = "sonolect.bubbleVisibility";
-export const BUBBLE_AUTO_INSERT_KEY = "sonolect.bubbleAutoInsert";
 export const DEFAULT_BUBBLE_VISIBILITY: BubbleVisibility = "always";
 
 export type BubblePhase =
@@ -78,6 +77,7 @@ export function parseBubbleVisibility(
 export function bubblePhaseFor(
   recordingState: RecordingState,
   outcome: DictationOutcome | undefined,
+  source: DictationSource,
 ): BubblePhase {
   switch (recordingState) {
     case "requesting-permission":
@@ -88,7 +88,10 @@ export function bubblePhaseFor(
     case "error":
       return "error";
     case "completed":
-      if (!outcome) return "idle";
+      // In-app captures land in the editor; the bubble just goes back to idle.
+      if (source === "app") return "idle";
+      // Transcribed, still pasting into the focused app.
+      if (!outcome) return "transcribing";
       if (outcome.kind === "inserted") return "inserted";
       if (outcome.kind === "copied") return "copied";
       if (outcome.kind === "error") return "error";

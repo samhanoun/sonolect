@@ -27,6 +27,8 @@ import { StudioModelSelector } from "./StudioModels";
 import { submitCapturedAudioCloud } from "../voiceApi";
 import { prepareLocalAudio } from "../localAudio";
 import { STT_LANGUAGES } from "../sttLanguages";
+import { loadBubbleVisibility, saveBubbleVisibility } from "../bubbleBridge";
+import type { BubbleVisibility } from "../dictationBubble";
 
 const SIGNAL_BARS = [
   18, 30, 44, 26, 58, 72, 40, 64, 86, 52, 70, 94, 62, 80, 48, 90, 66, 76, 42,
@@ -982,6 +984,8 @@ export function StudioVocabulary({ snippets = false }: { snippets?: boolean }) {
 
 export function StudioSettings() {
   const state = useDesktopStore();
+  const [bubbleVisibility, setBubbleVisibility] =
+    useState<BubbleVisibility>(loadBubbleVisibility);
   const [model, setModel] = useState<{ ready: boolean; path: string }>(),
     [busy, setBusy] = useState(false),
     [progress, setProgress] = useState(0),
@@ -1125,6 +1129,30 @@ export function StudioSettings() {
           </p>
         </section>
       </div>
+      <section className="studio-card" aria-labelledby="bubble-settings">
+        <h3 id="bubble-settings">Dictation bubble</h3>
+        <p className="studio-muted">
+          Press Ctrl + Shift + M (or hold Ctrl + Shift + V) in any app. A
+          floating bubble shows Sonolect is listening, then your words are
+          pasted where your cursor is. Click the bubble to start or stop, Esc to
+          cancel, right-click it to open Sonolect.
+        </p>
+        <label>
+          Show the bubble
+          <select
+            value={bubbleVisibility}
+            onChange={(e) => {
+              const next = e.target.value as BubbleVisibility;
+              setBubbleVisibility(next);
+              saveBubbleVisibility(next);
+            }}
+          >
+            <option value="always">Always (small pill when idle)</option>
+            <option value="dictating">Only while dictating</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+      </section>
       <section className="studio-card">
         <h3>Shortcuts & storage</h3>
         <div className="studio-workflow-row">
@@ -1134,6 +1162,10 @@ export function StudioSettings() {
         <div className="studio-workflow-row">
           <span>Hold to talk</span>
           <kbd>Ctrl + Shift + V</kbd>
+        </div>
+        <div className="studio-workflow-row">
+          <span>Cancel dictation</span>
+          <kbd>Esc</kbd>
         </div>
         <div className="studio-workflow-row">
           <span>Quick navigation</span>

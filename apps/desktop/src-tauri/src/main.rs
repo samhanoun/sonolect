@@ -451,11 +451,13 @@ fn main() {
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .setup(bubble::setup)
         .on_window_event(bubble::on_window_event)
         .invoke_handler(tauri::generate_handler![
             bubble::bubble_show,
             bubble::bubble_hide,
             bubble::bubble_open_main,
+            bubble::bubble_restore_target,
             transcribe_audio,
             online::save_provider_key,
             online::provider_key_status,

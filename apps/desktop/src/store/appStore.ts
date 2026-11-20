@@ -45,7 +45,11 @@ import {
   type OnboardingChecklist,
   type Snippet,
 } from "../wisprWorkflow";
-import { insertTextIntoActiveApp, isTauriRuntime } from "../desktopNative";
+import {
+  insertTextIntoActiveApp,
+  isTauriRuntime,
+  restoreDictationTarget,
+} from "../desktopNative";
 import { formatDuration } from "../lib/format";
 import {
   levelFromSamples,
@@ -127,8 +131,6 @@ export type DesktopState = {
   dictationSource: DictationSource;
   /** Result of the last bubble/hotkey dictation, shown on the bubble. */
   dictationOutcome: DictationOutcome | undefined;
-  autoInsertDictation: boolean;
-  setAutoInsertDictation: (enabled: boolean) => void;
   toggleRecording: (source?: DictationSource) => void;
   startVoiceCapture: (source?: DictationSource) => Promise<void>;
   stopVoiceCapture: () => void;
@@ -215,6 +217,9 @@ function startLevelMeter(stream: MediaStream) {
     source.connect(processor);
     processor.connect(mute);
     mute.connect(ctx.destination);
+    // Created outside a user gesture (global hotkey) the context may start
+    // suspended; the bubble falls back to an ambient wave if it stays so.
+    if (ctx.state === "suspended") void ctx.resume().catch(() => undefined);
     meterContext = ctx;
   } catch {
     meterContext = undefined;
@@ -228,30 +233,25 @@ function stopLevelMeter() {
   levelListeners.forEach((listener) => listener(0));
 }
 
-const AUTO_INSERT_KEY = "sonolect.bubbleAutoInsert";
-
-function loadAutoInsert(): boolean {
-  try {
-    return localStorage.getItem(AUTO_INSERT_KEY) !== "false";
-  } catch {
-    return true;
-  }
-}
-
 /** Paste one bubble/hotkey dictation into whatever app has focus. */
 async function deliverDictation(text: string): Promise<DictationOutcome> {
   const trimmed = text.trim();
   if (!trimmed) return { kind: "empty" };
+  await restoreDictationTarget();
   const result = await insertTextIntoActiveApp(trimmed);
   if (result.ok) return { kind: "inserted", text: trimmed };
   if (result.method === "clipboard-only") {
     return { kind: "copied", text: trimmed, reason: result.status };
   }
   try {
+    // Only works while a Sonolect window has focus; otherwise Chromium refuses.
     await navigator.clipboard.writeText(trimmed);
     return { kind: "copied", text: trimmed, reason: result.status };
   } catch {
-    return { kind: "error", message: result.status };
+    return {
+      kind: "error",
+      message: "Couldn't paste. Your words are saved in Sonolect.",
+    };
   }
 }
 
@@ -416,15 +416,6 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
   recordingState: "idle",
   dictationSource: "app",
   dictationOutcome: undefined,
-  autoInsertDictation: loadAutoInsert(),
-  setAutoInsertDictation: (enabled) => {
-    try {
-      localStorage.setItem(AUTO_INSERT_KEY, String(enabled));
-    } catch {
-      // Storage unavailable: keep the choice for this session only.
-    }
-    set({ autoInsertDictation: enabled });
-  },
   activeView: "home",
   privacyLevel:
     (loadSettings(SETTINGS_KEYS.privacyLevel) as PrivacyLevel) || "local",
@@ -659,7 +650,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
                 }),
               };
             });
-            const { dictationSource, autoInsertDictation } = get();
+            const { dictationSource } = get();
             if (dictationSource === "app" || api.status === "offline") return;
             const spoken =
               api.transcript?.trim() ||
@@ -668,25 +659,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
               dictionary: get().dictionaryEntries,
               snippets: get().snippets,
             });
-            const outcome: DictationOutcome = autoInsertDictation
-              ? await deliverDictation(polished)
-              : polished.trim()
-                ? await (async (): Promise<DictationOutcome> => {
-                    try {
-                      await navigator.clipboard.writeText(polished.trim());
-                      return {
-                        kind: "copied",
-                        text: polished.trim(),
-                        reason: "Auto-insert is off.",
-                      };
-                    } catch {
-                      return {
-                        kind: "error",
-                        message: "Could not copy the dictation.",
-                      };
-                    }
-                  })()
-                : { kind: "empty" };
+            const outcome = await deliverDictation(polished);
             set({
               dictationOutcome: outcome,
               insertionStatus:

@@ -194,6 +194,21 @@ html.bubble-window #root {
   opacity: 0.8;
 }
 
+/* Listening, but no level frames (e.g. the meter could not start): breathe. */
+.bubble__wave.is-ambient span {
+  animation: bubble-ambient 1.6s ease-in-out infinite;
+}
+
+@keyframes bubble-ambient {
+  0%,
+  100% {
+    transform: scaleY(0.15);
+  }
+  50% {
+    transform: scaleY(0.45);
+  }
+}
+
 @keyframes bubble-think {
   0%,
   100% {
@@ -244,7 +259,8 @@ html.bubble-window #root {
 
 @media (prefers-reduced-motion: reduce) {
   .bubble,
-  .bubble__wave.is-thinking span {
+  .bubble__wave.is-thinking span,
+  .bubble__wave.is-ambient span {
     animation: none;
   }
   .bubble__wave span {

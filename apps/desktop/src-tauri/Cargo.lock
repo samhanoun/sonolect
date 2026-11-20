@@ -3332,6 +3332,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-global-shortcut",
  "whisper-rs",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

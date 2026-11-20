@@ -88,6 +88,120 @@ pub fn bubble_open_main(app: AppHandle) -> Result<(), String> {
     main.set_focus().map_err(|e| e.to_string())
 }
 
+/// Called right before pasting a dictation. If clicking the bubble (or the
+/// main window) took focus away from the app the user was dictating into,
+/// hand focus back to that app so the paste lands there. Does nothing when
+/// another app is already in front (the user may have switched on purpose).
+#[tauri::command]
+pub async fn bubble_restore_target() -> bool {
+    tauri::async_runtime::spawn_blocking(|| {
+        let restored = focus::restore_if_ours();
+        if restored {
+            // Give the target a moment to process the activation before the paste keystroke.
+            std::thread::sleep(std::time::Duration::from_millis(90));
+        }
+        restored
+    })
+    .await
+    .unwrap_or(false)
+}
+
+/// App setup hook: start tracking which other app was last in front.
+pub fn setup(_app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    focus::install();
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+mod focus {
+    use std::ffi::c_void;
+    use std::ptr::null_mut;
+    use std::sync::atomic::{AtomicPtr, Ordering};
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId, IsWindow, SetForegroundWindow,
+        EVENT_SYSTEM_FOREGROUND, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
+    };
+
+    /// The last foreground window that belongs to another app: the paste target.
+    static LAST_EXTERNAL: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
+
+    fn is_own(hwnd: HWND) -> bool {
+        let mut pid = 0u32;
+        // SAFETY: GetWindowThreadProcessId accepts any window handle and only
+        // writes the owning process id into `pid`.
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        // SAFETY: GetCurrentProcessId has no preconditions.
+        pid == unsafe { GetCurrentProcessId() }
+    }
+
+    unsafe extern "system" fn on_foreground(
+        _hook: HWINEVENTHOOK,
+        _event: u32,
+        hwnd: HWND,
+        _object: i32,
+        _child: i32,
+        _thread: u32,
+        _time: u32,
+    ) {
+        // WINEVENT_SKIPOWNPROCESS: our own windows never reach this callback.
+        if !hwnd.is_null() {
+            LAST_EXTERNAL.store(hwnd, Ordering::Relaxed);
+        }
+    }
+
+    pub fn install() {
+        // SAFETY: plain Win32 calls. The hook procedure is a static function and
+        // the hook lives for the whole process; setup runs on the main thread,
+        // whose event loop pumps the out-of-context hook messages.
+        unsafe {
+            let current = GetForegroundWindow();
+            if !current.is_null() && !is_own(current) {
+                LAST_EXTERNAL.store(current, Ordering::Relaxed);
+            }
+            SetWinEventHook(
+                EVENT_SYSTEM_FOREGROUND,
+                EVENT_SYSTEM_FOREGROUND,
+                null_mut(),
+                Some(on_foreground),
+                0,
+                0,
+                WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS,
+            );
+        }
+    }
+
+    pub fn restore_if_ours() -> bool {
+        let target = LAST_EXTERNAL.load(Ordering::Relaxed);
+        if target.is_null() {
+            return false;
+        }
+        // SAFETY: the handles are only compared and passed back to user32,
+        // which validates them (IsWindow) before use.
+        unsafe {
+            let current = GetForegroundWindow();
+            if !current.is_null() && !is_own(current) {
+                return false;
+            }
+            if IsWindow(target) == 0 {
+                return false;
+            }
+            SetForegroundWindow(target) != 0
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+mod focus {
+    pub fn install() {}
+
+    pub fn restore_if_ours() -> bool {
+        false
+    }
+}
+
 /// Closing the main window quits the app instead of leaving the hidden
 /// bubble window (and the microphone engine with it) running invisibly.
 pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {

@@ -106,7 +106,8 @@ export function useDictationBubbleBridge(): void {
         const st = useDesktopStore.getState();
         const phase = bubblePhaseFor(
           st.recordingState,
-          st.dictationSource === "app" ? undefined : st.dictationOutcome,
+          st.dictationOutcome,
+          st.dictationSource,
         );
         if (FINISHED.has(phase) && dismissedGeneration === generation) {
           return "idle";

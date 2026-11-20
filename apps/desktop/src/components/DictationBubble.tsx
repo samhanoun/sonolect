@@ -44,6 +44,8 @@ export default function DictationBubble() {
     Array.from({ length: BAR_COUNT }, () => 0),
   );
   const [now, setNow] = useState(() => Date.now());
+  // False until real mic levels arrive; until then the wave breathes on its own.
+  const [hasLevels, setHasLevels] = useState(false);
   const levelsRef = useRef(levels);
 
   useEffect(() => {
@@ -56,12 +58,10 @@ export default function DictationBubble() {
         setState(event.payload),
       );
       const offLevel = await listen<number>(BUBBLE_LEVEL_EVENT, (event) => {
-        levelsRef.current = pushLevel(
-          levelsRef.current,
-          Number(event.payload) || 0,
-          BAR_COUNT,
-        );
+        const level = Number(event.payload) || 0;
+        levelsRef.current = pushLevel(levelsRef.current, level, BAR_COUNT);
         setLevels(levelsRef.current);
+        if (level > 0.03) setHasLevels(true);
       });
       if (disposed) {
         offState();
@@ -83,6 +83,7 @@ export default function DictationBubble() {
     if (state.phase !== "listening") {
       levelsRef.current = Array.from({ length: BAR_COUNT }, () => 0);
       setLevels(levelsRef.current);
+      setHasLevels(false);
       return;
     }
     const id = setInterval(() => setNow(Date.now()), 250);
@@ -97,9 +98,12 @@ export default function DictationBubble() {
         type="button"
         className="bubble bubble--idle"
         onClick={() => void send("toggle")}
-        onDoubleClick={() => void send("open-app")}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          void send("open-app");
+        }}
         aria-label={`Start dictation (${state.hotkey})`}
-        title={`Click or press ${state.hotkey} to dictate. Double-click to open Sonolect.`}
+        title={`Click or press ${state.hotkey} to dictate. Right-click to open Sonolect.`}
       >
         <span className="bubble__orb" aria-hidden="true">
           <Mic size={13} strokeWidth={2} />
@@ -113,7 +117,10 @@ export default function DictationBubble() {
     state.startedAt !== null ? formatElapsed(now - state.startedAt) : "0:00";
 
   return (
-    <div className="bubble-stack">
+    <div
+      className="bubble-stack"
+      onContextMenu={(event) => event.preventDefault()}
+    >
       <div
         className={`bubble bubble--active bubble--${phase}`}
         role="status"
@@ -137,7 +144,13 @@ export default function DictationBubble() {
         <div className="bubble__center">
           {phase === "listening" || phase === "transcribing" ? (
             <div
-              className={`bubble__wave ${phase === "transcribing" ? "is-thinking" : ""}`}
+              className={`bubble__wave ${
+                phase === "transcribing"
+                  ? "is-thinking"
+                  : hasLevels
+                    ? ""
+                    : "is-ambient"
+              }`}
               aria-hidden="true"
             >
               {levels.map((level, index) => (
