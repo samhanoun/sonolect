@@ -798,6 +798,8 @@ export const en = {
   "native.opusError": "Opus error: {reason}",
   "toast.shortcutsUnavailable":
     "The dictation shortcuts could not be set up. Another app may already use them.",
+  "error.importInProgress":
+    "An audio file is being transcribed. Record again once it has finished.",
 } as const;
 
 export type LocaleKeys = keyof typeof en;

@@ -1,11 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
-import { installMockTauri, nativeCalls } from "./support/mockTauri";
+import {
+  emitNativeEvent,
+  installMockTauri,
+  nativeCalls,
+} from "./support/mockTauri";
 
 function nav(page: Page, name: string) {
-  return page
-    .getByRole("navigation")
-    .getByRole("button", { name: new RegExp(`^${name}`) })
-    .first();
+  return page.getByRole("navigation").getByRole("button", { name }).first();
 }
 
 /** A 16 kHz mono WAV file holding a quiet tone of the given length. */
@@ -81,5 +82,47 @@ test.describe("long recordings", () => {
     await nav(page, "Library").click();
     await expect(page.getByText(/Part 79\. Part 80\./)).toBeVisible();
     expect(errors).toEqual([]);
+  });
+
+  test("a dictation waits while a file is being transcribed", async ({
+    page,
+  }) => {
+    await installMockTauri(page, []);
+    await page.goto("/");
+    await nav(page, "Transcribe").click();
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "lecture.wav",
+      mimeType: "audio/wav",
+      buffer: toneWav(600),
+    });
+    // The bubble asks for a dictation while the recorder has the file.
+    await emitNativeEvent(page, "sonolect://bubble/action", "toggle");
+    await expect(page.locator(".studio-recording-dock")).toContainText(
+      "An audio file is being transcribed. Record again once it has finished.",
+    );
+    // The file is not disturbed: one recording, finished whole.
+    await expect(page.getByText("Audio transcribed and saved.")).toBeVisible({
+      timeout: 30_000,
+    });
+    expect(await nativeCalls(page, "capture_begin")).toHaveLength(1);
+    expect(await nativeCalls(page, "capture_cancel")).toEqual([]);
+    await expect(page.getByLabel("Transcript editor")).toHaveValue(
+      /Part 200\.$/,
+    );
+  });
+
+  test("a file cannot be imported while recording", async ({ page }) => {
+    await installMockTauri(page, []);
+    await page.goto("/");
+    await nav(page, "Transcribe").click();
+    const importButton = page.getByRole("button", { name: "Import audio" });
+    await expect(importButton).toBeEnabled();
+    await page.getByRole("button", { name: "Record to add text" }).click();
+    await expect(page.locator(".studio-recording-dock")).toContainText(
+      "Listening…",
+    );
+    await expect(importButton).toBeDisabled();
+    await page.getByRole("button", { name: "Stop recording" }).click();
+    await expect(importButton).toBeEnabled();
   });
 });

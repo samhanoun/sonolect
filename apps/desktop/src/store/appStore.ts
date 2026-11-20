@@ -135,6 +135,11 @@ export type DesktopState = {
    * app's recorder reports it; empty otherwise.
    */
   liveTranscript: string;
+  /**
+   * An audio file is going through the app's recorder. The recorder holds
+   * one recording at a time, so a new one waits until the file is done.
+   */
+  importingAudio: boolean;
   polishedPreview: string;
   insertionStatus: string | undefined;
   dictionaryEntries: DictionaryEntry[];
@@ -593,6 +598,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
   voiceCapture: undefined,
   voiceError: undefined,
   liveTranscript: "",
+  importingAudio: false,
   polishedPreview: polishDictation(initialTranscriptSnapshot.transcript, {
     dictionary: loadJsonArray<DictionaryEntry>(
       SETTINGS_KEYS.dictionaryEntries,
@@ -656,6 +662,18 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
   startVoiceCapture: async (source = "app") => {
     if (!["idle", "completed", "error"].includes(get().recordingState)) return;
     set({ dictationSource: source, dictationOutcome: undefined });
+
+    // Starting now would take the recorder away from the file being
+    // transcribed and lose it.
+    if (get().importingAudio) {
+      set({
+        recordingState: "error",
+        voiceError: "error.importInProgress",
+        voiceCapture: undefined,
+        liveTranscript: "",
+      });
+      return;
+    }
 
     if (!navigator.mediaDevices?.getUserMedia) {
       set({

@@ -183,7 +183,8 @@ export function useSavedCaptures() {
     if (isTauriRuntime()) {
       // With compressed storage, a recording that just finished is turned
       // into Opus in the background; the list does not wait for it.
-      if (recordingState === "idle")
+      // A recording in progress is skipped by the recorder itself.
+      if (["idle", "completed", "error"].includes(recordingState))
         void applyCaptureFormat(nativeProviderCall).catch(() => undefined);
       // Enforce the retention setting whenever the list is refreshed.
       void applyCaptureRetention(nativeProviderCall)
@@ -330,6 +331,13 @@ export function StudioOverview({ captures }: { captures: SavedCapture[] }) {
   );
 }
 
+/** Whether a recording is being made or finished right now. */
+function isCapturing(recordingState: string) {
+  return ["requesting-permission", "recording", "uploading"].includes(
+    recordingState,
+  );
+}
+
 export function StudioTranscribe({
   onSaved,
 }: {
@@ -347,8 +355,15 @@ export function StudioTranscribe({
   const instruction =
     customInstruction ?? t("studio.transcribe.defaultInstruction");
   const allowCloud = () => useDesktopStore.getState().privacyLevel === "cloud";
+  // The app's recorder holds one recording at a time: a file is not imported
+  // while it records, and nothing is recorded while it takes a file.
+  const capturing = isCapturing(state.recordingState);
   const importAudio = async (file?: File) => {
     if (!file) return;
+    const native = isTauriRuntime();
+    if (native && isCapturing(useDesktopStore.getState().recordingState))
+      return;
+    if (native) useDesktopStore.setState({ importingAudio: true });
     setBusy(true);
     setMessage("");
     try {
@@ -449,6 +464,7 @@ export function StudioTranscribe({
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
+      if (native) useDesktopStore.setState({ importingAudio: false });
       setBusy(false);
       await onSaved();
       if (input.current) input.current.value = "";
@@ -531,7 +547,7 @@ export function StudioTranscribe({
         <button
           className="studio-button secondary"
           onClick={() => input.current?.click()}
-          disabled={busy}
+          disabled={busy || (capturing && isTauriRuntime())}
         >
           <Upload size={16} />
           {t("studio.transcribe.import")}

@@ -6,10 +6,7 @@ import {
 } from "./support/mockTauri";
 
 function nav(page: Page, name: string) {
-  return page
-    .getByRole("navigation")
-    .getByRole("button", { name: new RegExp(`^${name}`) })
-    .first();
+  return page.getByRole("navigation").getByRole("button", { name }).first();
 }
 
 function capture(id: string, durationMs: number): MockCapture {
@@ -124,6 +121,34 @@ test.describe("compressed recordings", () => {
       )
       .toBe(1);
     expect(await nativeCalls(page, "capture_finish")).toHaveLength(1);
+  });
+
+  test("a recording is compressed as soon as it is finished", async ({
+    page,
+  }) => {
+    await installMockTauri(page, []);
+    await page.goto("/");
+    await nav(page, "Settings").click();
+    await privacyCard(page)
+      .getByLabel("Save recordings as")
+      .selectOption("opus");
+    await nav(page, "Transcribe").click();
+    const before = (await nativeCalls(page, "compress_local_captures")).length;
+    await page.getByRole("button", { name: "Record to add text" }).click();
+    const dock = page.locator(".studio-recording-dock");
+    await expect(dock).toContainText(/0:0[1-9]/);
+    // Not while it records.
+    expect(await nativeCalls(page, "compress_local_captures")).toHaveLength(
+      before,
+    );
+    await page.getByRole("button", { name: "Stop recording" }).click();
+    await expect(dock).toContainText("Your words are ready");
+    // Without dismissing the dock or starting another recording.
+    await expect
+      .poll(
+        async () => (await nativeCalls(page, "compress_local_captures")).length,
+      )
+      .toBe(before + 1);
   });
 });
 

@@ -6,10 +6,7 @@ import {
 } from "./support/mockTauri";
 
 function nav(page: Page, name: string) {
-  return page
-    .getByRole("navigation")
-    .getByRole("button", { name: new RegExp(`^${name}`) })
-    .first();
+  return page.getByRole("navigation").getByRole("button", { name }).first();
 }
 
 const BUBBLE_ACTION = "sonolect://bubble/action";

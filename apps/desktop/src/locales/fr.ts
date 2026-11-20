@@ -844,4 +844,6 @@ export const fr: Record<LocaleKeys, string> = {
   "native.opusError": "Erreur Opus\u00a0: {reason}",
   "toast.shortcutsUnavailable":
     "Les raccourcis de dictée n'ont pas pu être activés. Une autre application les utilise peut-être déjà.",
+  "error.importInProgress":
+    "Un fichier audio est en cours de transcription. Réessayez une fois qu'elle est terminée.",
 };
