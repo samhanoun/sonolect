@@ -41,3 +41,33 @@ export function contrastRatio(a: string, b: string): number {
   const second = relativeLuminance(b);
   return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
 }
+
+/** The channels and alpha of rgba(r, g, b, a), each from 0 to 1. */
+function rgba(color: string): [...Rgb, number] {
+  const match =
+    /^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d*\.?\d+)\s*\)$/i.exec(
+      color.trim(),
+    );
+  if (!match) throw new Error(`Not an rgba() colour: ${color}`);
+  const [, red, green, blue, alpha] = match.map(Number) as number[];
+  return [red! / 255, green! / 255, blue! / 255, alpha!];
+}
+
+/**
+ * The opaque #RRGGBB seen when a translucent rgba() colour is drawn over
+ * `bottom` (#RGB or #RRGGBB), as a view's background is drawn over what is
+ * behind it. Over this result, contrastRatio checks glass.
+ */
+export function over(top: string, bottom: string): string {
+  const [red, green, blue, alpha] = rgba(top);
+  const base = channels(bottom);
+  return `#${[red, green, blue]
+    .map((channel, index) => {
+      const mixed = channel * alpha + base[index]! * (1 - alpha);
+      return Math.round(mixed * 255)
+        .toString(16)
+        .padStart(2, "0");
+    })
+    .join("")
+    .toUpperCase()}`;
+}
