@@ -7,7 +7,8 @@ Sonolect is a pnpm monorepo containing desktop/mobile clients, shared packages, 
 - **Clients**: desktop and mobile apps capture audio, manage user workflows, and call the API.
 - **API service**: public HTTP edge for auth-aware product APIs, user/session metadata, billing webhooks, and signed upload/download coordination.
 - **Worker service**: asynchronous processors for transcription, agent actions, billing events, and retries from Pub/Sub.
-- **Shared packages**: `@sonolect/types`, `@sonolect/validation`, `@sonolect/config`, `@sonolect/sdk`, `@sonolect/ui`, and prompt assets.
+- **Sync service**: end-to-end encrypted note sync. The apps call it directly with a vault key, and it never sees a key or a word of a note (see [security.md](security.md#note-sync)).
+- **Shared packages**: `@sonolect/types`, `@sonolect/validation`, `@sonolect/config`, `@sonolect/sdk`, `@sonolect/sync-core`, `@sonolect/ui`, and prompt assets.
 - **Infrastructure**: GCP Cloud Run, Firestore, Cloud SQL for relational state, Cloud Storage for audio/artifacts, Pub/Sub for queues, and Secret Manager for runtime secrets.
 
 ## Data flow

@@ -13,7 +13,9 @@ COPY tooling/service-build tooling/service-build
 COPY services/sync-service services/sync-service
 RUN pnpm install --frozen-lockfile --filter "@sonolect/sync-service..."
 # Bundle the service and the workspace packages it uses into dist/index.js,
-# then collect only its production dependencies.
+# then collect only its production dependencies. They include the Firestore
+# client, which the bundle imports only for SONOLECT_SYNC_STORE=firestore.
+# The SQLite store uses node:sqlite, which Node 26 runs without a flag.
 RUN pnpm --filter "@sonolect/sync-service" build \
   && pnpm --filter "@sonolect/sync-service" deploy --prod /out
 
