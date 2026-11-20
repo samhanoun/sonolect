@@ -465,7 +465,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
             });
             return;
           }
-          // The Capture screen shows and announces `latest` once ready.
+          // Capture shows `latest` once ready; the root layout announces it.
           set({
             capture: {
               ...idleCapture,

@@ -182,7 +182,9 @@ function RecordingDock() {
       </span>
       <button
         onClick={
-          recordingState === "recording" ? toggleRecording : resetVoiceCapture
+          recordingState === "recording"
+            ? () => toggleRecording()
+            : resetVoiceCapture
         }
         disabled={processing}
       >

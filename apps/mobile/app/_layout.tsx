@@ -21,8 +21,10 @@ import { Inter_600SemiBold } from "@expo-google-fonts/inter/600SemiBold";
 import { JetBrainsMono_500Medium } from "@expo-google-fonts/jetbrains-mono/500Medium";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
+import { syncVoiceKeyboardPreferences } from "../modules/sonolect-voice-keyboard";
 import { strings, type Strings } from "../src/i18n";
 import { noticeText } from "../src/notices";
+import { systemServiceAllowedWithoutAsking } from "../src/speechPolicy";
 import { useCompanionStore } from "../src/store";
 import { MIN_TOUCH_SIZE } from "../src/ui/components";
 import { confirm } from "../src/ui/confirm";
@@ -82,11 +84,42 @@ function NoticeAnnouncer() {
   return null;
 }
 
+/**
+ * Screen readers hear a dictation start, stop and end once, on Capture and
+ * on Quick dictation alike, instead of every partial result.
+ */
+function CaptureAnnouncer() {
+  const status = useCompanionStore((s) => s.capture.status);
+  const latest = useCompanionStore((s) => s.latest);
+  const announced = useRef(status);
+  useEffect(() => {
+    const previous = announced.current;
+    announced.current = status;
+    if (previous === status) return;
+    const t = strings(useCompanionStore.getState().settings.uiLanguage);
+    if (status === "listening") {
+      AccessibilityInfo.announceForAccessibility(t.capture.a11yStarted);
+    } else if (status === "processing") {
+      AccessibilityInfo.announceForAccessibility(t.capture.a11yStopped);
+    } else if (status === "ready" && latest) {
+      AccessibilityInfo.announceForAccessibility(
+        `${t.capture.a11yResult} ${latest.refinedText.slice(0, 300)}`,
+      );
+    }
+  }, [status, latest]);
+  return null;
+}
+
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts(FONTS);
   const hydrate = useCompanionStore((s) => s.hydrate);
   const hydrated = useCompanionStore((s) => s.hydrated);
   const uiLanguage = useCompanionStore((s) => s.settings.uiLanguage);
+  const privacyLevel = useCompanionStore((s) => s.settings.privacyLevel);
+  const allowSystemService = useCompanionStore(
+    (s) => s.settings.allowSystemService,
+  );
+  const dictationLanguage = useCompanionStore((s) => s.settings.language);
   const t = strings(uiLanguage);
   const reducedMotion = useReducedMotion();
 
@@ -95,6 +128,21 @@ export default function RootLayout() {
     hydrationStarted = true;
     void hydrate();
   }, [hydrate]);
+
+  // The Android voice keyboard follows the app's privacy and language
+  // settings: it may use the system speech service only where the app may
+  // without asking, since a keyboard can't ask.
+  useEffect(() => {
+    if (hydrated) {
+      syncVoiceKeyboardPreferences({
+        allowSystemService: systemServiceAllowedWithoutAsking({
+          privacyLevel,
+          allowSystemService,
+        }),
+        language: dictationLanguage,
+      });
+    }
+  }, [hydrated, privacyLevel, allowSystemService, dictationLanguage]);
 
   const ready = (fontsLoaded || Boolean(fontError)) && hydrated;
   useEffect(() => {
@@ -107,6 +155,7 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <StatusBar style="light" />
       <NoticeAnnouncer />
+      <CaptureAnnouncer />
       <Tabs
         // A floating glass capsule over the page; it hides itself while the
         // keyboard is up (android-9).
@@ -128,6 +177,17 @@ export default function RootLayout() {
         <Tabs.Screen
           name="settings"
           options={tabOptions(t, t.tabs.settings, 4)}
+        />
+        <Tabs.Screen
+          name="dictate"
+          options={{
+            // Reachable by link (sonolect://dictate) but not shown as a tab.
+            // `href: null` would make expo-router redirect away from it.
+            tabBarButton: () => null,
+            tabBarItemStyle: { display: "none" },
+            title: t.dictate.title,
+            tabBarStyle: { display: "none" },
+          }}
         />
         {/* Unknown links redirect to Capture; never a tab. */}
         <Tabs.Screen name="+not-found" options={{ href: null }} />

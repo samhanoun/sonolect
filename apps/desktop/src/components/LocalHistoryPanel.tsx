@@ -97,7 +97,7 @@ export default function LocalHistoryPanel() {
             dictate.
           </p>
           <button
-            onClick={toggleRecording}
+            onClick={() => toggleRecording()}
             className="bg-white text-black rounded-xl px-6 py-3"
           >
             {recordingState === "recording"
