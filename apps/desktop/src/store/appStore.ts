@@ -218,6 +218,8 @@ let activeStartedAt = 0;
 let captureTimer: ReturnType<typeof setTimeout> | undefined;
 let cloudAbort: AbortController | undefined;
 let permissionCancelled = false;
+/** Why the recorder stopped by itself (the four-hour limit, say). */
+let stallNotice: string | undefined;
 let discardCapture = false;
 /** Bumped when a capture is cancelled mid-transcription so its result is dropped. */
 let captureGeneration = 0;
@@ -326,7 +328,8 @@ async function completeCapture(
         api.status === "offline" ? ("error" as const) : ("completed" as const),
       voiceCapture: capture,
       liveTranscript: "",
-      voiceError: api.status === "offline" ? api.message : undefined,
+      // A recording that stopped by itself is kept: its note says why.
+      voiceError: api.status === "offline" ? api.message : stallNotice,
     };
     const savedSegments = api.captureId
       ? segmentsFromCapture({
@@ -677,6 +680,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     };
     const onlineChoice = { ...useProviderStore.getState().preferences.stt };
     permissionCancelled = false;
+    stallNotice = undefined;
     discardCapture = false;
     cloudAbort = new AbortController();
     set({
@@ -720,7 +724,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
             // The recorder takes no more audio (four hours, say): keep what
             // was recorded and say why it stopped.
             onStalled: (message) => {
-              get().addToast(message);
+              stallNotice = message;
               get().stopVoiceCapture();
             },
           },
@@ -1351,7 +1355,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     set((state) => ({ toasts: [...state.toasts, { id, message }] }));
     setTimeout(() => {
       set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) }));
-    }, 3000);
+    }, 6000);
   },
   transformTranscript: () => {
     const { transforming, transcript, addToast } = get();

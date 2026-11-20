@@ -231,6 +231,22 @@ function RecordingDock() {
     </div>
   );
 }
+/**
+ * Short notices from anywhere in the app: a failed shortcut registration,
+ * a microphone that was replaced by the default one. The region is always
+ * there, so a screen reader announces a notice when one appears.
+ */
+function StudioNotices() {
+  const toasts = useDesktopStore((state) => state.toasts);
+  const t = useT();
+  return (
+    <div className="studio-notices" role="status">
+      {toasts.map((toast) => (
+        <p key={toast.id}>{t.message(toast.message)}</p>
+      ))}
+    </div>
+  );
+}
 export default function StudioShell() {
   const {
     activeView,
@@ -361,6 +377,7 @@ export default function StudioShell() {
         {pages[activeView] || pages.home}
       </main>
       <RecordingDock />
+      <StudioNotices />
       <QuickNavigation />
     </div>
   );

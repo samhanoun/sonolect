@@ -230,7 +230,7 @@ function App() {
     }).then((registration) => {
       unregister = registration.unregister;
       if (!registration.enabled && isTauriRuntime()) {
-        useDesktopStore.getState().addToast("toast.error");
+        useDesktopStore.getState().addToast("toast.shortcutsUnavailable");
       }
     });
 
@@ -657,24 +657,6 @@ function TranscriptDetail() {
 }
 
 /* ── Product Setup Panels ────────────────────────────────────── */
-
-function ToastContainer() {
-  const toasts = useDesktopStore((state) => state.toasts);
-  const t = useT();
-  if (toasts.length === 0) return null;
-  return (
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
-      {toasts.map((toast) => (
-        <div
-          key={toast.id}
-          className="px-4 py-2.5 rounded-xl bg-[#0C0C0C] border border-white/10 text-xs text-white shadow-2xl"
-        >
-          {t(toast.message as LocaleKeys)}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 /* ── Mount ───────────────────────────────────────────────────── */
 

@@ -138,6 +138,48 @@ test.describe("dictation with the app's recorder", () => {
     expect(await nativeCalls(page, "capture_append")).toEqual([]);
   });
 
+  test("a recording that fills the recorder is kept, with the reason", async ({
+    page,
+  }) => {
+    await installMockTauri(page, [], { recorderLimitMs: 4000 });
+    await page.goto("/");
+    await nav(page, "Transcribe").click();
+    await page.getByRole("button", { name: "Record to add text" }).click();
+    const dock = page.locator(".studio-recording-dock");
+    // Nobody stops it: the recorder refuses more audio and the app ends the
+    // recording by itself, keeping what was said.
+    await expect(dock).toContainText("Your words are ready", {
+      timeout: 15_000,
+    });
+    await expect(dock).toContainText(
+      "The recording reached the four-hour limit.",
+    );
+    await expect(page.getByLabel("Transcript editor")).toHaveValue(/^Part 1\./);
+    expect(await nativeCalls(page, "capture_finish")).toHaveLength(1);
+    expect(await nativeCalls(page, "capture_cancel")).toEqual([]);
+  });
+
+  test("says so when recording falls back to the default microphone", async ({
+    page,
+  }) => {
+    await installMockTauri(page, []);
+    await page.addInitScript(() =>
+      window.localStorage.setItem("sonolect.micDeviceId", "unplugged-device"),
+    );
+    await page.goto("/");
+    await nav(page, "Transcribe").click();
+    await page.getByRole("button", { name: "Record to add text" }).click();
+    await expect(
+      page.getByText(
+        "Chosen microphone not found. Recording with the system default.",
+      ),
+    ).toBeVisible();
+    await expect(page.locator(".studio-recording-dock")).toContainText(
+      "Listening…",
+    );
+    await page.getByRole("button", { name: "Stop recording" }).click();
+  });
+
   test("falls back to the short path when the webview keeps audio suspended", async ({
     page,
   }) => {

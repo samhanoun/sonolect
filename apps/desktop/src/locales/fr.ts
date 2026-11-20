@@ -842,4 +842,6 @@ export const fr: Record<LocaleKeys, string> = {
   "native.cannotCompress":
     "Impossible d'écrire l'audio compressé\u00a0: {reason}",
   "native.opusError": "Erreur Opus\u00a0: {reason}",
+  "toast.shortcutsUnavailable":
+    "Les raccourcis de dictée n'ont pas pu être activés. Une autre application les utilise peut-être déjà.",
 };

@@ -31,6 +31,9 @@ const toneWav = readFileSync(
  * counted, and every three seconds of it produces one segment of live text
  * ("Part 1.", "Part 2." and so on) as a `capture-partial` event.
  *
+ * With `recorderLimitMs`, the recorder is full after that much audio and
+ * refuses more, as the real one does after four hours.
+ *
  * `compress_local_captures` compresses each saved recording once and reports
  * what that freed. Pasting into another app always succeeds.
  */
@@ -40,10 +43,12 @@ export async function installMockTauri(
   options: {
     /** false: the recorder cannot start, as when no speech model is installed. */
     recorder?: boolean;
+    /** The recorder takes this much audio, then refuses more. */
+    recorderLimitMs?: number;
   } = {},
 ) {
   await page.addInitScript(
-    ({ captures, toneWav, recorder }) => {
+    ({ captures, toneWav, recorder, recorderLimitMs }) => {
       window.localStorage.clear();
       const library = structuredClone(captures);
       /** Recordings already turned into Opus. */
@@ -107,6 +112,8 @@ export async function installMockTauri(
               calls.push({ command, args: { capture, bytes: pcm.length } });
               if (!live || live.id !== capture)
                 throw "This recording is no longer in progress.";
+              if (recorderLimitMs && live.bytes >= recorderLimitMs * 32)
+                throw "The recording reached the four-hour limit.";
               live.bytes += pcm.length;
               hear(false);
               return Math.round(live.bytes / 32);
@@ -212,7 +219,12 @@ export async function installMockTauri(
         },
       });
     },
-    { captures, toneWav, recorder: options.recorder ?? true },
+    {
+      captures,
+      toneWav,
+      recorder: options.recorder ?? true,
+      recorderLimitMs: options.recorderLimitMs,
+    },
   );
 }
 

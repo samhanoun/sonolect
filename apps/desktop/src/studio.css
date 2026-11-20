@@ -955,6 +955,28 @@ body {
   font-size: 12px;
   max-width: 650px;
 }
+.studio-notices {
+  position: fixed;
+  top: 18px;
+  right: 22px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 360px;
+  pointer-events: none;
+}
+.studio-notices p {
+  margin: 0;
+  background: #1f3429;
+  color: #e6f2db;
+  border: 1px solid #526c47;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 10px 35px #19291833;
+}
 .studio-recording-dock > span {
   display: flex;
   flex-direction: column;

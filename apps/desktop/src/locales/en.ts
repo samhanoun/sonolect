@@ -796,6 +796,8 @@ export const en = {
   "native.invalidCompressed": "Invalid compressed audio.",
   "native.cannotCompress": "Cannot write compressed audio: {reason}",
   "native.opusError": "Opus error: {reason}",
+  "toast.shortcutsUnavailable":
+    "The dictation shortcuts could not be set up. Another app may already use them.",
 } as const;
 
 export type LocaleKeys = keyof typeof en;
