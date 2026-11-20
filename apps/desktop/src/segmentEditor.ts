@@ -8,6 +8,11 @@ export type TranscriptSegment = {
   captureId?: string;
   /** The timing is an estimate, not what the speech engine reported. */
   approx?: boolean;
+  /**
+   * Joined from more than one recording. It has no audio of its own, and the
+   * transcript it sits in can no longer be saved back to a single recording.
+   */
+  mixed?: boolean;
 };
 
 function createSegmentId(index: number, text: string) {
@@ -55,33 +60,7 @@ export function mergeTranscriptSegments(
   firstId: string,
   secondId: string,
 ): TranscriptSegment[] {
-  const firstIndex = segments.findIndex((segment) => segment.id === firstId);
-  const secondIndex = segments.findIndex((segment) => segment.id === secondId);
-  if (
-    firstIndex === -1 ||
-    secondIndex === -1 ||
-    Math.abs(firstIndex - secondIndex) !== 1
-  ) {
-    return segments;
-  }
-
-  const lowerIndex = Math.min(firstIndex, secondIndex);
-  const upperIndex = Math.max(firstIndex, secondIndex);
-  const first = segments[lowerIndex]!;
-  const second = segments[upperIndex]!;
-  const merged: TranscriptSegment = {
-    ...first,
-    text: `${first.text.trim()} ${second.text.trim()}`.trim(),
-    endMs: second.endMs,
-  };
-  const speaker = first.speaker || second.speaker;
-  if (speaker) merged.speaker = speaker;
-
-  return [
-    ...segments.slice(0, lowerIndex),
-    merged,
-    ...segments.slice(upperIndex + 1),
-  ];
+  return mergeSegmentRun(segments, [firstId, secondId]);
 }
 
 export function splitTranscriptSegment(
@@ -282,6 +261,7 @@ function redistribute(
   const sameCapture = replaced.every(
     (segment) => segment.captureId === first.captureId,
   );
+  const mixed = fromSeveralRecordings(replaced);
   const sameSpeaker = replaced.every(
     (segment) => segment.speaker === first.speaker,
   );
@@ -303,11 +283,24 @@ function redistribute(
       endMs,
       approx: true,
     };
-    if (sameCapture && first.captureId) segment.captureId = first.captureId;
+    if (sameCapture && !mixed && first.captureId)
+      segment.captureId = first.captureId;
+    if (mixed) segment.mixed = true;
     if (sameSpeaker && first.speaker) segment.speaker = first.speaker;
     cursor = endMs;
     return segment;
   });
+}
+
+/**
+ * Whether these segments were spoken in more than one recording. Typed text
+ * has no recording and does not count.
+ */
+function fromSeveralRecordings(segments: TranscriptSegment[]): boolean {
+  const ids = new Set(
+    segments.map((segment) => segment.captureId).filter(Boolean),
+  );
+  return ids.size > 1 || segments.some((segment) => segment.mixed);
 }
 
 export type SavedCaptureSegment = {
@@ -410,25 +403,38 @@ export function mergeSegmentRun(
   const run = mergeableRun(segments, selectedIds);
   if (!run.length) return segments;
   const first = run[0]!;
-  const sameCapture = run.every(
-    (segment) => segment.captureId === first.captureId,
-  );
-  const merged: TranscriptSegment = {
-    id: first.id,
-    text: run
-      .map((segment) => segment.text.trim())
-      .filter(Boolean)
-      .join(" "),
-    startMs: first.startMs,
-    // Segments from different recordings have no shared timeline.
-    endMs: sameCapture
-      ? Math.max(...run.map((segment) => segment.endMs))
-      : first.endMs,
-  };
+  const text = run
+    .map((segment) => segment.text.trim())
+    .filter(Boolean)
+    .join(" ");
+  let merged: TranscriptSegment;
+  if (fromSeveralRecordings(run)) {
+    // Recordings share no timeline: the result belongs to none of them.
+    merged = {
+      id: first.id,
+      text,
+      startMs: first.startMs,
+      endMs: first.endMs,
+      approx: true,
+      mixed: true,
+    };
+  } else {
+    // Segments can be moved, so the first one shown is not always the first
+    // one spoken: the merged range covers all the audio it came from.
+    const recorded = run.filter((segment) => segment.captureId);
+    const timed = recorded.length ? recorded : run;
+    merged = {
+      id: first.id,
+      text,
+      startMs: Math.min(...timed.map((segment) => segment.startMs)),
+      endMs: Math.max(...timed.map((segment) => segment.endMs)),
+    };
+    const captureId = recorded[0]?.captureId;
+    if (captureId) merged.captureId = captureId;
+    if (run.some((segment) => segment.approx)) merged.approx = true;
+  }
   const speaker = run.find((segment) => segment.speaker)?.speaker;
   if (speaker) merged.speaker = speaker;
-  if (first.captureId) merged.captureId = first.captureId;
-  if (run.some((segment) => segment.approx)) merged.approx = true;
   const start = segments.indexOf(first);
   return [
     ...segments.slice(0, start),
@@ -499,8 +505,6 @@ export function segmentAtTime(
 export function singleCaptureId(
   segments: TranscriptSegment[],
 ): string | undefined {
-  const ids = new Set(
-    segments.map((segment) => segment.captureId).filter(Boolean),
-  );
-  return ids.size === 1 ? [...ids][0] : undefined;
+  if (fromSeveralRecordings(segments)) return undefined;
+  return segments.find((segment) => segment.captureId)?.captureId;
 }

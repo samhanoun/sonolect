@@ -214,6 +214,79 @@ describe("reordering, merging and speakers", () => {
     assert.equal(merged[0]!.captureId, "17-1");
   });
 
+  it("covers all the source audio when merging segments that were moved", () => {
+    const [a, b, c] = recorded();
+    // The second segment now sits above the first one.
+    const moved = moveTranscriptSegment([a!, b!, c!], b!.id, "up");
+    const merged = mergeSegmentRun(moved, [a!.id, b!.id]);
+    assert.equal(merged.length, 2);
+    assert.equal(merged[0]!.startMs, a!.startMs);
+    assert.equal(merged[0]!.endMs, b!.endMs);
+    assert.equal(merged[0]!.captureId, "17-1");
+  });
+
+  it("keeps the recording's timing when typed text is merged into it", () => {
+    const [a] = recorded();
+    const [typed] = textToSegments("A note added by hand.");
+    const merged = mergeSegmentRun([typed!, a!], [typed!.id, a!.id]);
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0]!.captureId, "17-1");
+    assert.equal(merged[0]!.startMs, a!.startMs);
+    assert.equal(merged[0]!.endMs, a!.endMs);
+    assert.equal(singleCaptureId(merged), "17-1");
+  });
+
+  it("gives a merge across two recordings no recording of its own", () => {
+    const first = segmentsFromCapture({
+      id: "17-1",
+      durationMs: 2000,
+      transcript: "From the first.",
+    });
+    const second = segmentsFromCapture({
+      id: "20-1",
+      durationMs: 1000,
+      transcript: "From the second.",
+    });
+    const list = [...first, ...second];
+    const merged = mergeSegmentRun(list, [list[0]!.id, list[1]!.id]);
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0]!.text, "From the first. From the second.");
+    assert.equal(merged[0]!.captureId, undefined);
+    assert.equal(merged[0]!.mixed, true);
+    // Nothing can be saved over the first recording any more, even after
+    // more edits to the merged segment.
+    assert.equal(singleCaptureId(merged), undefined);
+    const split = splitTranscriptSegment(merged, merged[0]!.id, 15);
+    assert.equal(split.length, 2);
+    assert.equal(singleCaptureId(split), undefined);
+    const again = mergeSegmentRun(
+      [...recorded(), ...split],
+      [recorded()[2]!.id, split[0]!.id],
+    );
+    assert.equal(singleCaptureId(again), undefined);
+  });
+
+  it("marks paragraphs joined in the text view across two recordings", () => {
+    const first = segmentsFromCapture({
+      id: "17-1",
+      durationMs: 2000,
+      transcript: "From the first.",
+    });
+    const second = segmentsFromCapture({
+      id: "20-1",
+      durationMs: 1000,
+      transcript: "From the second.",
+    });
+    const after = resyncSegments(
+      [...first, ...second],
+      "From the first. From the second.",
+    );
+    assert.equal(after.length, 1);
+    assert.equal(after[0]!.captureId, undefined);
+    assert.equal(after[0]!.mixed, true);
+    assert.equal(singleCaptureId(after), undefined);
+  });
+
   it("does not merge segments that are apart, or a single one", () => {
     const list = recorded();
     assert.equal(mergeSegmentRun(list, [list[0]!.id, list[2]!.id]), list);
