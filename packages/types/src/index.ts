@@ -287,53 +287,6 @@ export interface SyncManifest {
   items: SyncManifestItem[];
 }
 
-export interface SyncPullRequest {
-  userId: string;
-  since?: string;
-  limit?: number;
-}
-
-export interface SyncPullResponse {
-  cursor: string;
-  hasMore: boolean;
-  manifest: SyncManifest;
-  records: Array<{
-    entity: SyncEntityType;
-    id: string;
-    data: unknown;
-    updatedAt: string;
-    deleted: boolean;
-  }>;
-}
-
-export interface SyncPushChange {
-  clientChangeId: string;
-  entity: SyncEntityType;
-  id: string;
-  updatedAt: string;
-  deleted?: boolean;
-  data?: unknown;
-}
-
-export interface SyncPushRequest {
-  userId: string;
-  deviceId: string;
-  changes: SyncPushChange[];
-}
-
-export interface SyncPushResponse {
-  accepted: Array<{
-    clientChangeId: string;
-    serverId: string;
-    updatedAt: string;
-  }>;
-  conflicts: Array<{
-    clientChangeId: string;
-    serverVersion: unknown;
-    reason: string;
-  }>;
-}
-
 export interface ListResponse<T> {
   items: T[];
   nextCursor?: string;

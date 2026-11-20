@@ -255,27 +255,6 @@ export const trackUsageSchema = z.object({
     .optional(),
 });
 
-export const syncPullSchema = z.object({
-  userId: userIdSchema,
-  since: z.string().datetime().optional(),
-  limit: z.number().int().min(1).max(500).default(100),
-});
-
-export const syncPushChangeSchema = z.object({
-  clientChangeId: recordIdSchema,
-  entity: z.enum(["user", "transcript", "command", "usage"]),
-  id: recordIdSchema,
-  updatedAt: z.string().datetime(),
-  deleted: z.boolean().optional(),
-  data: z.unknown().optional(),
-});
-
-export const syncPushSchema = z.object({
-  userId: userIdSchema,
-  deviceId: recordIdSchema,
-  changes: z.array(syncPushChangeSchema).max(500),
-});
-
 export const workerTaskKindSchema = z.enum(["audio", "agent", "billing"]);
 
 export const enqueueWorkerTaskSchema = z.object({
@@ -305,6 +284,4 @@ export type AgentCommandExecutionInput = z.infer<
 export type SyncManifestQuery = z.infer<typeof syncManifestQuerySchema>;
 export type CreateDictationInput = CreateTranscriptInput;
 export type TrackUsageInput = z.infer<typeof trackUsageSchema>;
-export type SyncPullInput = z.infer<typeof syncPullSchema>;
-export type SyncPushInput = z.infer<typeof syncPushSchema>;
 export type EnqueueWorkerTaskInput = z.infer<typeof enqueueWorkerTaskSchema>;
