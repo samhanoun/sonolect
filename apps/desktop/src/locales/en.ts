@@ -484,7 +484,7 @@ export const en = {
   "studio.settings.bubbleDictating": "Only while dictating",
   "studio.settings.bubbleOff": "Off",
   "studio.settings.storageHint":
-    "Recordings are limited to three minutes and saved on this device for as long as you choose above. API keys use Windows Credential Manager.",
+    "Recordings can run up to four hours and are saved on this device for as long as you choose above. API keys use Windows Credential Manager.",
   "studio.settings.previewNotice":
     "This is the browser preview. Model installation and local speech run in the Windows app.",
   "studio.privacy.title": "Privacy & retention",
@@ -744,6 +744,88 @@ export const en = {
   "native.editTooLarge": "The edited transcript is too large to save.",
   "native.segmentOrder": "A segment ends before it starts.",
   "native.speakerTooLong": "Speaker names can have up to 80 characters.",
+  "capture.recorderBehind":
+    "The recorder is not keeping up with the microphone. The recording was stopped and saved.",
+  "native.fourHourLimit": "The recording reached the four-hour limit.",
+  "native.notInProgress": "This recording is no longer in progress.",
+  "native.cannotReadRecording": "Cannot read recording: {reason}",
+  "studio.transcribe.fileTooLargeApp": "Choose an audio file under 100 MB.",
+  "studio.transcribe.reading": "Reading the audio file…",
+  "studio.transcribe.progress": "Transcribing… {done} of {total}",
+  "studio.mic.title": "Microphone",
+  "studio.mic.meta": "Which input records your voice",
+  "studio.mic.choose": "Record with",
+  "studio.mic.systemDefault": "System default",
+  "studio.mic.numbered": "Microphone {position}",
+  "studio.mic.notConnected": "Chosen microphone (not connected)",
+  "studio.mic.notConnectedHint":
+    "The microphone you chose is not connected. Until it is back, recordings use the system default.",
+  "studio.mic.namesHint":
+    "Microphone names appear once access is allowed. Run a test to allow it.",
+  "studio.mic.test": "Test microphone",
+  "studio.mic.stopTest": "Stop test",
+  "studio.mic.testHint":
+    "Speak normally: the bar should move with your voice. Nothing is recorded.",
+  "studio.mic.level": "Microphone level",
+  "studio.mic.fellBack":
+    "The chosen microphone is not connected, so the system default is used.",
+  "toast.micFellBack":
+    "Chosen microphone not found. Recording with the system default.",
+  "studio.storage.format": "Save recordings as",
+  "studio.storage.wav": "Original quality (WAV)",
+  "studio.storage.opus": "Compressed (Opus, 10× smaller)",
+  "studio.storage.compressNow": "Compress saved recordings",
+  "studio.storage.compressing": "Compressing…",
+  "studio.storage.compressed.one":
+    "{count} recording compressed, {size} freed.",
+  "studio.storage.compressed.other":
+    "{count} recordings compressed, {size} freed.",
+  "studio.storage.nothingToCompress":
+    "Every saved recording is already compressed.",
+  "studio.storage.failed.one":
+    "{count} recording could not be compressed and stays as it is.",
+  "studio.storage.failed.other":
+    "{count} recordings could not be compressed and stay as they are.",
+  "studio.storage.savedOpus":
+    "New recordings are compressed once they are transcribed. You can still play them and transcribe them again.",
+  "studio.storage.savedWav":
+    "New recordings are kept in original quality. Recordings already compressed stay compressed.",
+  "studio.transcribe.liveLabel": "Heard so far",
+  "capture.keptForRetry":
+    "{error} The recording is in your Library, where you can transcribe it again.",
+  "native.invalidCompressed": "Invalid compressed audio.",
+  "native.cannotCompress": "Cannot write compressed audio: {reason}",
+  "native.opusError": "Opus error: {reason}",
+  "toast.shortcutsUnavailable":
+    "The dictation shortcuts could not be set up. Another app may already use them.",
+  "error.importInProgress":
+    "An audio file is being transcribed. Record again once it has finished.",
+  "studio.source.label": "Record from",
+  "studio.source.microphone": "The microphone",
+  "studio.source.system": "This computer's sound",
+  "studio.source.systemHint":
+    "The record button records what is playing on this computer, such as a meeting or a video. Dictation with the hotkeys or the bubble still uses the microphone.",
+  "studio.dock.recordingSystem": "Recording computer sound…",
+  "native.noPlaybackDevice": "There is no playback device to record.",
+  "native.playbackFormat": "Cannot read the playback format: {reason}",
+  "native.playbackNoFormat": "The playback device reports no audio format.",
+  "native.playbackUnsupported": "Unsupported playback format: {format}.",
+  "native.systemAudioCannotStart":
+    "Cannot start recording system audio: {reason}",
+  "native.systemAudioCannotRecord": "Cannot record system audio: {reason}",
+  "native.systemAudioStoppedReason": "System audio stopped: {reason}",
+  "native.systemAudioStopped": "System audio stopped.",
+  "native.systemAudioStoppedUnexpectedly": "System audio stopped unexpectedly.",
+  "native.systemAudioDidNotStart": "System audio did not start.",
+  "native.systemAudioUnavailable":
+    "System audio capture is not available on this platform.",
+  "native.systemRecorderCannotStart":
+    "Cannot start the system audio recorder: {reason}",
+  "native.systemRecorderCannotRead": "Cannot read the system audio recorder.",
+  "native.noMonitorSource": "No PulseAudio monitor source found.",
+  "native.pactlFailed": "pactl failed: {reason}",
+  "native.systemAudioBusy": "System audio is unavailable.",
+  "native.ffmpegNeeded": "ffmpeg is needed to record system audio.",
 } as const;
 
 export type LocaleKeys = keyof typeof en;

@@ -351,7 +351,9 @@ phone-only build; turning the API back on changes them.
     Settings.
 - **Notes, dictionary and snippets** stay on the phone (AsyncStorage).
   Android backups are off (`allowBackup: false`). _Ephemeral_ saves nothing.
-  _Clear history_ and _Erase all data_ delete them.
+  _Clear history_ and _Erase all data_ delete them. _Keep notes for_
+  (forever by default; 1, 7, 30 or 90 days) deletes older notes at launch
+  and whenever the app comes back to the foreground; pinned notes stay.
 - **Recordings** are not kept: each one is deleted once read, and leftovers
   in the app cache are deleted at the next start.
 - **Read aloud** uses the phone's voices. Android voices that need the

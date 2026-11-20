@@ -18,6 +18,8 @@ import {
 import { useDesktopStore, type ViewId } from "../store/appStore";
 import { useProviderStore, setProviderMode } from "../providerSettings";
 import { useT, type LocaleKeys } from "../i18n";
+import { isTauriRuntime } from "../desktopNative";
+import { formatTimestamp } from "../lib/format";
 import StudioModels from "./StudioModels";
 import {
   StudioOverview,
@@ -156,10 +158,45 @@ function QuickNavigation() {
     </dialog>
   );
 }
+/** How long the current recording has run, ticking once a second. */
+function useElapsedMs(running: boolean) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!running) return;
+    const startedAt = Date.now();
+    setElapsed(0);
+    const timer = setInterval(() => setElapsed(Date.now() - startedAt), 1000);
+    return () => clearInterval(timer);
+  }, [running]);
+  return elapsed;
+}
+
+/** The end of the live text: the dock has room for a line or two. */
+function liveTail(text: string, max = 120) {
+  const trimmed = text.trim();
+  if (trimmed.length <= max) return trimmed;
+  const tail = trimmed.slice(-max);
+  // Start at a word, not in the middle of one.
+  return `…${tail.slice(tail.indexOf(" ") + 1)}`;
+}
+
 function RecordingDock() {
-  const { recordingState, voiceError, toggleRecording, resetVoiceCapture } =
-    useDesktopStore();
+  const {
+    recordingState,
+    voiceError,
+    liveTranscript,
+    toggleRecording,
+    resetVoiceCapture,
+    captureSource,
+    dictationSource,
+  } = useDesktopStore();
   const t = useT();
+  // Only a recording started here can take the computer's sound.
+  const listening =
+    captureSource === "system" && dictationSource === "app" && isTauriRuntime()
+      ? "studio.dock.recordingSystem"
+      : "studio.dock.listening";
+  const elapsed = useElapsedMs(recordingState === "recording");
   if (recordingState === "idle") return null;
   const processing =
     recordingState === "uploading" ||
@@ -172,13 +209,20 @@ function RecordingDock() {
       <AudioLines size={24} />
       <span>
         {recordingState === "recording"
-          ? t("studio.dock.listening")
+          ? `${t(listening)} ${formatTimestamp(elapsed)}`
           : processing
             ? t("studio.dock.processing")
             : recordingState === "error"
               ? t("studio.dock.error")
               : t("studio.dock.ready")}
         {voiceError && <small>{t.message(voiceError)}</small>}
+        {liveTranscript && (recordingState === "recording" || processing) && (
+          // Not announced: the dock is a status region and this changes
+          // every few seconds. The finished transcript is what gets read.
+          <small className="studio-dock-live" aria-hidden="true">
+            {liveTail(liveTranscript)}
+          </small>
+        )}
       </span>
       <button
         onClick={
@@ -192,6 +236,22 @@ function RecordingDock() {
           ? t("studio.dock.stop")
           : t("studio.dock.dismiss")}
       </button>
+    </div>
+  );
+}
+/**
+ * Short notices from anywhere in the app: a failed shortcut registration,
+ * a microphone that was replaced by the default one. The region is always
+ * there, so a screen reader announces a notice when one appears.
+ */
+function StudioNotices() {
+  const toasts = useDesktopStore((state) => state.toasts);
+  const t = useT();
+  return (
+    <div className="studio-notices" role="status">
+      {toasts.map((toast) => (
+        <p key={toast.id}>{t.message(toast.message)}</p>
+      ))}
     </div>
   );
 }
@@ -325,6 +385,7 @@ export default function StudioShell() {
         {pages[activeView] || pages.home}
       </main>
       <RecordingDock />
+      <StudioNotices />
       <QuickNavigation />
     </div>
   );

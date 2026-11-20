@@ -491,7 +491,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.settings.bubbleDictating": "Seulement pendant la dictée",
   "studio.settings.bubbleOff": "Jamais",
   "studio.settings.storageHint":
-    "Les enregistrements sont limités à trois minutes et conservés sur cet appareil pendant la durée choisie ci-dessus. Les clés API utilisent le Gestionnaire d'identification Windows.",
+    "Les enregistrements peuvent durer jusqu'à quatre heures et sont conservés sur cet appareil pendant la durée choisie ci-dessus. Les clés API utilisent le Gestionnaire d'identification Windows.",
   "studio.settings.previewNotice":
     "Ceci est l'aperçu dans le navigateur. L'installation des modèles et la reconnaissance locale fonctionnent dans l'application Windows.",
   "studio.privacy.title": "Confidentialité et conservation",
@@ -786,4 +786,99 @@ export const fr: Record<LocaleKeys, string> = {
   "native.segmentOrder": "Un segment se termine avant de commencer.",
   "native.speakerTooLong":
     "Les noms d'intervenants peuvent contenir jusqu'à 80 caractères.",
+  "capture.recorderBehind":
+    "L'enregistreur ne suit plus le microphone. L'enregistrement a été arrêté et sauvegardé.",
+  "native.fourHourLimit":
+    "L'enregistrement a atteint la limite de quatre heures.",
+  "native.notInProgress": "Cet enregistrement n'est plus en cours.",
+  "native.cannotReadRecording":
+    "Impossible de lire l'enregistrement\u00a0: {reason}",
+  "studio.transcribe.fileTooLargeApp":
+    "Choisissez un fichier audio de moins de 100 Mo.",
+  "studio.transcribe.reading": "Lecture du fichier audio…",
+  "studio.transcribe.progress": "Transcription en cours… {done} sur {total}",
+  "studio.mic.title": "Microphone",
+  "studio.mic.meta": "L'entrée qui enregistre votre voix",
+  "studio.mic.choose": "Enregistrer avec",
+  "studio.mic.systemDefault": "Micro par défaut du système",
+  "studio.mic.numbered": "Microphone {position}",
+  "studio.mic.notConnected": "Micro choisi (non connecté)",
+  "studio.mic.notConnectedHint":
+    "Le micro choisi n'est pas connecté. En attendant, les enregistrements utilisent le micro par défaut du système.",
+  "studio.mic.namesHint":
+    "Les noms des micros apparaissent une fois l'accès autorisé. Lancez un test pour l'autoriser.",
+  "studio.mic.test": "Tester le micro",
+  "studio.mic.stopTest": "Arrêter le test",
+  "studio.mic.testHint":
+    "Parlez normalement\u00a0: la barre doit suivre votre voix. Rien n'est enregistré.",
+  "studio.mic.level": "Niveau du micro",
+  "studio.mic.fellBack":
+    "Le micro choisi n'est pas connecté\u00a0: le micro par défaut du système est utilisé.",
+  "toast.micFellBack":
+    "Micro choisi introuvable. Enregistrement avec le micro par défaut du système.",
+  "studio.storage.format": "Format des enregistrements",
+  "studio.storage.wav": "Qualité d'origine (WAV)",
+  "studio.storage.opus": "Compressé (Opus, 10× plus léger)",
+  "studio.storage.compressNow": "Compresser les enregistrements",
+  "studio.storage.compressing": "Compression…",
+  "studio.storage.compressed.one":
+    "{count} enregistrement compressé, {size} libérés.",
+  "studio.storage.compressed.other":
+    "{count} enregistrements compressés, {size} libérés.",
+  "studio.storage.nothingToCompress":
+    "Tous les enregistrements sont déjà compressés.",
+  "studio.storage.failed.one":
+    "{count} enregistrement n'a pas pu être compressé et reste tel quel.",
+  "studio.storage.failed.other":
+    "{count} enregistrements n'ont pas pu être compressés et restent tels quels.",
+  "studio.storage.savedOpus":
+    "Les nouveaux enregistrements sont compressés une fois transcrits. Vous pouvez toujours les écouter et les transcrire à nouveau.",
+  "studio.storage.savedWav":
+    "Les nouveaux enregistrements sont conservés en qualité d'origine. Ceux déjà compressés le restent.",
+  "studio.transcribe.liveLabel": "Entendu jusqu'ici",
+  "capture.keptForRetry":
+    "{error} L'enregistrement est dans votre Bibliothèque, où vous pouvez le transcrire à nouveau.",
+  "native.invalidCompressed": "Audio compressé invalide.",
+  "native.cannotCompress":
+    "Impossible d'écrire l'audio compressé\u00a0: {reason}",
+  "native.opusError": "Erreur Opus\u00a0: {reason}",
+  "toast.shortcutsUnavailable":
+    "Les raccourcis de dictée n'ont pas pu être activés. Une autre application les utilise peut-être déjà.",
+  "error.importInProgress":
+    "Un fichier audio est en cours de transcription. Réessayez une fois qu'elle est terminée.",
+  "studio.source.label": "Enregistrer depuis",
+  "studio.source.microphone": "Le microphone",
+  "studio.source.system": "Le son de cet ordinateur",
+  "studio.source.systemHint":
+    "Le bouton d'enregistrement capte ce qui est joué sur cet ordinateur, une réunion ou une vidéo par exemple. La dictée avec les raccourcis ou la bulle utilise toujours le microphone.",
+  "studio.dock.recordingSystem": "Enregistrement du son de l'ordinateur…",
+  "native.noPlaybackDevice": "Aucun périphérique de lecture à enregistrer.",
+  "native.playbackFormat":
+    "Impossible de lire le format de lecture\u00a0: {reason}",
+  "native.playbackNoFormat":
+    "Le périphérique de lecture n'indique aucun format audio.",
+  "native.playbackUnsupported":
+    "Format de lecture non pris en charge\u00a0: {format}.",
+  "native.systemAudioCannotStart":
+    "Impossible de démarrer l'enregistrement du son de l'ordinateur\u00a0: {reason}",
+  "native.systemAudioCannotRecord":
+    "Impossible d'enregistrer le son de l'ordinateur\u00a0: {reason}",
+  "native.systemAudioStoppedReason":
+    "Le son de l'ordinateur n'est plus enregistré\u00a0: {reason}",
+  "native.systemAudioStopped": "Le son de l'ordinateur n'est plus enregistré.",
+  "native.systemAudioStoppedUnexpectedly":
+    "L'enregistrement du son de l'ordinateur s'est arrêté de façon inattendue.",
+  "native.systemAudioDidNotStart":
+    "L'enregistrement du son de l'ordinateur n'a pas démarré.",
+  "native.systemAudioUnavailable":
+    "La capture du son de l'ordinateur n'est pas disponible sur cette plateforme.",
+  "native.systemRecorderCannotStart":
+    "Impossible de démarrer l'enregistreur du son de l'ordinateur\u00a0: {reason}",
+  "native.systemRecorderCannotRead":
+    "Impossible de lire l'enregistreur du son de l'ordinateur.",
+  "native.noMonitorSource": "Aucune source de contrôle PulseAudio trouvée.",
+  "native.pactlFailed": "Échec de pactl\u00a0: {reason}",
+  "native.systemAudioBusy": "Le son de l'ordinateur n'est pas disponible.",
+  "native.ffmpegNeeded":
+    "ffmpeg est nécessaire pour enregistrer le son de l'ordinateur.",
 };

@@ -12,8 +12,11 @@ import {
 import { openPrivacyPolicy, privacyPolicyUrl } from "../src/appInfo";
 import {
   DICTATION_LANGUAGES,
+  RETENTION_DAY_CHOICES,
+  keepsHistory,
   type CompanionSettings,
   type PrivacyLevel,
+  type RetentionDays,
 } from "../src/domain";
 import { API_FEATURES_ENABLED } from "../src/features";
 import { LANGUAGE_NAMES, strings } from "../src/i18n";
@@ -23,6 +26,7 @@ import {
   clearHistoryPrompt,
   historyOffConfirmation,
   historyOffPrompt,
+  retentionPrompt,
 } from "../src/settingsPolicy";
 import { useCompanionStore } from "../src/store";
 import {
@@ -114,6 +118,34 @@ export default function SettingsScreen() {
       }
     }
     await updateSettings(patch);
+  };
+
+  /**
+   * Changes how long notes are kept. A shorter limit deletes the notes
+   * already past it, so it asks first and says how many.
+   */
+  const changeRetention = async (retentionDays: RetentionDays) => {
+    if (confirming.current) return;
+    const state = useCompanionStore.getState();
+    if (retentionDays === state.settings.retentionDays) return;
+    const prompt = state.storageDegraded
+      ? null
+      : retentionPrompt(t, state.history, retentionDays, Date.now());
+    if (prompt) {
+      confirming.current = true;
+      try {
+        const confirmed = await confirm({
+          ...prompt,
+          confirmLabel: t.settings.deleteNotes,
+          cancelLabel: t.common.cancel,
+          destructive: true,
+        });
+        if (!confirmed) return;
+      } finally {
+        confirming.current = false;
+      }
+    }
+    await updateSettings({ retentionDays });
   };
 
   const clearPrompt = clearHistoryPrompt(t, history.length, storageDegraded);
@@ -236,6 +268,25 @@ export default function SettingsScreen() {
               />
             ) : null}
           </Card>
+
+          {keepsHistory(settings) ? (
+            <FadeIn index={2} style={styles.section}>
+              <Label heading>{t.settings.retention}</Label>
+              <View style={styles.chips}>
+                {RETENTION_DAY_CHOICES.map((days) => (
+                  <Chip
+                    key={days}
+                    label={t.settings.retentionChoices[days]}
+                    selected={settings.retentionDays === days}
+                    onPress={() => void changeRetention(days)}
+                  />
+                ))}
+              </View>
+              <Text style={styles.help}>
+                {t.settings.retentionHelp(settings.retentionDays)}
+              </Text>
+            </FadeIn>
+          ) : null}
 
           <VoiceKeyboardCard enterIndex={3} />
 

@@ -1,6 +1,11 @@
-import type { CompanionSettings } from "./domain";
+import type {
+  CompanionSettings,
+  RetentionDays,
+  TranscriptTurn,
+} from "./domain";
 import { keepsHistory } from "./domain";
 import type { Strings } from "./i18n";
+import { applyRetention } from "./retention";
 
 type HistorySettings = Pick<CompanionSettings, "saveHistory" | "privacyLevel">;
 
@@ -96,6 +101,25 @@ export function clearHistoryPrompt(
   return {
     title: t.settings.clearHistoryTitle,
     message: deletionMessage(t, noteCount, notesUnread),
+  };
+}
+
+/**
+ * Choosing a shorter retention deletes the notes already past it at once
+ * (store.updateSettings). Returns the confirmation to show first, or null
+ * when the change deletes nothing now.
+ */
+export function retentionPrompt(
+  t: Strings,
+  history: readonly TranscriptTurn[],
+  days: RetentionDays,
+  now: number,
+): ConfirmPrompt | null {
+  const count = applyRetention(history, days, now).expired.length;
+  if (count <= 0) return null;
+  return {
+    title: t.settings.retentionTitle,
+    message: t.settings.retentionMessage(count, days),
   };
 }
 
