@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
+import { Animated, Platform, StyleSheet, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
@@ -7,6 +7,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useCompanionStore } from "../src/store";
 import { Button, MicOrb, Waveform } from "../src/ui/components";
+import { Backdrop, glassStyles } from "../src/ui/glass";
+import { useReducedMotion, useReducedTransparency } from "../src/ui/motion";
 import { colors, fonts, radius, space } from "../src/ui/theme";
 
 /**
@@ -27,9 +29,23 @@ export default function QuickDictateScreen() {
 
   const startLatestId = useRef(latest?.id);
   const [copiedText, setCopiedText] = useState<string | null>(null);
+  const reduced = useReducedMotion();
+  const opaque = useReducedTransparency();
+  /** The backdrop's lime light rises while the microphone listens. */
+  const glow = useRef(new Animated.Value(0)).current;
 
   const listening = capture.status === "listening";
   const processing = capture.status === "processing";
+
+  useEffect(() => {
+    const animation = Animated.timing(glow, {
+      toValue: listening ? 1 : 0,
+      duration: reduced ? 0 : 700,
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [listening, reduced, glow]);
 
   useEffect(() => {
     if (useCompanionStore.getState().capture.status === "idle") {
@@ -83,51 +99,60 @@ export default function QuickDictateScreen() {
         : "Tap the orb to start.";
 
   return (
-    <SafeAreaView style={s.safe} edges={["top", "bottom"]}>
-      <View style={s.sheet}>
-        <Text style={s.title} accessibilityRole="header">
-          {title}
-        </Text>
-        <Text style={s.body} numberOfLines={6}>
-          {body}
-        </Text>
-        <View style={s.wave}>
-          <Waveform level={level} active={listening} />
-        </View>
-        <MicOrb
-          listening={listening}
-          busy={processing}
-          label={listening ? "Tap to finish" : "Tap to speak"}
-          onPress={() => (listening ? stopCapture() : again())}
-          accessibilityLabel={
-            listening ? "Finish dictation" : "Start dictation"
-          }
-        />
-        {copiedText ? (
-          <Text style={s.hint}>
-            {Platform.OS === "ios"
-              ? "Go back to your app (top-left corner) and paste."
-              : "Switch back to your app and paste."}
+    <View style={s.screen}>
+      <Backdrop glow={glow} />
+      <SafeAreaView style={s.safe} edges={["top", "bottom"]}>
+        <View
+          style={[
+            glassStyles.panel,
+            glassStyles.panelStrong,
+            opaque && glassStyles.panelOpaque,
+            s.sheet,
+          ]}
+        >
+          <Text style={s.title} accessibilityRole="header">
+            {title}
           </Text>
-        ) : null}
-        <View style={s.actions}>
-          <Button label="Close" variant="ghost" onPress={close} />
+          <Text style={s.body} numberOfLines={6}>
+            {body}
+          </Text>
+          <View style={s.wave}>
+            <Waveform level={level} active={listening} />
+          </View>
+          <MicOrb
+            listening={listening}
+            busy={processing}
+            label={listening ? "Tap to finish" : "Tap to speak"}
+            onPress={() => (listening ? stopCapture() : again())}
+            accessibilityLabel={
+              listening ? "Finish dictation" : "Start dictation"
+            }
+            level={level}
+          />
+          {copiedText ? (
+            <Text style={s.hint}>
+              {Platform.OS === "ios"
+                ? "Go back to your app (top-left corner) and paste."
+                : "Switch back to your app and paste."}
+            </Text>
+          ) : null}
+          <View style={s.actions}>
+            <Button label="Close" variant="ghost" onPress={close} />
+          </View>
         </View>
-      </View>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  screen: { flex: 1, backgroundColor: colors.bg },
+  safe: { flex: 1 },
   sheet: {
     flex: 1,
     margin: space.lg,
     padding: space.xl,
     borderRadius: radius.lg + 10,
-    borderWidth: 1,
-    borderColor: "rgba(221, 243, 154, 0.18)",
-    backgroundColor: "rgba(31, 52, 41, 0.55)",
     alignItems: "center",
     justifyContent: "center",
     gap: space.lg,
