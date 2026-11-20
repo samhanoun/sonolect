@@ -5,14 +5,15 @@ import {
 } from "./desktopWhisper";
 import type { TranscriptSegment } from "./segmentEditor";
 import { isTauriRuntime } from "./desktopNative";
+import { getT } from "./i18n";
 
 /** Explains why local transcription could not run, without blaming the model in the browser preview. */
 export function localUnavailableMessage(
   inDesktopApp = isTauriRuntime(),
 ): string {
   return inDesktopApp
-    ? "Local transcription unavailable. Check your installed model in Settings. No audio was uploaded."
-    : "Local transcription runs in the Windows app. This browser preview did not upload any audio.";
+    ? getT()("voice.localUnavailableApp")
+    : getT()("voice.localUnavailablePreview");
 }
 
 export type VoiceCaptureMetadata = {
@@ -35,6 +36,8 @@ export type TranscriptJobResult = {
   jobId?: string;
   transcript?: string;
   segments?: TranscriptSegment[];
+  /** The saved recording behind this transcript, for playback in the editor. */
+  captureId?: string;
   status: "submitted" | "completed" | "offline";
   message?: string;
 };
@@ -73,8 +76,7 @@ function cloudAllowed(options: SubmitCapturedAudioOptions): boolean {
 function guardedFetch(options: SubmitCapturedAudioOptions): typeof fetch {
   const request = options.fetchImpl ?? fetch;
   return (input, init) => {
-    if (!cloudAllowed(options))
-      throw new Error("Local only: cloud processing is disabled.");
+    if (!cloudAllowed(options)) throw new Error(getT()("voice.localOnly"));
     const timeout = AbortSignal.timeout(60_000);
     return request(input, {
       ...init,
@@ -123,7 +125,10 @@ export async function submitCapturedAudio(
       status: "completed",
       transcript: desktopResult.text.trim(),
       segments: desktopResult.segments,
-      message: "Transcribed on this device with local Whisper.",
+      ...(desktopResult.captureId
+        ? { captureId: desktopResult.captureId }
+        : {}),
+      message: getT()("voice.localWhisper"),
     };
   }
 
@@ -132,9 +137,7 @@ export async function submitCapturedAudio(
   }
   const apiUrl = options.apiUrl ?? API_URL;
   if (!apiUrl) {
-    return offlineResult(
-      "Online transcription is not configured. Your recording stayed on this device.",
-    );
+    return offlineResult(getT()("voice.notConfigured"));
   }
 
   const fetchImpl = guardedFetch(options);
@@ -155,7 +158,7 @@ export async function submitCapturedAudio(
     });
 
     if (!response.ok) {
-      throw new Error(`Backend audio job failed (${response.status})`);
+      throw new Error(getT()("voice.jobFailed", { status: response.status }));
     }
 
     const payload = (await response
@@ -175,8 +178,8 @@ export async function submitCapturedAudio(
     const result: TranscriptJobResult = {
       status: payload.status === "completed" ? "completed" : "submitted",
       message: jobId
-        ? "Recording sent to Sonolect for transcription."
-        : (payload.message ?? "Recording sent to Sonolect for transcription."),
+        ? getT()("voice.sentForTranscription")
+        : (payload.message ?? getT()("voice.sentForTranscription")),
     };
 
     const transcript = payload.transcriptId;
@@ -187,8 +190,8 @@ export async function submitCapturedAudio(
   } catch (error) {
     return offlineResult(
       error instanceof Error
-        ? `Sonolect could not be reached, so your recording stayed on this device (${error.message}).`
-        : "Sonolect could not be reached, so your recording stayed on this device.",
+        ? getT()("voice.unreachableBecause", { reason: error.message })
+        : getT()("voice.unreachable"),
     );
   }
 }
@@ -218,7 +221,9 @@ async function cloudTranscribe(
     body: audio,
   });
   if (!response.ok) {
-    throw new Error(`Cloud transcribe failed (${response.status})`);
+    throw new Error(
+      getT()("voice.transcribeFailed", { status: response.status }),
+    );
   }
   const payload = (await response.json().catch(() => ({}))) as {
     transcript?: string;
@@ -239,7 +244,7 @@ async function cloudPolish(
     body: JSON.stringify({ transcript, locale: options.language }),
   });
   if (!response.ok) {
-    throw new Error(`Cloud polish failed (${response.status})`);
+    throw new Error(getT()("voice.polishFailed", { status: response.status }));
   }
   const payload = (await response.json().catch(() => ({}))) as {
     polished?: string;
@@ -264,7 +269,8 @@ export async function submitCapturedAudioCloud(
         status: "completed",
         transcript: result.text,
         segments: result.segments,
-        message: "Transcribed with your selected online model.",
+        ...(result.captureId ? { captureId: result.captureId } : {}),
+        message: getT()("voice.onlineModel"),
       };
     } catch (error) {
       return offlineResult(
@@ -282,7 +288,10 @@ export async function submitCapturedAudioCloud(
       status: "completed",
       transcript: desktopResult.text.trim(),
       segments: desktopResult.segments,
-      message: "Transcribed on this device with local Whisper.",
+      ...(desktopResult.captureId
+        ? { captureId: desktopResult.captureId }
+        : {}),
+      message: getT()("voice.localWhisper"),
     };
   }
 
@@ -305,7 +314,7 @@ export async function submitCapturedAudioCloud(
         return {
           status: "completed",
           transcript: polished,
-          message: "Cloud STT + Gemini polish.",
+          message: getT()("voice.cloudPolish"),
         };
       }
     } catch {
@@ -340,7 +349,9 @@ async function uploadCapturedAudioBinary(
     body: audio,
   });
   if (!uploadResponse.ok) {
-    throw new Error(`Backend audio upload failed (${uploadResponse.status})`);
+    throw new Error(
+      getT()("voice.uploadFailed", { status: uploadResponse.status }),
+    );
   }
 }
 

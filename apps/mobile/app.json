@@ -13,6 +13,10 @@
       "supportsTablet": true,
       "config": {
         "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "CFBundleDevelopmentRegion": "en",
+        "CFBundleLocalizations": ["en", "fr"]
       }
     },
     "android": {
@@ -21,11 +25,14 @@
       "blockedPermissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.SYSTEM_ALERT_WINDOW"
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
       ],
       "allowBackup": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
+        "monochromeImage": "./assets/adaptive-icon-monochrome.png",
         "backgroundColor": "#0B120E"
       }
     },
@@ -34,10 +41,14 @@
       "output": "single",
       "favicon": "./assets/favicon.png"
     },
+    "locales": {
+      "fr": "./locales/fr.json"
+    },
     "plugins": [
-      "expo-router",
+      ["expo-router", { "sitemap": false }],
       "expo-font",
-      "expo-secure-store",
+      ["expo-localization", { "supportsRTL": false }],
+      ["expo-secure-store", { "faceIDPermission": false }],
       [
         "expo-speech-recognition",
         {
@@ -49,10 +60,14 @@
         "expo-splash-screen",
         {
           "image": "./assets/splash-icon.png",
-          "imageWidth": 160,
+          "imageWidth": 280,
           "backgroundColor": "#0B120E"
         }
-      ]
+      ],
+      "./plugins/withAsyncStorageSize",
+      "./plugins/withDarkAndroidTheme",
+      "./plugins/withReleaseLogStripping",
+      "./plugins/withReleaseSigning"
     ],
     "experiments": {
       "typedRoutes": false,

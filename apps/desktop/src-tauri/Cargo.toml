@@ -13,12 +13,30 @@ hound = "3.5"
 sha2 = "0.11"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
 base64 = "0.23"
+# Saved recordings as Ogg Opus. libopus is bundled and built with cmake, which whisper-rs already needs.
+opus = "0.4"
+ogg = "0.9"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3.6", features = ["windows-native"] }
+# In-process paste: clipboard write kept out of clipboard history, then Ctrl+V via SendInput.
+arboard = { version = "3.7", default-features = false }
+enigo = { version = "0.6", default-features = false }
+# Dictation bubble: remember the app being dictated into and give focus back to it.
+# System audio: WASAPI loopback recording of the default playback device.
+cpal = "0.18"
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_Accessibility",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [features]
 default = []
+
+[dev-dependencies]
+tempfile = "3"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

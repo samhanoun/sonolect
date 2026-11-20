@@ -26,6 +26,27 @@ Before any real apply:
 4. Populate Secret Manager versions out-of-band.
 5. Review deletion protection and public API invocation settings.
 
+## Service images
+
+Each service has a Dockerfile that is built from the repository root, because the build needs the shared workspace packages:
+
+```bash
+docker build -f services/api/Dockerfile -t sonolect-api .
+docker build -f services/worker-service/Dockerfile -t sonolect-worker .
+```
+
+The build bundles the service into `dist/index.js` (`pnpm --filter <service> build`) and ships only its production dependencies. Images run as the `node` user with `NODE_ENV=production`, listen on `PORT` (default 8080) and expose `GET /health`. CI builds all six images and starts each one in production mode on every pull request.
+
+Runtime configuration the images need:
+
+| Service                             | Required in production                                           |
+| ----------------------------------- | ---------------------------------------------------------------- |
+| api                                 | `FIREBASE_PROJECT_ID`, `SONOLECT_ALLOWED_ORIGINS`                |
+| agent, audio, billing, sync, worker | `SONOLECT_SERVICE_TOKENS` (comma-separated, 32+ characters each) |
+| billing                             | `STRIPE_WEBHOOK_SECRET` for the Stripe webhook                   |
+
+The internal services (agent, audio, billing, sync, worker) are not public APIs. A caller sends `Authorization: Bearer <service token>` and names the end user in `x-user-id`; a request whose body or path names a different user is rejected. A service refuses to start in production without a token. Terraform generates the worker's token, stores it in Secret Manager as `sonolect-<env>-service-tokens` and passes it to the worker. Terraform sets `NODE_ENV=production`, `FIREBASE_PROJECT_ID` (the GCP project unless `firebase_project_id` is set) and `SONOLECT_ALLOWED_ORIGINS` (from `allowed_origins`) on Cloud Run in every environment.
+
 ## Firebase deployment
 
 ```bash

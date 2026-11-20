@@ -371,4 +371,41 @@ const none = await processNextQueuedAudioJob({
 });
 assert.equal(none, undefined);
 
+// A language that looks like a command-line option must never reach the
+// speech engine: the job fails before anything is executed.
+const afterNone = JSON.parse(await readFile(storePath, "utf8")) as {
+  audioJobs: AudioUploadJob[];
+  transcripts: Transcript[];
+};
+const optionTranscript: Transcript = {
+  ...queuedTranscriptInput,
+  id: "transcript-option-injection",
+  language: "--output-file=/tmp/sonolect-injected",
+  status: "processing",
+  tags: ["audio", "queued"],
+  updatedAt: now,
+};
+afterNone.audioJobs.push({
+  ...queuedJob,
+  id: "job-option-injection",
+  transcriptId: optionTranscript.id,
+  status: "queued",
+  updatedAt: now,
+});
+afterNone.transcripts.push(optionTranscript);
+await writeFile(storePath, JSON.stringify(afterNone, null, 2), "utf8");
+const optionRefused = await processNextQueuedAudioJob({
+  storePath,
+  localSttCommandArgs: [
+    process.execPath,
+    "-e",
+    "console.log('must not run with ' + process.argv[1])",
+    "{language}",
+  ],
+});
+assert.equal(optionRefused?.job.id, "job-option-injection");
+assert.equal(optionRefused?.job.status, "failed");
+assert.match(optionRefused?.job.error ?? "", /Local STT command refused/);
+assert.notEqual(optionRefused?.transcript?.status, "completed");
+
 console.log("Local audio worker smoke test passed");

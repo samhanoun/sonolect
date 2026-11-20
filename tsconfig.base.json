@@ -20,6 +20,7 @@
       "@sonolect/config": ["./packages/config/src/index.ts"],
       "@sonolect/prompts": ["./packages/prompts/src/index.ts"],
       "@sonolect/sdk": ["./packages/sdk/src/index.ts"],
+      "@sonolect/service-kit": ["./packages/service-kit/src/index.ts"],
       "@sonolect/ui": ["./packages/ui/src/index.ts"]
     }
   }

@@ -1,22 +1,61 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  AccessibilityInfo,
   Animated,
   Easing,
+  Platform,
   Pressable,
   StyleSheet,
   Switch,
   Text,
   View,
   type ColorValue,
+  type LayoutChangeEvent,
   type PressableProps,
   type StyleProp,
+  type TextInputProps,
   type TextStyle,
   type ViewStyle,
 } from "react-native";
 import Svg, { Circle, Path, Rect } from "react-native-svg";
 
-import { colors, fonts, radius, space } from "./theme";
+import { FadeIn, PressableScale, glassStyles } from "./glass";
+import { useReducedMotion, useReducedTransparency } from "./motion";
+import {
+  colors,
+  fonts,
+  glass,
+  inputSelectionColor,
+  motion,
+  radius,
+  space,
+} from "./theme";
+
+export { useReducedMotion } from "./motion";
+
+/** Smallest touch target: 44 pt on iOS, 48 dp on Android (ux-18). */
+export const MIN_TOUCH_SIZE = Platform.select({
+  ios: 44,
+  android: 48,
+  default: 44,
+});
+
+/**
+ * Fixed chrome (labels, chips, segments, the mode pill, tab labels) grows
+ * with the system font size up to 1.5x, so it stays on screen at 200%.
+ * Body text is not capped (ux-19).
+ */
+export const CHROME_MAX_FONT_SCALE = 1.5;
+
+/**
+ * Lime cursor, selection handles and selection in every text field. iOS
+ * ignores cursorColor and selectionHandleColor and tints all three with
+ * selectionColor, which is opaque there (see inputSelectionColor).
+ */
+export const inputColors = {
+  cursorColor: colors.lime,
+  selectionHandleColor: colors.lime,
+  selectionColor: inputSelectionColor(Platform.OS),
+} as const satisfies TextInputProps;
 
 export type IconName =
   | "mic"
@@ -142,40 +181,41 @@ export function Icon({
   );
 }
 
-export function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false);
-  useEffect(() => {
-    let mounted = true;
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then((value) => mounted && setReduced(value))
-      .catch(() => undefined);
-    const sub = AccessibilityInfo.addEventListener(
-      "reduceMotionChanged",
-      setReduced,
-    );
-    return () => {
-      mounted = false;
-      sub.remove();
-    };
-  }, []);
-  return reduced;
-}
-
+/**
+ * A small mono caption. `heading` makes it a screen-reader heading: only for
+ * section labels, never for mode tags, durations or a status.
+ */
 export function Label({
   children,
   color = colors.muted,
   style,
+  heading,
 }: {
   children: ReactNode;
   color?: string;
   style?: StyleProp<TextStyle>;
+  heading?: boolean;
 }) {
-  return <Text style={[styles.label, { color }, style]}>{children}</Text>;
+  return (
+    <Text
+      {...(heading ? { accessibilityRole: "header" as const } : {})}
+      maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
+      style={[styles.label, { color }, style]}
+    >
+      {children}
+    </Text>
+  );
 }
 
-export function Title({ children }: { children: ReactNode }) {
+export function Title({
+  children,
+  style,
+}: {
+  children: ReactNode;
+  style?: StyleProp<TextStyle>;
+}) {
   return (
-    <Text accessibilityRole="header" style={styles.title}>
+    <Text accessibilityRole="header" style={[styles.title, style]}>
       {children}
     </Text>
   );
@@ -189,6 +229,7 @@ export function Button({
   variant = "outline",
   onPress,
   disabled,
+  selected,
   style,
   accessibilityLabel,
   compact,
@@ -198,6 +239,8 @@ export function Button({
   variant?: ButtonVariant;
   onPress: PressableProps["onPress"];
   disabled?: boolean;
+  /** A toggle such as Pin: read as selected, with a lime icon when on. */
+  selected?: boolean;
   style?: StyleProp<ViewStyle>;
   accessibilityLabel?: string;
   compact?: boolean;
@@ -209,25 +252,34 @@ export function Button({
         ? colors.danger
         : colors.text;
   return (
-    <Pressable
+    <PressableScale
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{ disabled: Boolean(disabled) }}
+      accessibilityState={{
+        disabled: Boolean(disabled),
+        ...(selected === undefined ? {} : { selected }),
+      }}
       disabled={disabled}
       onPress={onPress}
       hitSlop={compact ? 6 : 0}
-      style={({ pressed }) => [
+      style={[
         styles.button,
         compact && styles.buttonCompact,
         variant === "primary" && styles.buttonPrimary,
         variant === "outline" && styles.buttonOutline,
         variant === "danger" && styles.buttonDanger,
+        selected && styles.buttonSelected,
         disabled && styles.disabled,
-        pressed && styles.pressed,
         style,
       ]}
     >
-      {icon ? <Icon name={icon} size={compact ? 16 : 18} color={fg} /> : null}
+      {icon ? (
+        <Icon
+          name={icon}
+          size={compact ? 16 : 18}
+          color={selected ? colors.lime : fg}
+        />
+      ) : null}
       {label ? (
         <Text
           style={[
@@ -239,7 +291,7 @@ export function Button({
           {label}
         </Text>
       ) : null}
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -255,7 +307,7 @@ export function Chip({
   disabled?: boolean;
 }) {
   return (
-    <Pressable
+    <PressableScale
       accessibilityRole="button"
       accessibilityState={{
         selected: Boolean(selected),
@@ -263,28 +315,95 @@ export function Chip({
       }}
       onPress={onPress}
       disabled={disabled}
-      style={({ pressed }) => [
+      style={[
         styles.chip,
         selected && styles.chipSelected,
         disabled && styles.disabled,
-        pressed && styles.pressed,
       ]}
     >
-      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+      <Text
+        maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
+        style={[styles.chipText, selected && styles.chipTextSelected]}
+      >
         {label}
       </Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 
+/**
+ * A glass panel. `strong` raises it a step, for content that needs to stand
+ * out from the cards around it. With Reduce Transparency it is solid.
+ * `enterIndex` fades it in on mount, staggered by its place in a list.
+ */
 export function Card({
   children,
   style,
+  strong,
+  enterIndex,
 }: {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
+  strong?: boolean;
+  enterIndex?: number;
 }) {
-  return <View style={[styles.card, style]}>{children}</View>;
+  const opaque = useReducedTransparency();
+  const panel = (
+    <View
+      style={[
+        glassStyles.panel,
+        styles.card,
+        strong && glassStyles.panelStrong,
+        opaque && glassStyles.panelOpaque,
+        style,
+      ]}
+    >
+      {children}
+    </View>
+  );
+  return enterIndex === undefined ? (
+    panel
+  ) : (
+    <FadeIn index={enterIndex}>{panel}</FadeIn>
+  );
+}
+
+/**
+ * A message at the top of a screen, such as a storage error, with an
+ * optional action. The root layout announces each notice once, so this has
+ * no live region: Android would read it twice.
+ */
+export function NoticeBanner({
+  text,
+  actionLabel,
+  onAction,
+}: {
+  text: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  const opaque = useReducedTransparency();
+  return (
+    <View
+      style={[
+        glassStyles.panel,
+        glassStyles.panelStrong,
+        styles.banner,
+        opaque && glassStyles.panelOpaque,
+      ]}
+      accessibilityRole="alert"
+    >
+      <Text style={styles.bannerText}>{text}</Text>
+      {actionLabel && onAction ? (
+        <Button
+          compact
+          label={actionLabel}
+          onPress={onAction}
+          style={styles.bannerAction}
+        />
+      ) : null}
+    </View>
+  );
 }
 
 export function ToggleRow({
@@ -292,25 +411,56 @@ export function ToggleRow({
   value,
   onChange,
   last,
+  disabled,
 }: {
   label: string;
   value: boolean;
   onChange: (value: boolean) => void;
   last?: boolean;
+  /** Shown but not changeable, such as Save history in Ephemeral mode. */
+  disabled?: boolean;
 }) {
   return (
     <View style={[styles.toggleRow, !last && styles.toggleRowBorder]}>
-      <Text style={styles.body}>{label}</Text>
+      <Text
+        style={[styles.body, styles.toggleLabel, disabled && styles.mutedText]}
+      >
+        {label}
+      </Text>
       <Switch
         accessibilityLabel={label}
         value={value}
         onValueChange={onChange}
-        trackColor={{ false: colors.line, true: colors.lime }}
+        disabled={Boolean(disabled)}
+        trackColor={{ false: colors.lineInteractive, true: colors.lime }}
         thumbColor={value ? colors.onLime : colors.muted}
-        ios_backgroundColor={colors.line}
+        ios_backgroundColor={colors.lineInteractive}
         {...({ activeThumbColor: colors.onLime } as object)}
       />
     </View>
+  );
+}
+
+/**
+ * A text link that opens a web page, such as the privacy policy. It is read
+ * as a link, and its touch area reaches the minimum size.
+ */
+export function TextLink({
+  label,
+  onPress,
+}: {
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="link"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [styles.link, pressed && styles.pressed]}
+    >
+      <Text style={styles.linkText}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -325,12 +475,70 @@ export function Segmented<T extends string>({
   onChange: (value: T) => void;
   accessibilityLabel: string;
 }) {
+  const reduced = useReducedMotion();
+  const opaque = useReducedTransparency();
+  const index = Math.max(
+    0,
+    options.findIndex((option) => option.value === value),
+  );
+  const [width, setWidth] = useState(0);
+  const position = useRef(new Animated.Value(index)).current;
+
+  // The thumb springs to the selected segment (no slide with Reduce Motion).
+  useEffect(() => {
+    if (reduced) {
+      position.setValue(index);
+      return;
+    }
+    const animation = Animated.spring(position, {
+      toValue: index,
+      useNativeDriver: true,
+      ...motion.spring,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [index, reduced, position]);
+
+  const count = Math.max(options.length, 1);
+  // Segments share the row inside its border (1) and padding (4), 4 apart.
+  const thumbWidth = width > 0 ? (width - 10 - 4 * (count - 1)) / count : 0;
+  const step = thumbWidth + 4;
+
   return (
     <View
       accessibilityRole="radiogroup"
       accessibilityLabel={accessibilityLabel}
-      style={styles.segmented}
+      onLayout={(event: LayoutChangeEvent) =>
+        setWidth(event.nativeEvent.layout.width)
+      }
+      style={[
+        glassStyles.panel,
+        styles.segmented,
+        opaque && glassStyles.panelOpaque,
+      ]}
     >
+      {thumbWidth > 0 ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.segmentThumb,
+            {
+              width: thumbWidth,
+              transform: [
+                {
+                  translateX:
+                    count > 1
+                      ? position.interpolate({
+                          inputRange: [0, count - 1],
+                          outputRange: [0, step * (count - 1)],
+                        })
+                      : 0,
+                },
+              ],
+            },
+          ]}
+        />
+      ) : null}
       {options.map((option) => {
         const selected = option.value === value;
         return (
@@ -339,9 +547,16 @@ export function Segmented<T extends string>({
             accessibilityRole="radio"
             accessibilityState={{ checked: selected }}
             onPress={() => onChange(option.value)}
-            style={[styles.segment, selected && styles.segmentSelected]}
+            // 40 + 4 + 4 = 48, inside the container's padding of 4.
+            hitSlop={{ top: 4, bottom: 4 }}
+            style={[
+              styles.segment,
+              // Until the row is measured there is no thumb to slide.
+              selected && thumbWidth === 0 && styles.segmentSelected,
+            ]}
           >
             <Text
+              maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
               style={[
                 styles.segmentText,
                 selected && styles.segmentTextSelected,
@@ -357,6 +572,12 @@ export function Segmented<T extends string>({
 }
 
 const BAR_COUNT = 28;
+
+/** Bars fade towards both ends of the meter, so it reads as a soft band. */
+function barOpacity(index: number): number {
+  const fromEdge = Math.min(index, BAR_COUNT - 1 - index) / (BAR_COUNT / 2);
+  return 0.35 + 0.65 * Math.min(1, fromEdge * 2.2);
+}
 
 /** Live input meter: bars shift left as new levels arrive. */
 export function Waveform({
@@ -389,40 +610,54 @@ export function Waveform({
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
     >
-      {history.map((value, index) => (
-        <View
-          key={index}
-          style={[
-            styles.bar,
-            {
-              height: 4 + Math.round(value * 36),
-              backgroundColor:
-                active && value > 0.02 ? colors.lime : colors.lineStrong,
-            },
-          ]}
-        />
-      ))}
+      {history.map((value, index) => {
+        const lit = active && value > 0.02;
+        return (
+          <View
+            key={index}
+            style={[
+              styles.bar,
+              {
+                height: 4 + Math.round(value * 36),
+                backgroundColor: lit ? colors.lime : colors.lineStrong,
+                opacity: lit ? barOpacity(index) : 1,
+              },
+            ]}
+          />
+        );
+      })}
     </View>
   );
 }
 
-/** The capture button with orbit rings that breathe while listening. */
+/**
+ * The capture button: a lit lime core in glass rings. While listening, a
+ * halo swells with the voice and the dashed orbit turns. Reduce Motion
+ * keeps the rings still and the halo steady.
+ */
 export function MicOrb({
   listening,
   busy,
   label,
   onPress,
   accessibilityLabel,
+  level = 0,
 }: {
   listening: boolean;
   busy: boolean;
   label: string;
   onPress: () => void;
   accessibilityLabel: string;
+  /** Input level from 0 to 1, while listening. */
+  level?: number;
 }) {
   const reduced = useReducedMotion();
   const pulse = useRef(new Animated.Value(0)).current;
+  const orbit = useRef(new Animated.Value(0)).current;
+  const voice = useRef(new Animated.Value(0)).current;
+  const active = listening || busy;
 
+  // The inner ring breathes while listening.
   useEffect(() => {
     if (!listening || reduced) {
       pulse.stopAnimation();
@@ -449,6 +684,44 @@ export function MicOrb({
     return () => loop.stop();
   }, [listening, reduced, pulse]);
 
+  // The dashed orbit turns while a dictation runs, faster while it is
+  // processed. It stops otherwise, so an idle screen draws no frames.
+  useEffect(() => {
+    if (!active || reduced) {
+      orbit.stopAnimation();
+      return;
+    }
+    orbit.setValue(0);
+    const loop = Animated.loop(
+      Animated.timing(orbit, {
+        toValue: 1,
+        duration: busy ? 2400 : 14000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [active, busy, reduced, orbit]);
+
+  // The halo follows the voice.
+  useEffect(() => {
+    const target = listening ? Math.min(1, Math.max(0, level)) : 0;
+    if (reduced) {
+      voice.setValue(listening ? 0.4 : 0);
+      return;
+    }
+    const animation = Animated.spring(voice, {
+      toValue: target,
+      useNativeDriver: true,
+      stiffness: 180,
+      damping: 18,
+      mass: 0.8,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [listening, level, reduced, voice]);
+
   const ringScale = pulse.interpolate({
     inputRange: [0, 1],
     outputRange: [1, 1.06],
@@ -457,12 +730,40 @@ export function MicOrb({
     inputRange: [0, 1],
     outputRange: [0.45, 0.85],
   });
+  const rotate = orbit.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0deg", "360deg"],
+  });
+  const haloScale = voice.interpolate({
+    inputRange: [0, 1],
+    outputRange: [listening ? 1 : 0.92, 1.22],
+  });
+  const haloOpacity = voice.interpolate({
+    inputRange: [0, 1],
+    outputRange: [listening ? 0.75 : 0.5, 1],
+  });
 
   return (
     <View style={styles.orb}>
-      <View style={[styles.ring, styles.ringOuter]} />
-      <View style={[styles.ring, styles.ringDashed]} />
       <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.halo,
+          { opacity: haloOpacity, transform: [{ scale: haloScale }] },
+        ]}
+      />
+      <View pointerEvents="none" style={[styles.ring, styles.ringOuter]} />
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.ring,
+          styles.ringDashed,
+          active && styles.ringDashedActive,
+          { transform: [{ rotate }] },
+        ]}
+      />
+      <Animated.View
+        pointerEvents="none"
         style={[
           styles.ring,
           styles.ringActive,
@@ -473,17 +774,14 @@ export function MicOrb({
           },
         ]}
       />
-      <Pressable
+      <PressableScale
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
         accessibilityState={{ busy }}
         disabled={busy}
         onPress={onPress}
-        style={({ pressed }) => [
-          styles.orbButton,
-          busy && styles.disabled,
-          pressed && styles.pressed,
-        ]}
+        pressedScale={0.93}
+        style={[styles.orbButton, busy && styles.disabled]}
       >
         <Icon
           name={listening ? "stop" : "mic"}
@@ -491,7 +789,7 @@ export function MicOrb({
           color={colors.onLime}
         />
         <Text style={styles.orbLabel}>{label}</Text>
-      </Pressable>
+      </PressableScale>
     </View>
   );
 }
@@ -506,7 +804,7 @@ export const styles = StyleSheet.create({
   },
   body: { fontFamily: fonts.body, fontSize: 15, color: colors.text },
   button: {
-    minHeight: 44,
+    minHeight: MIN_TOUCH_SIZE,
     paddingHorizontal: space.lg,
     borderRadius: radius.md,
     flexDirection: "row",
@@ -519,60 +817,119 @@ export const styles = StyleSheet.create({
     paddingHorizontal: space.md,
     borderRadius: radius.sm,
   },
-  buttonPrimary: { backgroundColor: colors.lime },
-  buttonOutline: { borderWidth: 1, borderColor: colors.line },
-  buttonDanger: { borderWidth: 1, borderColor: colors.line },
+  buttonPrimary: {
+    backgroundColor: colors.lime,
+    backgroundImage: glass.limeSheen,
+    boxShadow: glass.buttonGlow,
+  },
+  buttonOutline: {
+    backgroundColor: glass.control,
+    borderWidth: 1,
+    borderColor: glass.edge,
+    borderTopColor: glass.edgeTop,
+  },
+  buttonDanger: {
+    backgroundColor: glass.dangerFill,
+    borderWidth: 1,
+    borderColor: glass.dangerEdge,
+  },
+  // A toggle that is on (Pin): lime-tinted glass.
+  buttonSelected: {
+    backgroundColor: glass.accent,
+    borderColor: glass.accentEdge,
+    borderTopColor: glass.accentEdge,
+  },
   buttonText: { fontFamily: fonts.bodyBold, fontSize: 15 },
   buttonTextCompact: { fontFamily: fonts.bodyMedium, fontSize: 13 },
   disabled: { opacity: 0.4 },
   pressed: { opacity: 0.8, transform: [{ scale: 0.98 }] },
+  // No hitSlop: chip rows are 8 apart, so slop areas would overlap and send
+  // a tap to the wrong chip.
   chip: {
-    minHeight: 38,
-    paddingHorizontal: 14,
+    minHeight: MIN_TOUCH_SIZE,
+    paddingHorizontal: 16,
     borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.lineInteractive,
+    backgroundColor: glass.recess,
     justifyContent: "center",
   },
-  chipSelected: { backgroundColor: colors.forest, borderColor: colors.forest },
+  chipSelected: {
+    backgroundColor: glass.accent,
+    borderColor: glass.accentEdge,
+  },
   chipText: { fontFamily: fonts.bodyMedium, fontSize: 13, color: colors.text },
   chipTextSelected: { color: colors.lime, fontFamily: fonts.bodyBold },
   card: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
     padding: space.lg,
     gap: space.md,
   },
+  banner: {
+    gap: space.sm,
+    borderRadius: radius.lg,
+    padding: space.md,
+  },
+  bannerText: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.text,
+  },
+  bannerAction: { alignSelf: "flex-start" },
   toggleRow: {
     minHeight: 52,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: space.md,
+  },
+  // A long label wraps instead of pushing the switch off the screen.
+  toggleLabel: { flexShrink: 1 },
+  mutedText: { color: colors.muted },
+  link: {
+    minHeight: MIN_TOUCH_SIZE,
+    justifyContent: "center",
+    alignSelf: "flex-start",
+  },
+  linkText: {
+    fontFamily: fonts.bodyMedium,
+    fontSize: 14,
+    color: colors.lime,
+    textDecorationLine: "underline",
   },
   toggleRowBorder: { borderBottomWidth: 1, borderBottomColor: colors.line },
   segmented: {
     flexDirection: "row",
     gap: 4,
     padding: 4,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
+    borderRadius: radius.lg,
   },
   segment: {
     flex: 1,
     minHeight: 40,
-    borderRadius: radius.sm,
+    borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
+    paddingHorizontal: 4,
   },
-  segmentSelected: { backgroundColor: colors.forest },
+  segmentSelected: { backgroundColor: glass.accent },
+  segmentThumb: {
+    position: "absolute",
+    top: 4,
+    bottom: 4,
+    left: 4,
+    borderRadius: radius.md,
+    backgroundColor: glass.accent,
+    borderWidth: 1,
+    borderColor: glass.accentEdge,
+  },
+  // A label that wraps at a large font size stays centred in its segment.
   segmentText: {
     fontFamily: fonts.bodyMedium,
     fontSize: 13,
     color: colors.muted,
+    textAlign: "center",
   },
   segmentTextSelected: { color: colors.lime, fontFamily: fonts.bodyBold },
   waveform: { flexDirection: "row", alignItems: "center", gap: 4, height: 44 },
@@ -583,12 +940,20 @@ export const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  halo: {
+    position: "absolute",
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundImage: glass.halo,
+  },
   ring: { position: "absolute", borderRadius: 999 },
   ringOuter: {
     width: 248,
     height: 248,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: glass.edge,
+    backgroundColor: glass.ringFill,
   },
   ringDashed: {
     width: 204,
@@ -597,20 +962,20 @@ export const styles = StyleSheet.create({
     borderColor: colors.lineStrong,
     borderStyle: "dashed",
   },
+  ringDashedActive: { borderColor: glass.orbit },
   ringActive: { width: 160, height: 160, borderWidth: 2 },
   orbButton: {
     width: 132,
     height: 132,
     borderRadius: 66,
     backgroundColor: colors.lime,
+    backgroundImage: glass.limeSheen,
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    shadowColor: colors.lime,
-    shadowOpacity: 0.3,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 8,
+    borderWidth: 1,
+    borderColor: glass.orbEdge,
+    boxShadow: glass.limeGlow,
   },
   orbLabel: {
     fontFamily: fonts.displayMedium,

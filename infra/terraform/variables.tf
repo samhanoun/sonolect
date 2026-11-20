@@ -97,6 +97,22 @@ variable "allow_unauthenticated_api" {
   default     = true
 }
 
+variable "firebase_project_id" {
+  description = "Firebase project whose ID tokens the API accepts. Defaults to project_id."
+  type        = string
+  default     = null
+}
+
+variable "allowed_origins" {
+  description = "Browser origins the API accepts (CORS). The defaults are the desktop app's Tauri origins; add the hosted web app's origin when there is one."
+  type        = list(string)
+  default = [
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost"
+  ]
+}
+
 variable "api_image" {
   description = "Container image for the API service. Replace placeholder before apply."
   type        = string

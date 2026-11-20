@@ -13,7 +13,12 @@ export type NativeShortcutRegistration = {
 
 export type NativeInsertionResult = {
   ok: boolean;
-  method: "native-insert" | "clipboard-fallback";
+  /**
+   * native-insert: pasted. clipboard-only: on the clipboard but the paste
+   * keystroke failed (the user can press Ctrl+V). clipboard-fallback: nothing
+   * happened natively, so copy it from the web layer.
+   */
+  method: "native-insert" | "clipboard-only" | "clipboard-fallback";
   status: string;
 };
 
@@ -127,6 +132,20 @@ export async function registerNativeDictationShortcuts({
       status: `Global shortcut registration failed: ${error instanceof Error ? error.message : "unknown error"}`,
       unregister: async () => undefined,
     };
+  }
+}
+
+/**
+ * Before pasting a bubble dictation: if clicking the bubble moved focus to
+ * Sonolect, give it back to the app the user was dictating into (Windows).
+ */
+export async function restoreDictationTarget(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke<boolean>("bubble_restore_target");
+  } catch {
+    // Older shell or unsupported platform: paste into whatever has focus.
   }
 }
 

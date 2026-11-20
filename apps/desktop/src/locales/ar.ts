@@ -1,6 +1,6 @@
 import type { LocaleKeys } from "./en";
 
-export const ar: Record<LocaleKeys, string> = {
+export const ar: Partial<Record<LocaleKeys, string>> = {
   "nav.today": "اليوم",
   "nav.history": "السجل",
   "nav.agents": "الوكلاء",
