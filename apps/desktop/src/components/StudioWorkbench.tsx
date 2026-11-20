@@ -19,6 +19,7 @@ import { useDesktopStore } from "../store/appStore";
 import { isTauriRuntime } from "../desktopNative";
 import {
   nativeProviderCall,
+  setProviderMode,
   useProviderStore,
   speakUsingProvider,
   rewriteUsingProvider,
@@ -34,6 +35,7 @@ import {
 import { submitCapturedAudioCloud } from "../voiceApi";
 import { prepareLocalAudio } from "../localAudio";
 import { copyTranscript } from "../richClipboard";
+import { transcribeAudioFile } from "../liveCaptureNative";
 import { STT_LANGUAGES } from "../sttLanguages";
 import { loadBubbleVisibility, saveBubbleVisibility } from "../bubbleBridge";
 import type { BubbleVisibility } from "../dictationBubble";
@@ -316,6 +318,49 @@ export function StudioTranscribe({
     setBusy(true);
     setMessage("");
     try {
+      if (isTauriRuntime()) {
+        // The app records files of any length through its chunked recorder.
+        if (file.size > 100 * 1024 * 1024)
+          throw new Error(t("studio.transcribe.fileTooLargeApp"));
+        setMessage(t("studio.transcribe.reading"));
+        const online = preferences.stt.provider !== "local" && allowCloud();
+        if (online) await setProviderMode(true);
+        const long = await transcribeAudioFile(
+          file,
+          {
+            language: state.sttLanguage,
+            modelPath: state.whisperConfig.modelPath,
+            ...(online
+              ? {
+                  provider: preferences.stt.provider,
+                  model: preferences.stt.model,
+                }
+              : {}),
+          },
+          ({ transcribedMs, durationMs }) =>
+            setMessage(
+              t("studio.transcribe.progress", {
+                done: formatTimestamp(transcribedMs),
+                total: formatTimestamp(durationMs),
+              }),
+            ),
+        );
+        if (long) {
+          state.openCapture({
+            id: long.captureId!,
+            durationMs: long.durationMs,
+            transcript: long.text,
+            segments: long.segments,
+          });
+          setMessage(
+            long.text
+              ? t("studio.transcribe.saved")
+              : t("studio.transcribe.noSpeech"),
+          );
+          return;
+        }
+        setMessage("");
+      }
       if (file.size > 25 * 1024 * 1024)
         throw new Error(t("studio.transcribe.fileTooLarge"));
       const wav = await prepareLocalAudio(file);

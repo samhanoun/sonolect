@@ -9,6 +9,7 @@ mod ipc_audio;
 mod local_engine;
 mod local_history;
 mod online;
+mod streaming;
 mod system_audio;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -268,6 +269,10 @@ fn main() {
             local_history::purge_local_captures,
             local_history::read_local_capture_audio,
             local_history::update_local_capture,
+            streaming::capture_begin,
+            streaming::capture_append,
+            streaming::capture_finish,
+            streaming::capture_cancel,
             insertion::insert_text_into_active_app,
             check_accessibility_permission,
             open_accessibility_settings,

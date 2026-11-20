@@ -786,4 +786,15 @@ export const fr: Record<LocaleKeys, string> = {
   "native.segmentOrder": "Un segment se termine avant de commencer.",
   "native.speakerTooLong":
     "Les noms d'intervenants peuvent contenir jusqu'à 80 caractères.",
+  "capture.recorderBehind":
+    "L'enregistreur ne suit plus le microphone. L'enregistrement a été arrêté et sauvegardé.",
+  "native.fourHourLimit":
+    "L'enregistrement a atteint la limite de quatre heures.",
+  "native.notInProgress": "Cet enregistrement n'est plus en cours.",
+  "native.cannotReadRecording":
+    "Impossible de lire l'enregistrement\u00a0: {reason}",
+  "studio.transcribe.fileTooLargeApp":
+    "Choisissez un fichier audio de moins de 100 Mo.",
+  "studio.transcribe.reading": "Lecture du fichier audio…",
+  "studio.transcribe.progress": "Transcription en cours… {done} sur {total}",
 };

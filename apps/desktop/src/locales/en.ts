@@ -744,6 +744,14 @@ export const en = {
   "native.editTooLarge": "The edited transcript is too large to save.",
   "native.segmentOrder": "A segment ends before it starts.",
   "native.speakerTooLong": "Speaker names can have up to 80 characters.",
+  "capture.recorderBehind":
+    "The recorder is not keeping up with the microphone. The recording was stopped and saved.",
+  "native.fourHourLimit": "The recording reached the four-hour limit.",
+  "native.notInProgress": "This recording is no longer in progress.",
+  "native.cannotReadRecording": "Cannot read recording: {reason}",
+  "studio.transcribe.fileTooLargeApp": "Choose an audio file under 100 MB.",
+  "studio.transcribe.reading": "Reading the audio file…",
+  "studio.transcribe.progress": "Transcribing… {done} of {total}",
 } as const;
 
 export type LocaleKeys = keyof typeof en;

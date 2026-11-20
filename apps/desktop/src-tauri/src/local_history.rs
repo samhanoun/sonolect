@@ -21,7 +21,7 @@ pub struct Capture {
     #[serde(default)]
     pub segments: Vec<super::WhisperSegment>,
 }
-fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(super) fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let directory = app
         .path()
         .app_local_data_dir()
@@ -36,7 +36,7 @@ fn valid_id(id: &str) -> Result<(), String> {
     }
     Ok(())
 }
-fn write_record(app: &tauri::AppHandle, capture: &Capture) -> Result<(), String> {
+pub(super) fn write_record(app: &tauri::AppHandle, capture: &Capture) -> Result<(), String> {
     let directory = directory(app)?;
     let path = directory.join(format!("{}.json", capture.id));
     let temp = directory.join(format!("{}.json.tmp", capture.id));
@@ -47,6 +47,11 @@ fn write_record(app: &tauri::AppHandle, capture: &Capture) -> Result<(), String>
     .map_err(|e| e.to_string())?;
     // Rename replaces atomically on supported desktop filesystems.
     fs::rename(temp, path).map_err(|e| e.to_string())
+}
+/// The saved record of one recording, when it exists and can be read.
+pub(super) fn read_record(directory: &std::path::Path, id: &str) -> Option<Capture> {
+    let data = fs::read(directory.join(format!("{id}.json"))).ok()?;
+    serde_json::from_slice(&data).ok()
 }
 pub fn process(
     app: &tauri::AppHandle,
@@ -100,6 +105,8 @@ pub fn process_with(
 #[tauri::command]
 pub fn list_local_captures(app: tauri::AppHandle) -> Result<Vec<Capture>, String> {
     let mut captures = vec![];
+    // The recording in progress joins the library once it is finished.
+    let live = super::streaming::live_id();
     for entry in fs::read_dir(directory(&app)?).map_err(|e| e.to_string())? {
         let path = entry.map_err(|e| e.to_string())?.path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
@@ -107,7 +114,9 @@ pub fn list_local_captures(app: tauri::AppHandle) -> Result<Vec<Capture>, String
         }
         if let Ok(data) = fs::read(&path) {
             if let Ok(capture) = serde_json::from_slice::<Capture>(&data) {
-                captures.push(capture);
+                if live.as_deref() != Some(capture.id.as_str()) {
+                    captures.push(capture);
+                }
             }
         }
     }
@@ -289,6 +298,9 @@ fn purge_directory(
     }
     Ok(removed)
 }
+/// Transcribes a saved recording again with the local engine. Recordings of
+/// any length are handled chunk by chunk, with the same live text events as a
+/// recording in progress.
 #[tauri::command]
 pub async fn retry_local_capture(
     app: tauri::AppHandle,
@@ -298,20 +310,7 @@ pub async fn retry_local_capture(
 ) -> Result<super::WhisperResult, String> {
     valid_id(&id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let bytes =
-            fs::read(directory(&app)?.join(format!("{id}.wav"))).map_err(|e| e.to_string())?;
-        let duration_ms = bytes.len().saturating_sub(44) as u64 * 1000 / 32000;
-        process(
-            &app,
-            super::WhisperPayload {
-                audio_bytes: bytes,
-                mime_type: "audio/wav".into(),
-                duration_ms,
-                language,
-                model_path,
-            },
-            Some(id),
-        )
+        super::streaming::retranscribe(&app, &id, model_path, language)
     })
     .await
     .map_err(|e| e.to_string())?
