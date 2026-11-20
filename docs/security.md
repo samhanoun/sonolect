@@ -20,7 +20,8 @@
 ## Desktop app boundary
 
 - The bundled interface runs under a Content Security Policy (`app.security.csp` in `apps/desktop/src-tauri/tauri.conf.json`): scripts and styles only from the app itself, and network connections only to Tauri IPC and loopback (`localhost`/`127.0.0.1`, for a local `VITE_SONOLECT_API_URL`). Every online request (OpenRouter, OpenCode, Edge voices) goes through the Rust side, which refuses it while **Local only** is selected. If a build points `VITE_SONOLECT_API_URL` at a remote host, add that origin to `connect-src`.
-- File paths are chosen natively: recordings and system-audio captures live in the app's local data folder, and a model path from the interface must be a GGML Whisper file before it reaches whisper.cpp.
+- File paths are chosen natively: recordings live in the app's local data folder, and a model path from the interface must be a GGML Whisper file before it reaches whisper.cpp.
+- System audio is recorded natively, straight into the recording in progress, and never passes through the interface. The interface chooses no device, path or command: it can only ask for the default playback device to be fed into the recording it started, and only the recorder process the app started is ever stopped.
 - Dictations pasted into other apps are kept out of Windows clipboard history and the cloud clipboard, and the previous clipboard text is restored afterwards.
 - Settings > Privacy & retention deletes recordings after a chosen number of days, and **Delete all my data** removes recordings, transcripts, saved provider keys, dictionary, snippets and preferences.
 

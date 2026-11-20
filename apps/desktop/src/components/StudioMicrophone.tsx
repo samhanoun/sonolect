@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Mic } from "lucide-react";
 import { useT } from "../i18n";
-import { openPcmSource, type PcmSource } from "../liveCaptureNative";
+import {
+  CAPTURE_SOURCES,
+  nativeSystemAudio,
+  openPcmSource,
+  type CaptureSource,
+  type PcmSource,
+} from "../liveCaptureNative";
 import {
   listMicrophones,
   meterPosition,
@@ -11,6 +17,7 @@ import {
 } from "../microphone";
 import { pcmLevel } from "../pcmStream";
 import { useDesktopStore } from "../store/appStore";
+import { isTauriRuntime } from "../desktopNative";
 
 /** How long a microphone test listens before it stops by itself. */
 const TEST_MS = 15_000;
@@ -26,6 +33,20 @@ export function MicrophoneSettings() {
   const micDeviceId = useDesktopStore((state) => state.micDeviceId);
   const setMicDeviceId = useDesktopStore((state) => state.setMicDeviceId);
   const recordingState = useDesktopStore((state) => state.recordingState);
+  const captureSource = useDesktopStore((state) => state.captureSource);
+  const setCaptureSource = useDesktopStore((state) => state.setCaptureSource);
+  // Offered where the app can record what is playing on this computer.
+  const [systemAudio, setSystemAudio] = useState(false);
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let current = true;
+    void nativeSystemAudio.available().then((available) => {
+      if (current) setSystemAudio(available);
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
   const [microphones, setMicrophones] = useState<Microphone[]>([]);
   const [testing, setTesting] = useState(false);
   const [level, setLevel] = useState(0);
@@ -118,6 +139,27 @@ export function MicrophoneSettings() {
           <p>{t("studio.mic.meta")}</p>
         </div>
       </div>
+      {(systemAudio || captureSource === "system") && (
+        <label>
+          {t("studio.source.label")}
+          <select
+            value={captureSource}
+            disabled={busy}
+            onChange={(event) =>
+              setCaptureSource(event.target.value as CaptureSource)
+            }
+          >
+            {CAPTURE_SOURCES.map((source) => (
+              <option value={source} key={source}>
+                {t(`studio.source.${source}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {captureSource === "system" && (
+        <p className="studio-muted">{t("studio.source.systemHint")}</p>
+      )}
       <label>
         {t("studio.mic.choose")}
         <select

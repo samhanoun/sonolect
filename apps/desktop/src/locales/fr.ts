@@ -846,4 +846,39 @@ export const fr: Record<LocaleKeys, string> = {
     "Les raccourcis de dictée n'ont pas pu être activés. Une autre application les utilise peut-être déjà.",
   "error.importInProgress":
     "Un fichier audio est en cours de transcription. Réessayez une fois qu'elle est terminée.",
+  "studio.source.label": "Enregistrer depuis",
+  "studio.source.microphone": "Le microphone",
+  "studio.source.system": "Le son de cet ordinateur",
+  "studio.source.systemHint":
+    "Le bouton d'enregistrement capte ce qui est joué sur cet ordinateur, une réunion ou une vidéo par exemple. La dictée avec les raccourcis ou la bulle utilise toujours le microphone.",
+  "studio.dock.recordingSystem": "Enregistrement du son de l'ordinateur…",
+  "native.noPlaybackDevice": "Aucun périphérique de lecture à enregistrer.",
+  "native.playbackFormat":
+    "Impossible de lire le format de lecture\u00a0: {reason}",
+  "native.playbackNoFormat":
+    "Le périphérique de lecture n'indique aucun format audio.",
+  "native.playbackUnsupported":
+    "Format de lecture non pris en charge\u00a0: {format}.",
+  "native.systemAudioCannotStart":
+    "Impossible de démarrer l'enregistrement du son de l'ordinateur\u00a0: {reason}",
+  "native.systemAudioCannotRecord":
+    "Impossible d'enregistrer le son de l'ordinateur\u00a0: {reason}",
+  "native.systemAudioStoppedReason":
+    "Le son de l'ordinateur n'est plus enregistré\u00a0: {reason}",
+  "native.systemAudioStopped": "Le son de l'ordinateur n'est plus enregistré.",
+  "native.systemAudioStoppedUnexpectedly":
+    "L'enregistrement du son de l'ordinateur s'est arrêté de façon inattendue.",
+  "native.systemAudioDidNotStart":
+    "L'enregistrement du son de l'ordinateur n'a pas démarré.",
+  "native.systemAudioUnavailable":
+    "La capture du son de l'ordinateur n'est pas disponible sur cette plateforme.",
+  "native.systemRecorderCannotStart":
+    "Impossible de démarrer l'enregistreur du son de l'ordinateur\u00a0: {reason}",
+  "native.systemRecorderCannotRead":
+    "Impossible de lire l'enregistreur du son de l'ordinateur.",
+  "native.noMonitorSource": "Aucune source de contrôle PulseAudio trouvée.",
+  "native.pactlFailed": "Échec de pactl\u00a0: {reason}",
+  "native.systemAudioBusy": "Le son de l'ordinateur n'est pas disponible.",
+  "native.ffmpegNeeded":
+    "ffmpeg est nécessaire pour enregistrer le son de l'ordinateur.",
 };

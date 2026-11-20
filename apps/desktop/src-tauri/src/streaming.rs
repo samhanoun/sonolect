@@ -473,6 +473,9 @@ struct Live {
     hold: compact_audio::Hold,
 }
 
+/// What a command answers when its recording has ended or was replaced.
+pub const NOT_IN_PROGRESS: &str = "This recording is no longer in progress.";
+
 /// The one recording in progress. The microphone is a single device, so a
 /// second recording replaces a first that was never finished.
 static LIVE: Mutex<Option<Live>> = Mutex::new(None);
@@ -605,11 +608,25 @@ pub fn capture_begin(
 pub fn capture_append(request: tauri::ipc::Request<'_>) -> Result<u64, String> {
     let id = super::ipc_audio::header(&request, "x-sonolect-capture").unwrap_or_default();
     let pcm = super::ipc_audio::pcm_chunk(&request)?;
+    append_bytes(&id, &pcm)
+}
+
+fn append_bytes(id: &str, pcm: &[u8]) -> Result<u64, String> {
     let mut live = LIVE.lock().map_err(|_| "Speech engine unavailable")?;
     match live.as_mut().filter(|live| live.id == id) {
-        Some(live) => live.recorder.append(&pcm),
-        None => Err("This recording is no longer in progress.".into()),
+        Some(live) => live.recorder.append(pcm),
+        None => Err(NOT_IN_PROGRESS.into()),
     }
+}
+
+/// Adds samples from a native source (system audio) to the live recording.
+/// Returns the recorded length in milliseconds.
+pub fn append_live(id: &str, samples: &[i16]) -> Result<u64, String> {
+    let pcm: Vec<u8> = samples
+        .iter()
+        .flat_map(|sample| sample.to_le_bytes())
+        .collect();
+    append_bytes(id, &pcm)
 }
 
 /// The ID of the recording in progress, if any.
@@ -622,10 +639,9 @@ pub fn live_id() -> Option<String> {
 fn take_live(id: &str) -> Result<Live, String> {
     let mut live = LIVE.lock().map_err(|_| "Speech engine unavailable")?;
     if live.as_ref().is_some_and(|live| live.id == id) {
-        live.take()
-            .ok_or_else(|| "This recording is no longer in progress.".into())
+        live.take().ok_or_else(|| NOT_IN_PROGRESS.into())
     } else {
-        Err("This recording is no longer in progress.".into())
+        Err(NOT_IN_PROGRESS.into())
     }
 }
 

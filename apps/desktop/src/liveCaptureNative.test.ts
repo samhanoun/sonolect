@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { LiveCaptureTransport } from "./liveCapture";
-import { recordLive, type PcmSource } from "./liveCaptureNative";
+import {
+  loadCaptureSource,
+  recordLive,
+  recordSystemAudio,
+  saveCaptureSource,
+  type PcmSource,
+  type SystemAudioEnded,
+  type SystemAudioFeed,
+} from "./liveCaptureNative";
 
 function fakeTransport(failBegin = false) {
   const calls: string[] = [];
@@ -150,5 +158,192 @@ describe("recordLive", () => {
     assert.equal(calls.at(-2), "cancel");
     assert.equal(calls.at(-1), "unlisten");
     assert.ok(!calls.includes("finish"));
+  });
+});
+
+/** A system-audio feed that reports what the test tells it to. */
+function fakeFeed(calls: string[], failStart?: string, endsAtStart?: string) {
+  const state: {
+    level?: (level: number) => void;
+    ended?: (event: SystemAudioEnded) => void;
+  } = {};
+  const feed: SystemAudioFeed = {
+    available: async () => true,
+    listen: async ({ onLevel, onEnded }) => {
+      calls.push("feed listen");
+      state.level = onLevel;
+      state.ended = onEnded;
+      return () => void calls.push("feed unlisten");
+    },
+    start: async (captureId) => {
+      if (failStart) throw new Error(failStart);
+      calls.push(`feed start ${captureId}`);
+      // The recorder process can exit before its start is acknowledged.
+      if (endsAtStart) state.ended?.({ id: captureId, message: endsAtStart });
+    },
+    stop: async () => void calls.push("feed stop"),
+  };
+  return { feed, state };
+}
+
+describe("recordSystemAudio", () => {
+  it("feeds the recording natively and stops the feed before finishing", async () => {
+    const { transport, calls } = fakeTransport();
+    const { feed, state } = fakeFeed(calls);
+    const levels: number[] = [];
+    let clock = 1000;
+    const recording = await recordSystemAudio(
+      {},
+      { onLevel: (level) => levels.push(level) },
+      transport,
+      feed,
+      () => clock,
+    );
+    assert.equal(recording.captureId, "17-1");
+    state.level!(0.4);
+    clock = 61_000;
+    const result = await recording.finish();
+    assert.equal(result.text, "Hello.");
+    // The length is the time recorded: the window saw none of the audio.
+    assert.equal(result.durationMs, 60_000);
+    // A level that arrives late is not passed on.
+    state.level!(0.9);
+    assert.deepEqual(levels, [0.4, 0]);
+    assert.deepEqual(calls, [
+      "listen",
+      "begin",
+      "feed listen",
+      "feed start 17-1",
+      "feed unlisten",
+      "feed stop",
+      "finish",
+      "unlisten",
+    ]);
+  });
+
+  it("reports a feed that ended by itself, once, for this recording only", async () => {
+    const { transport, calls } = fakeTransport();
+    const { feed, state } = fakeFeed(calls);
+    const stalled: string[] = [];
+    const recording = await recordSystemAudio(
+      {},
+      { onStalled: (message) => stalled.push(message) },
+      transport,
+      feed,
+    );
+    state.ended!({ id: "another", message: "System audio stopped." });
+    assert.deepEqual(stalled, []);
+    state.ended!({ id: "17-1", message: "System audio stopped." });
+    assert.deepEqual(stalled, ["System audio stopped."]);
+    await recording.finish();
+    state.ended!({ id: "17-1", message: "System audio stopped." });
+    assert.equal(stalled.length, 1);
+  });
+
+  it("throws the recording away and says why when the feed cannot start", async () => {
+    const { transport, calls } = fakeTransport();
+    const { feed } = fakeFeed(calls, "There is no playback device to record.");
+    await assert.rejects(
+      recordSystemAudio({}, {}, transport, feed),
+      /no playback device/,
+    );
+    assert.deepEqual(calls, [
+      "listen",
+      "begin",
+      "feed listen",
+      "feed unlisten",
+      "feed stop",
+      "cancel",
+      "unlisten",
+    ]);
+  });
+
+  it("treats a feed that ends while starting as a failed start, with the reason", async () => {
+    const { transport, calls } = fakeTransport();
+    const { feed } = fakeFeed(calls, undefined, "System audio stopped.");
+    const stalled: string[] = [];
+    await assert.rejects(
+      recordSystemAudio(
+        {},
+        { onStalled: (message) => stalled.push(message) },
+        transport,
+        feed,
+      ),
+      /System audio stopped\./,
+    );
+    // Nobody is told to stop a recording that never began.
+    assert.deepEqual(stalled, []);
+    assert.deepEqual(calls.slice(-4), [
+      "feed unlisten",
+      "feed stop",
+      "cancel",
+      "unlisten",
+    ]);
+  });
+
+  it("rejects without touching the feed when the recorder cannot start", async () => {
+    const { transport, calls } = fakeTransport(true);
+    const { feed } = fakeFeed(calls);
+    await assert.rejects(
+      recordSystemAudio({}, {}, transport, feed),
+      /speech model/,
+    );
+    assert.equal(
+      calls.some((call) => call.startsWith("feed")),
+      false,
+    );
+  });
+
+  it("cancel stops the feed and deletes the recording", async () => {
+    const { transport, calls } = fakeTransport();
+    const { feed } = fakeFeed(calls);
+    const recording = await recordSystemAudio({}, {}, transport, feed);
+    await recording.cancel();
+    assert.deepEqual(calls.slice(-4), [
+      "feed unlisten",
+      "feed stop",
+      "cancel",
+      "unlisten",
+    ]);
+  });
+});
+
+describe("the choice of what to record", () => {
+  function memory() {
+    const values = new Map<string, string>();
+    return {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => void values.set(key, value),
+      removeItem: (key: string) => void values.delete(key),
+    };
+  }
+
+  it("is the microphone until this computer's sound is chosen", () => {
+    const storage = memory();
+    assert.equal(loadCaptureSource(storage), "microphone");
+    saveCaptureSource("system", storage);
+    assert.equal(loadCaptureSource(storage), "system");
+    saveCaptureSource("microphone", storage);
+    assert.equal(loadCaptureSource(storage), "microphone");
+  });
+
+  it("is the microphone when the saved value is unknown or storage fails", () => {
+    const storage = memory();
+    storage.setItem("sonolect.captureSource", "tape");
+    assert.equal(loadCaptureSource(storage), "microphone");
+    assert.equal(loadCaptureSource(undefined), "microphone");
+    const broken = {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+      removeItem: () => {
+        throw new Error("blocked");
+      },
+    };
+    assert.equal(loadCaptureSource(broken), "microphone");
+    saveCaptureSource("system", broken);
   });
 });

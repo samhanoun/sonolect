@@ -75,7 +75,14 @@ import {
   transcribeUsingProvider,
   setProviderMode,
 } from "../providerSettings";
-import { recordLive, type LiveRecording } from "../liveCaptureNative";
+import {
+  loadCaptureSource,
+  recordLive,
+  recordSystemAudio,
+  saveCaptureSource,
+  type CaptureSource,
+  type LiveRecording,
+} from "../liveCaptureNative";
 import { localizeNativeMessage } from "../nativeMessages";
 
 export type PrivacyLevel = "local" | "cloud";
@@ -153,6 +160,9 @@ export type DesktopState = {
   setWhisperConfig: (config: WhisperConfig) => void;
   /** The microphone that records; empty for the system default. */
   micDeviceId: string;
+  /** What the Studio's record button records. Dictation uses the microphone. */
+  captureSource: CaptureSource;
+  setCaptureSource: (source: CaptureSource) => void;
   setMicDeviceId: (deviceId: string) => void;
   setCommandOpen: (open: boolean) => void;
   /** Where the current/last capture was started from. Bubble and hotkey
@@ -632,6 +642,11 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     set({ whisperConfig: config });
   },
   micDeviceId: loadMicDeviceId(),
+  captureSource: loadCaptureSource(),
+  setCaptureSource: (source) => {
+    saveCaptureSource(source);
+    set({ captureSource: source });
+  },
   setMicDeviceId: (deviceId) => {
     saveMicDeviceId(deviceId);
     set({ micDeviceId: deviceId });
@@ -672,6 +687,69 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
         voiceCapture: undefined,
         liveTranscript: "",
       });
+      return;
+    }
+
+    // A recording started in the Studio can take what is playing on this
+    // computer instead of the microphone. A dictation is always spoken.
+    if (
+      source === "app" &&
+      get().captureSource === "system" &&
+      isTauriRuntime()
+    ) {
+      permissionCancelled = false;
+      stallNotice = undefined;
+      discardCapture = false;
+      cloudAbort = new AbortController();
+      set({
+        recordingState: "requesting-permission",
+        voiceError: undefined,
+        voiceCapture: undefined,
+        liveTranscript: "",
+      });
+      try {
+        const stt = { ...useProviderStore.getState().preferences.stt };
+        const online =
+          stt.provider !== "local" && get().privacyLevel === "cloud";
+        if (online) await setProviderMode(true);
+        const live = await recordSystemAudio(
+          {
+            language: get().sttLanguage,
+            modelPath: get().whisperConfig.modelPath,
+            ...(online ? { provider: stt.provider, model: stt.model } : {}),
+          },
+          {
+            onPartial: (segments) =>
+              set({
+                liveTranscript: segments
+                  .map((segment) => segment.text)
+                  .join(" "),
+              }),
+            onLevel: (level) =>
+              levelListeners.forEach((listener) => listener(level)),
+            // The feed ended by itself or the recorder is full: keep what
+            // was recorded and say why it stopped.
+            onStalled: (message) => {
+              stallNotice = message;
+              get().stopVoiceCapture();
+            },
+          },
+        );
+        if (permissionCancelled) {
+          await live.cancel().catch(() => undefined);
+          set({ recordingState: "idle" });
+          return;
+        }
+        activeLive = live;
+        activeLiveOnline = online;
+        activeStartedAt = Date.now();
+        set({ recordingState: "recording" });
+      } catch (error) {
+        set({
+          recordingState: "error",
+          voiceError: error instanceof Error ? error.message : String(error),
+        });
+      }
       return;
     }
 

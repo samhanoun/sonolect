@@ -36,6 +36,9 @@ const toneWav = readFileSync(
  *
  * `compress_local_captures` compresses each saved recording once and reports
  * what that freed. Pasting into another app always succeeds.
+ *
+ * With `systemAudio`, the computer's sound can be recorded: once started it
+ * adds a second of audio to the live recording every 100 ms, with a level.
  */
 export async function installMockTauri(
   page: Page,
@@ -45,10 +48,12 @@ export async function installMockTauri(
     recorder?: boolean;
     /** The recorder takes this much audio, then refuses more. */
     recorderLimitMs?: number;
+    /** true: this computer's sound can be recorded. */
+    systemAudio?: boolean;
   } = {},
 ) {
   await page.addInitScript(
-    ({ captures, toneWav, recorder, recorderLimitMs }) => {
+    ({ captures, toneWav, recorder, recorderLimitMs, systemAudio }) => {
       window.localStorage.clear();
       const library = structuredClone(captures);
       /** Recordings already turned into Opus. */
@@ -84,6 +89,7 @@ export async function installMockTauri(
         live.segments.push(...heard);
         emit("capture-partial", { captureId: live.id, segments: heard });
       };
+      let systemFeed: ReturnType<typeof setInterval> | undefined;
       Object.assign(window, {
         __sonolectE2eNativeCalls: calls,
         __sonolectE2eEmit: emit,
@@ -169,6 +175,25 @@ export async function installMockTauri(
               case "capture_cancel":
                 live = undefined;
                 return null;
+              case "check_system_audio_available":
+                return systemAudio;
+              case "start_system_audio_capture":
+                if (!systemAudio)
+                  throw "There is no playback device to record.";
+                if (!live || live.id !== args.id)
+                  throw "This recording is no longer in progress.";
+                clearInterval(systemFeed);
+                systemFeed = setInterval(() => {
+                  if (!live) return;
+                  live.bytes += 32000;
+                  hear(false);
+                  emit("system-audio-level", 0.6);
+                }, 100);
+                return null;
+              case "stop_system_audio_capture":
+                clearInterval(systemFeed);
+                systemFeed = undefined;
+                return null;
               case "insert_text_into_active_app":
                 return {
                   ok: true,
@@ -224,6 +249,7 @@ export async function installMockTauri(
       toneWav,
       recorder: options.recorder ?? true,
       recorderLimitMs: options.recorderLimitMs,
+      systemAudio: options.systemAudio ?? false,
     },
   );
 }

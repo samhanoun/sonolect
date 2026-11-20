@@ -800,6 +800,32 @@ export const en = {
     "The dictation shortcuts could not be set up. Another app may already use them.",
   "error.importInProgress":
     "An audio file is being transcribed. Record again once it has finished.",
+  "studio.source.label": "Record from",
+  "studio.source.microphone": "The microphone",
+  "studio.source.system": "This computer's sound",
+  "studio.source.systemHint":
+    "The record button records what is playing on this computer, such as a meeting or a video. Dictation with the hotkeys or the bubble still uses the microphone.",
+  "studio.dock.recordingSystem": "Recording computer sound…",
+  "native.noPlaybackDevice": "There is no playback device to record.",
+  "native.playbackFormat": "Cannot read the playback format: {reason}",
+  "native.playbackNoFormat": "The playback device reports no audio format.",
+  "native.playbackUnsupported": "Unsupported playback format: {format}.",
+  "native.systemAudioCannotStart":
+    "Cannot start recording system audio: {reason}",
+  "native.systemAudioCannotRecord": "Cannot record system audio: {reason}",
+  "native.systemAudioStoppedReason": "System audio stopped: {reason}",
+  "native.systemAudioStopped": "System audio stopped.",
+  "native.systemAudioStoppedUnexpectedly": "System audio stopped unexpectedly.",
+  "native.systemAudioDidNotStart": "System audio did not start.",
+  "native.systemAudioUnavailable":
+    "System audio capture is not available on this platform.",
+  "native.systemRecorderCannotStart":
+    "Cannot start the system audio recorder: {reason}",
+  "native.systemRecorderCannotRead": "Cannot read the system audio recorder.",
+  "native.noMonitorSource": "No PulseAudio monitor source found.",
+  "native.pactlFailed": "pactl failed: {reason}",
+  "native.systemAudioBusy": "System audio is unavailable.",
+  "native.ffmpegNeeded": "ffmpeg is needed to record system audio.",
 } as const;
 
 export type LocaleKeys = keyof typeof en;
