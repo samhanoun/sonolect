@@ -68,6 +68,7 @@ export type IconName =
   | "search"
   | "copy"
   | "share"
+  | "download"
   | "pin"
   | "trash"
   | "play"
@@ -154,6 +155,9 @@ export function Icon({
           d="M12 3v12M7 8l5-5 5 5M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"
           {...stroke}
         />
+      )}
+      {name === "download" && (
+        <Path d="M12 3v12M7 10l5 5 5-5M5 21h14" {...stroke} />
       )}
       {name === "pin" && (
         <Path d="M9 4h6l-1 6 4 4H6l4-4zM12 14v6" {...stroke} />

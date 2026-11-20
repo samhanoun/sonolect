@@ -21,7 +21,12 @@ import { formatDuration } from "../src/library";
 import { actionLabel, noticeText, type NoticeAction } from "../src/notices";
 import { requestDictationPermission } from "../src/speech";
 import { useCompanionStore } from "../src/store";
-import { copyText, openAppSettings, shareText } from "../src/ui/actions";
+import {
+  copyText,
+  currentShareTarget,
+  openAppSettings,
+  shareText,
+} from "../src/ui/actions";
 import {
   Button,
   CHROME_MAX_FONT_SCALE,
@@ -530,12 +535,23 @@ export default function CaptureScreen() {
                     label={copied ? t.capture.copied : t.capture.copy}
                     onPress={() => void copyLatest()}
                   />
-                  <Button
-                    compact
-                    icon="share"
-                    label={t.capture.share}
-                    onPress={() => void shareText(latest.refinedText, t)}
-                  />
+                  {currentShareTarget() === "download" ? (
+                    <Button
+                      compact
+                      icon="download"
+                      label={t.capture.download}
+                      onPress={() =>
+                        void shareText(latest.refinedText, t, latest.createdAt)
+                      }
+                    />
+                  ) : (
+                    <Button
+                      compact
+                      icon="share"
+                      label={t.capture.share}
+                      onPress={() => void shareText(latest.refinedText, t)}
+                    />
+                  )}
                 </View>
                 <View style={styles.chips}>
                   {availableRefinementModes().map((mode) => (

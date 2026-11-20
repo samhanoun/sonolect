@@ -56,6 +56,8 @@ const en = {
     copyFailed: "Couldn't copy the text.",
     share: "Share",
     shareFailed: "Couldn't open the share sheet.",
+    download: "Download",
+    downloadFailed: "Couldn't save the note.",
     ephemeralNote: "Ephemeral mode: nothing is saved.",
     systemServiceNote:
       "Transcribed by your phone's speech service, which may send audio online (for example to Google).",
@@ -384,6 +386,8 @@ const fr: Strings = {
     copyFailed: "Impossible de copier le texte.",
     share: "Partager",
     shareFailed: "Impossible d'ouvrir le partage.",
+    download: "Télécharger",
+    downloadFailed: "Impossible d'enregistrer la note.",
     ephemeralNote: "Mode éphémère : rien n'est enregistré.",
     systemServiceNote:
       "Transcription par le service vocal du téléphone, qui peut envoyer l'audio en ligne (par exemple à Google).",
