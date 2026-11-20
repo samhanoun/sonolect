@@ -9,6 +9,7 @@ import {
   historyOffConfirmation,
   historyOffPrompt,
   httpsUrlOrNull,
+  retentionPrompt,
 } from "./settingsPolicy";
 
 const localFirst: CompanionSettings = {
@@ -157,6 +158,67 @@ describe("confirmation prompts", () => {
   });
 });
 
+describe("retention confirmation", () => {
+  const now = Date.parse("2026-11-20T12:00:00.000Z");
+  const note = (id: string, ageDays: number, pinned = false) => ({
+    id,
+    rawText: id,
+    refinedText: id,
+    mode: "dictate" as const,
+    language: "en-US",
+    privacyMode: false,
+    createdAt: new Date(now - ageDays * 86_400_000).toISOString(),
+    durationMs: 0,
+    source: "typed" as const,
+    syncState: "local" as const,
+    pinned,
+  });
+  const history = [
+    note("a", 0),
+    note("b", 10),
+    note("c", 40),
+    note("d", 60, true),
+  ];
+
+  it("asks before a shorter limit deletes notes, and says how many", () => {
+    assert.deepEqual(retentionPrompt(STRINGS.en, history, 7, now), {
+      title: "Delete older notes?",
+      message:
+        "This deletes 2 notes older than 7 days now. Pinned notes are kept.",
+    });
+    assert.deepEqual(retentionPrompt(STRINGS.en, history, 30, now), {
+      title: "Delete older notes?",
+      message:
+        "This deletes 1 note older than 30 days now. Pinned notes are kept.",
+    });
+    assert.equal(
+      retentionPrompt(STRINGS.fr, history, 1, now)?.message,
+      "Cela supprime maintenant 2 notes de plus de 1 jour. Les notes épinglées sont conservées.",
+    );
+  });
+
+  it("asks nothing when the change deletes nothing now", () => {
+    assert.equal(retentionPrompt(STRINGS.en, history, 0, now), null);
+    assert.equal(retentionPrompt(STRINGS.en, history, 90, now), null);
+    assert.equal(retentionPrompt(STRINGS.en, [], 1, now), null);
+  });
+
+  it("explains each choice under the setting", () => {
+    assert.equal(
+      STRINGS.en.settings.retentionHelp(0),
+      "Notes stay on this phone until you delete them.",
+    );
+    assert.equal(
+      STRINGS.en.settings.retentionHelp(1),
+      "Notes older than 1 day are deleted automatically. Pinned notes are kept.",
+    );
+    assert.equal(
+      STRINGS.fr.settings.retentionHelp(30),
+      "Les notes de plus de 30 jours sont supprimées automatiquement. Les notes épinglées sont conservées.",
+    );
+  });
+});
+
 describe("confirmation titles fit an Android alert", () => {
   // react-native's Android Alert shows at most two lines of its title and
   // cuts the rest with an ellipsis (alert_title_layout.xml: singleLine,
@@ -174,6 +236,7 @@ describe("confirmation titles fit an Android alert", () => {
         t.settings.historyOffTitle,
         t.settings.ephemeralTitle,
         t.settings.eraseTitle,
+        t.settings.retentionTitle,
         t.errorBoundary.deleteNotesTitle,
         t.library.deleteConfirm,
         t.capture.discardTitle,

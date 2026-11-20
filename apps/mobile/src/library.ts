@@ -100,8 +100,93 @@ export function formattingLocale(
   return deviceLanguage === uiLanguage.toLowerCase() ? undefined : uiLanguage;
 }
 
-/** sonolect-notes-YYYY-MM-DD.md, with the local date. */
-export function exportFileName(date: Date): string {
+/** The file formats the library can be exported in. */
+export const EXPORT_FORMATS = ["markdown", "text", "json"] as const;
+export type ExportFormat = (typeof EXPORT_FORMATS)[number];
+
+/** What a file of each format is called and how the share sheet sees it. */
+export const EXPORT_FILE_TYPES: Record<
+  ExportFormat,
+  { extension: string; mimeType: string; uti: string }
+> = {
+  markdown: {
+    extension: "md",
+    mimeType: "text/markdown",
+    uti: "net.daringfireball.markdown",
+  },
+  text: { extension: "txt", mimeType: "text/plain", uti: "public.plain-text" },
+  json: { extension: "json", mimeType: "application/json", uti: "public.json" },
+};
+
+/**
+ * Notes as plain text: a line with the date and mode, the note, then a
+ * rule between notes so that a note of several paragraphs stays in one piece.
+ */
+export function exportAsText(
+  history: readonly TranscriptTurn[],
+  options: ExportOptions = {},
+): string {
+  const formatDate = options.formatDate ?? utcMinute;
+  const modeLabel = options.modeLabel ?? ((mode: string) => mode);
+  return history
+    .map(
+      (turn) =>
+        `${formatDate(turn.createdAt)} · ${modeLabel(turn.mode)}\n\n${turn.refinedText}`,
+    )
+    .join("\n\n----------\n\n");
+}
+
+/**
+ * Notes as JSON, for other tools: every note with its date, mode, language
+ * and length, and the text as dictated when refining changed it. Dates stay
+ * in ISO 8601 and modes stay as keys, whatever the app language.
+ */
+export function exportAsJson(
+  history: readonly TranscriptTurn[],
+  exportedAt: Date,
+): string {
+  return JSON.stringify(
+    {
+      app: "Sonolect",
+      formatVersion: 1,
+      exportedAt: exportedAt.toISOString(),
+      notes: history.map((turn) => ({
+        id: turn.id,
+        createdAt: turn.createdAt,
+        mode: turn.mode,
+        language: turn.language,
+        source: turn.source,
+        durationMs: turn.durationMs,
+        pinned: Boolean(turn.pinned),
+        text: turn.refinedText,
+        ...(turn.rawText && turn.rawText !== turn.refinedText
+          ? { original: turn.rawText }
+          : {}),
+      })),
+    },
+    null,
+    2,
+  );
+}
+
+/** The library in the chosen format. */
+export function exportLibrary(
+  history: readonly TranscriptTurn[],
+  format: ExportFormat,
+  options: ExportOptions & { exportedAt?: Date } = {},
+): string {
+  if (format === "json")
+    return exportAsJson(history, options.exportedAt ?? new Date());
+  return format === "text"
+    ? exportAsText(history, options)
+    : exportAsMarkdown(history, options);
+}
+
+/** sonolect-notes-YYYY-MM-DD.md (or .txt, .json), with the local date. */
+export function exportFileName(
+  date: Date,
+  format: ExportFormat = "markdown",
+): string {
   const pad = (n: number) => n.toString().padStart(2, "0");
-  return `sonolect-notes-${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}.md`;
+  return `sonolect-notes-${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}.${EXPORT_FILE_TYPES[format].extension}`;
 }

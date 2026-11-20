@@ -40,6 +40,7 @@ import {
   stylePresetForMode,
 } from "./refine";
 import { sweepCacheFiles } from "./recordings";
+import { applyRetention } from "./retention";
 import type { SpeechSession } from "./speech";
 import {
   downloadLanguageModel,
@@ -214,6 +215,30 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     }
     if (!stillAllowed(epoch)) return;
     await persist(() => mobileStorage.saveNotes(get().history));
+  };
+
+  /**
+   * Deletes the notes past the retention limit (retention.ts): at launch,
+   * each time the app comes back to the foreground, and when the limit
+   * changes. Notes that could not be read are left alone. Returns how many
+   * notes were deleted.
+   */
+  const enforceRetention = async (): Promise<number> => {
+    const { settings, history, latest, storageDegraded } = get();
+    if (!keepsHistory(settings) || storageDegraded) return 0;
+    const { kept, expired } = applyRetention(
+      history,
+      settings.retentionDays,
+      Date.now(),
+    );
+    if (expired.length === 0) return 0;
+    const gone = new Set(expired.map((turn) => turn.id));
+    // A deleted note's Listen button, and so its Stop, goes away with it.
+    const speaking = ttsController.getState().ownerId;
+    if (speaking && gone.has(speaking)) void ttsController.stop();
+    if (latest && gone.has(latest.id)) set({ latest: undefined });
+    await persistHistory(kept);
+    return expired.length;
   };
 
   /**
@@ -501,7 +526,11 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         AppState.addEventListener("change", (state) => {
           // A language pack installed in the system settings, or a
           // recognizer changed there, shows up back in the foreground.
-          if (state === "active") invalidateRecognitionEnvironment();
+          if (state === "active") {
+            invalidateRecognitionEnvironment();
+            // A phone left open for days still honours the limit.
+            void enforceRetention();
+          }
           // Never 'inactive': Control Center, Notification Center, Face ID,
           // system alerts and app-switcher peeks pass through it too.
           if (state === "background") stopForBackground();
@@ -541,6 +570,19 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
           if (apiToken) {
             apiToken = undefined;
             await mobileStorage.saveApiToken(undefined).catch(() => undefined);
+          }
+        }
+        // Notes past the retention limit go before anything is shown. A
+        // failed write is retried at the next launch.
+        if (notesRead.ok && keepsHistory(settings)) {
+          const { kept, expired } = applyRetention(
+            history,
+            settings.retentionDays,
+            Date.now(),
+          );
+          if (expired.length > 0) {
+            history = kept;
+            await mobileStorage.saveNotes(history).catch(() => undefined);
           }
         }
         // Nothing was deleted: the next launch reads again.
@@ -585,6 +627,8 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         const merged = mergeTranscriptHistory(synced, remote);
         set({ history: merged, latest: merged[0] });
         await persist(() => mobileStorage.saveNotes(merged));
+        // The server may have returned notes this phone already let go.
+        await enforceRetention();
       } catch {
         // Offline: keep local history as is.
       }
@@ -791,6 +835,9 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
           set({ history: [], storageDegraded: false });
         }
         sweepCacheWhenIdle();
+      }
+      if (settings.retentionDays !== previous.retentionDays) {
+        await enforceRetention();
       }
       if (settings.cloudSyncEnabled && !previous.cloudSyncEnabled) {
         await persistHistory(

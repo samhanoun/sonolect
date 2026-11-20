@@ -1,4 +1,10 @@
-import type { DictationLanguage, RefinementMode, UiLanguage } from "./domain";
+import type {
+  DictationLanguage,
+  RefinementMode,
+  RetentionDays,
+  UiLanguage,
+} from "./domain";
+import type { ExportFormat } from "./library";
 
 const en = {
   tabs: {
@@ -151,6 +157,12 @@ const en = {
     exportAll: "Export",
     exportFailed: "Couldn't export your notes.",
     exportTitle: "Export notes",
+    exportAs: "Export as",
+    exportFormats: {
+      markdown: "Markdown",
+      text: "Plain text",
+      json: "JSON",
+    } satisfies Record<ExportFormat, string>,
     sync: { local: "LOCAL", queued: "QUEUED", synced: "SYNCED" },
     original: "Original",
     typed: "TYPED",
@@ -195,6 +207,21 @@ const en = {
     allowSystemServiceHelp:
       "Your audio may then be sent to Google or Apple. Off: Sonolect asks each time.",
     saveHistory: "Save history",
+    retention: "KEEP NOTES FOR",
+    retentionChoices: {
+      0: "Forever",
+      1: "1 day",
+      7: "7 days",
+      30: "30 days",
+      90: "90 days",
+    } satisfies Record<RetentionDays, string>,
+    retentionHelp: (days: RetentionDays) =>
+      days === 0
+        ? "Notes stay on this phone until you delete them."
+        : `Notes older than ${days === 1 ? "1 day" : `${days} days`} are deleted automatically. Pinned notes are kept.`,
+    retentionTitle: "Delete older notes?",
+    retentionMessage: (n: number, days: RetentionDays) =>
+      `This deletes ${n} ${n === 1 ? "note" : "notes"} older than ${days === 1 ? "1 day" : `${days} days`} now. Pinned notes are kept.`,
     haptics: "Haptics",
     sync: "Sync with Sonolect API",
     dictation: "DICTATION LANGUAGE",
@@ -418,6 +445,12 @@ const fr: Strings = {
     exportAll: "Exporter",
     exportFailed: "Impossible d'exporter vos notes.",
     exportTitle: "Exporter les notes",
+    exportAs: "Exporter en",
+    exportFormats: {
+      markdown: "Markdown",
+      text: "Texte brut",
+      json: "JSON",
+    },
     sync: { local: "LOCAL", queued: "EN ATTENTE", synced: "SYNCHRONISÉ" },
     original: "Original",
     typed: "SAISI",
@@ -462,6 +495,21 @@ const fr: Strings = {
     allowSystemServiceHelp:
       "L'audio peut alors être envoyé à Google ou Apple. Désactivé : Sonolect demande à chaque fois.",
     saveHistory: "Conserver l'historique",
+    retention: "CONSERVER LES NOTES",
+    retentionChoices: {
+      0: "Toujours",
+      1: "1 jour",
+      7: "7 jours",
+      30: "30 jours",
+      90: "90 jours",
+    },
+    retentionHelp: (days: RetentionDays) =>
+      days === 0
+        ? "Les notes restent sur ce téléphone jusqu'à ce que vous les supprimiez."
+        : `Les notes de plus de ${days === 1 ? "1 jour" : `${days} jours`} sont supprimées automatiquement. Les notes épinglées sont conservées.`,
+    retentionTitle: "Supprimer les anciennes notes ?",
+    retentionMessage: (n: number, days: RetentionDays) =>
+      `Cela supprime maintenant ${n} ${n === 1 ? "note" : "notes"} de plus de ${days === 1 ? "1 jour" : `${days} jours`}. Les notes épinglées sont conservées.`,
     haptics: "Retour haptique",
     sync: "Synchroniser avec l'API Sonolect",
     dictation: "LANGUE DE DICTÉE",
