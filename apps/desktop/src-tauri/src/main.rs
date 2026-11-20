@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+mod audio_feed;
 mod bubble;
 mod compact_audio;
 mod insertion;
@@ -12,6 +13,8 @@ mod local_history;
 mod online;
 mod streaming;
 mod system_audio;
+#[cfg(target_os = "windows")]
+mod system_loopback;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
