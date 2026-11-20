@@ -15,7 +15,7 @@
     "test": "tsx --test src/*.test.ts && tsx src/auth.smoke.ts && tsx src/routes.smoke.ts && tsx src/audio-jobs.smoke.ts && tsx src/local-voice-transcript.e2e.smoke.ts && tsx src/transcript-persistence.smoke.ts && tsx src/ai-routes.smoke.ts"
   },
   "dependencies": {
-    "@fastify/cors": "^10.0.2",
+    "@fastify/cors": "^11.4.3",
     "@fastify/helmet": "^12.0.1",
     "@fastify/rate-limit": "^10.3.0",
     "@google-cloud/speech": "^7.0.0",

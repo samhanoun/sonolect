@@ -17,7 +17,7 @@
     "local:audio:daemon": "tsx src/local-audio-worker-daemon.ts"
   },
   "dependencies": {
-    "@fastify/cors": "^10.0.2",
+    "@fastify/cors": "^11.4.3",
     "@fastify/helmet": "^12.0.1",
     "@sonolect/config": "workspace:*",
     "@sonolect/service-kit": "workspace:*",
