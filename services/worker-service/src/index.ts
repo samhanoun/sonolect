@@ -13,8 +13,16 @@ import {
   enqueueWorkerTaskSchema,
   type EnqueueWorkerTaskInput,
 } from "@sonolect/validation";
+import {
+  BoundedMap,
+  registerServiceSecurity,
+  resolveListenOptions,
+  type ServiceEnv,
+} from "@sonolect/service-kit";
 
 const serviceName = "sonolect-worker-service";
+const MAX_TASKS = 10_000;
+const MAX_LISTED_TASKS = 200;
 
 interface WorkerStores {
   tasks: Map<string, WorkerTask>;
@@ -22,7 +30,9 @@ interface WorkerStores {
 
 type TaskHandler = (task: WorkerTask) => Promise<Record<string, unknown>>;
 
-const createStores = (): WorkerStores => ({ tasks: new Map() });
+const createStores = (): WorkerStores => ({
+  tasks: new BoundedMap(MAX_TASKS),
+});
 
 const parseBody = <T>(
   schema: { parse: (value: unknown) => T },
@@ -123,6 +133,7 @@ const dispatchTask = async (
 export interface CreateAppOptions {
   stores?: WorkerStores;
   logger?: boolean;
+  env?: ServiceEnv;
 }
 
 export async function createApp(
@@ -134,13 +145,16 @@ export async function createApp(
 
   await app.register(helmet);
   await app.register(cors, { origin: false });
+  registerServiceSecurity(app, { serviceName, env: options.env });
 
   app.get("/health", async () => ({ status: "ok", service: serviceName }));
 
   app.get("/tasks", async () => ({
-    items: [...stores.tasks.values()].sort((a, b) =>
-      b.createdAt.localeCompare(a.createdAt),
-    ),
+    // Newest first, capped so the response stays small however long the
+    // instance has been running.
+    items: [...stores.tasks.values()]
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, MAX_LISTED_TASKS),
   }));
 
   app.post(
@@ -188,6 +202,18 @@ export async function createApp(
   app.post<{ Params: { id: string } }>(
     "/tasks/:id/dispatch",
     async (request, reply) => {
+      const existing = stores.tasks.get(request.params.id);
+      if (!existing)
+        return reply
+          .status(404)
+          .send({ error: "not_found", message: "Task not found" });
+      // Dispatching a finished or running task again would re-run its side
+      // effects and wrap its payload once more on every call.
+      if (existing.status !== "queued" && existing.status !== "failed")
+        return reply.status(409).send({
+          error: "task_not_dispatchable",
+          message: `Task is already ${existing.status}`,
+        });
       const task = await dispatchTask(stores, dispatcher, request.params.id);
       if (!task)
         return reply
@@ -204,6 +230,5 @@ const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isDirectRun) {
   const app = await createApp();
-  const port = Number(process.env.PORT ?? 8080);
-  await app.listen({ host: "0.0.0.0", port });
+  await app.listen(resolveListenOptions());
 }
