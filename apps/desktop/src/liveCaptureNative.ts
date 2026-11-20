@@ -12,6 +12,7 @@ import {
   type LiveCaptureTransport,
   type LivePartialEvent,
 } from "./liveCapture";
+import { localizeNativeMessage } from "./nativeMessages";
 import { nativeProviderCall } from "./providerSettings";
 import type { TranscriptSegment } from "./segmentEditor";
 
@@ -190,6 +191,138 @@ export async function recordLive(
     },
     cancel: async () => {
       await source.close().catch(() => undefined);
+      await session.cancel();
+    },
+  };
+}
+
+/** Which sound a recording started in the Studio takes. */
+export const CAPTURE_SOURCES = ["microphone", "system"] as const;
+export type CaptureSource = (typeof CAPTURE_SOURCES)[number];
+export const CAPTURE_SOURCE_KEY = "sonolect.captureSource";
+
+function browserStorage(): Storage | undefined {
+  try {
+    return typeof localStorage === "undefined" ? undefined : localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+export function loadCaptureSource(
+  storage: Pick<Storage, "getItem"> | undefined = browserStorage(),
+): CaptureSource {
+  try {
+    return storage?.getItem(CAPTURE_SOURCE_KEY) === "system"
+      ? "system"
+      : "microphone";
+  } catch {
+    return "microphone";
+  }
+}
+
+export function saveCaptureSource(
+  source: CaptureSource,
+  storage:
+    Pick<Storage, "setItem" | "removeItem"> | undefined = browserStorage(),
+): void {
+  try {
+    if (source === "system") storage?.setItem(CAPTURE_SOURCE_KEY, source);
+    else storage?.removeItem(CAPTURE_SOURCE_KEY);
+  } catch {
+    // Without storage the choice lasts until the app closes.
+  }
+}
+
+export type SystemAudioEnded = { id: string; message: string };
+
+/**
+ * The desktop app's system-audio feed: what is playing on this computer,
+ * recorded natively and added to a live recording without passing through
+ * the window. Replaced by a fake in tests.
+ */
+export type SystemAudioFeed = {
+  available: () => Promise<boolean>;
+  /** Feeds the recording until `stop`. */
+  start: (captureId: string) => Promise<void>;
+  /** Resolves once all of the audio is in the recording. */
+  stop: () => Promise<void>;
+  /** Loudness, and a feed that ended by itself. Resolves with unsubscribe. */
+  listen: (handlers: {
+    onLevel: (level: number) => void;
+    onEnded: (event: SystemAudioEnded) => void;
+  }) => Promise<() => void>;
+};
+
+export const nativeSystemAudio: SystemAudioFeed = {
+  available: () =>
+    nativeProviderCall<boolean>("check_system_audio_available").catch(
+      () => false,
+    ),
+  start: (captureId) =>
+    nativeProviderCall<void>("start_system_audio_capture", { id: captureId }),
+  stop: () => nativeProviderCall<void>("stop_system_audio_capture"),
+  listen: async ({ onLevel, onEnded }) => {
+    const { listen } = await import("@tauri-apps/api/event");
+    const stops = await Promise.all([
+      listen<number>("system-audio-level", (event) => onLevel(event.payload)),
+      listen<SystemAudioEnded>("system-audio-ended", (event) =>
+        onEnded(event.payload),
+      ),
+    ]);
+    return () => stops.forEach((stop) => stop());
+  },
+};
+
+/**
+ * Records what is playing on this computer through the native recorder,
+ * with the same limits and live text as a microphone recording. Unlike
+ * `recordLive` there is nothing to fall back to, so it rejects with the
+ * reason when the recorder or the feed cannot start.
+ */
+export async function recordSystemAudio(
+  settings: LiveCaptureSettings,
+  handlers: LiveCaptureHandlers = {},
+  transport: LiveCaptureTransport = nativeLiveCapture,
+  feed: SystemAudioFeed = nativeSystemAudio,
+  now: () => number = Date.now,
+): Promise<LiveRecording> {
+  const session = await LiveCaptureSession.start(transport, settings, handlers);
+  let unlisten = () => {};
+  let startedAt = 0;
+  let over = false;
+  const close = async () => {
+    over = true;
+    handlers.onLevel?.(0);
+    unlisten();
+    await feed.stop().catch(() => undefined);
+  };
+  try {
+    unlisten = await feed.listen({
+      onLevel: (level) => {
+        if (!over) handlers.onLevel?.(level);
+      },
+      onEnded: (event) => {
+        if (over || event.id !== session.captureId) return;
+        handlers.onStalled?.(localizeNativeMessage(event.message));
+      },
+    });
+    await feed.start(session.captureId);
+    startedAt = now();
+  } catch (error) {
+    await close();
+    await session.cancel().catch(() => undefined);
+    throw error;
+  }
+  return {
+    captureId: session.captureId,
+    finish: async () => {
+      const durationMs = Math.max(0, now() - startedAt);
+      await close();
+      return { ...(await session.finish()), durationMs };
+    },
+    cancel: async () => {
+      await close();
       await session.cancel();
     },
   };

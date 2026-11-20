@@ -18,6 +18,7 @@ import {
 import { useDesktopStore, type ViewId } from "../store/appStore";
 import { useProviderStore, setProviderMode } from "../providerSettings";
 import { useT, type LocaleKeys } from "../i18n";
+import { isTauriRuntime } from "../desktopNative";
 import { formatTimestamp } from "../lib/format";
 import StudioModels from "./StudioModels";
 import {
@@ -186,8 +187,15 @@ function RecordingDock() {
     liveTranscript,
     toggleRecording,
     resetVoiceCapture,
+    captureSource,
+    dictationSource,
   } = useDesktopStore();
   const t = useT();
+  // Only a recording started here can take the computer's sound.
+  const listening =
+    captureSource === "system" && dictationSource === "app" && isTauriRuntime()
+      ? "studio.dock.recordingSystem"
+      : "studio.dock.listening";
   const elapsed = useElapsedMs(recordingState === "recording");
   if (recordingState === "idle") return null;
   const processing =
@@ -201,7 +209,7 @@ function RecordingDock() {
       <AudioLines size={24} />
       <span>
         {recordingState === "recording"
-          ? `${t("studio.dock.listening")} ${formatTimestamp(elapsed)}`
+          ? `${t(listening)} ${formatTimestamp(elapsed)}`
           : processing
             ? t("studio.dock.processing")
             : recordingState === "error"
