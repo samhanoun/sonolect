@@ -9,6 +9,7 @@ import {
   Pause,
   Play,
   RefreshCw,
+  ShieldCheck,
   Sparkles,
   Trash2,
   Upload,
@@ -27,6 +28,27 @@ import { StudioModelSelector } from "./StudioModels";
 import { submitCapturedAudioCloud } from "../voiceApi";
 import { prepareLocalAudio } from "../localAudio";
 import { STT_LANGUAGES } from "../sttLanguages";
+import {
+  exportTranscript,
+  type TranscriptExportFormat,
+} from "../transcriptExport";
+import {
+  RETENTION_DAY_CHOICES,
+  applyCaptureRetention,
+  deleteAllLocalData,
+  loadCaptureRetentionDays,
+  retentionLabel,
+  saveCaptureRetentionDays,
+  type RetentionDays,
+} from "../privacyControls";
+
+const EXPORT_FORMATS: { id: TranscriptExportFormat; label: string }[] = [
+  { id: "txt", label: "Plain text (.txt)" },
+  { id: "md", label: "Markdown (.md)" },
+  { id: "srt", label: "Subtitles (.srt)" },
+  { id: "vtt", label: "Web subtitles (.vtt)" },
+  { id: "json", label: "JSON with timings (.json)" },
+];
 
 const SIGNAL_BARS = [
   18, 30, 44, 26, 58, 72, 40, 64, 86, 52, 70, 94, 62, 80, 48, 90, 66, 76, 42,
@@ -101,7 +123,10 @@ export function useSavedCaptures() {
   useEffect(() => {
     let cancelled = false;
     if (isTauriRuntime()) {
-      void nativeProviderCall<SavedCapture[]>("list_local_captures")
+      // Enforce the retention setting whenever the list is refreshed.
+      void applyCaptureRetention(nativeProviderCall)
+        .catch(() => 0)
+        .then(() => nativeProviderCall<SavedCapture[]>("list_local_captures"))
         .then((result) => {
           if (!cancelled) {
             setCaptures(result);
@@ -333,13 +358,21 @@ export function StudioTranscribe({
       setBusy(false);
     }
   };
+  const [exportFormat, setExportFormat] =
+    useState<TranscriptExportFormat>("txt");
   const download = () => {
+    const file = exportTranscript({
+      format: exportFormat,
+      transcript: state.transcript,
+      segments: state.transcriptSegments,
+      title: "Sonolect transcript",
+    });
     const url = URL.createObjectURL(
-      new Blob([state.transcript], { type: "text/plain" }),
+      new Blob([file.content], { type: file.mimeType }),
     );
     const link = document.createElement("a");
     link.href = url;
-    link.download = "sonolect-transcript.txt";
+    link.download = `sonolect-${file.filename}`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
@@ -433,9 +466,24 @@ export function StudioTranscribe({
               <Copy size={16} />
               Copy
             </button>
+            <select
+              className="studio-export-format"
+              aria-label="Export format"
+              value={exportFormat}
+              onChange={(event) =>
+                setExportFormat(event.target.value as TranscriptExportFormat)
+              }
+            >
+              {EXPORT_FORMATS.map((format) => (
+                <option key={format.id} value={format.id}>
+                  {format.label}
+                </option>
+              ))}
+            </select>
             <button
               className="studio-icon-button"
               aria-label="Export transcript"
+              title="Export transcript"
               disabled={!state.transcript}
               onClick={download}
             >
@@ -980,6 +1028,119 @@ export function StudioVocabulary({ snippets = false }: { snippets?: boolean }) {
   );
 }
 
+function PrivacyControls() {
+  const recordingState = useDesktopStore((s) => s.recordingState);
+  const [retention, setRetention] = useState<RetentionDays>(() =>
+    loadCaptureRetentionDays(),
+  );
+  const [busy, setBusy] = useState(false),
+    [message, setMessage] = useState("");
+  const native = isTauriRuntime();
+  const capturing =
+    recordingState === "recording" ||
+    recordingState === "uploading" ||
+    recordingState === "requesting-permission";
+  const changeRetention = async (days: RetentionDays) => {
+    setRetention(days);
+    saveCaptureRetentionDays(days);
+    if (!native || days === 0) {
+      setMessage(
+        days === 0
+          ? "Recordings are kept until you delete them."
+          : "Saved. It applies in the Windows app.",
+      );
+      return;
+    }
+    try {
+      const removed = await applyCaptureRetention(nativeProviderCall, days);
+      setMessage(
+        removed
+          ? `Saved. Deleted ${removed} recording${removed === 1 ? "" : "s"} older than ${retentionLabel(days)}.`
+          : `Saved. Recordings older than ${retentionLabel(days)} are deleted automatically.`,
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+  const deleteEverything = async () => {
+    if (
+      !window.confirm(
+        "Delete all your recordings, transcripts, dictionary, snippets, saved API keys and settings from this device? This cannot be undone.",
+      )
+    )
+      return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await deleteAllLocalData(
+        native
+          ? nativeProviderCall
+          : async <T,>() =>
+              0 as unknown as T /* browser preview: nothing native */,
+      );
+      if (result.problems.length) {
+        setMessage(
+          `Some data could not be deleted: ${result.problems.join("; ")}`,
+        );
+        return;
+      }
+      // Start again from a clean state, exactly like a first launch.
+      window.location.reload();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="studio-card studio-privacy">
+      <div className="studio-card-heading">
+        <div className="studio-icon">
+          <ShieldCheck size={25} />
+        </div>
+        <div>
+          <h3>Privacy & retention</h3>
+          <p>
+            Recordings and transcripts never leave this device in Local only.
+          </p>
+        </div>
+      </div>
+      <div className="studio-privacy-actions">
+        <label>
+          Keep recordings
+          <select
+            value={retention}
+            onChange={(event) =>
+              void changeRetention(Number(event.target.value) as RetentionDays)
+            }
+          >
+            {RETENTION_DAY_CHOICES.map((days) => (
+              <option key={days} value={days}>
+                {retentionLabel(days)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className="studio-button danger"
+          disabled={busy || capturing}
+          onClick={() => void deleteEverything()}
+        >
+          <Trash2 size={15} />
+          {busy ? "Deleting…" : "Delete all my data"}
+        </button>
+      </div>
+      <p className="studio-muted">
+        Deletes recordings, transcripts, your dictionary and snippets, saved API
+        keys and settings. Downloaded speech models are kept.
+      </p>
+      {message && (
+        <p role="status" className="studio-notice">
+          {message}
+        </p>
+      )}
+    </section>
+  );
+}
+
 export function StudioSettings() {
   const state = useDesktopStore();
   const [model, setModel] = useState<{ ready: boolean; path: string }>(),
@@ -1125,6 +1286,7 @@ export function StudioSettings() {
           </p>
         </section>
       </div>
+      <PrivacyControls />
       <section className="studio-card">
         <h3>Shortcuts & storage</h3>
         <div className="studio-workflow-row">
@@ -1140,8 +1302,8 @@ export function StudioSettings() {
           <kbd>Ctrl + K</kbd>
         </div>
         <p className="studio-muted">
-          Recordings are limited to three minutes and saved on this device until
-          you delete them from Library. API keys use Windows Credential Manager.
+          Recordings are limited to three minutes and saved on this device for
+          as long as you choose above. API keys use Windows Credential Manager.
         </p>
       </section>
       {message && (

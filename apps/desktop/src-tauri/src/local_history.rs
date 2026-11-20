@@ -118,6 +118,85 @@ pub fn delete_local_capture(app: tauri::AppHandle, id: String) -> Result<(), Str
     }
     Ok(())
 }
+/// Deletes saved recordings and transcripts from this device: every capture
+/// when `older_than_days` is `None` ("Delete all my data"), otherwise those
+/// recorded more than that many days ago (the retention setting). Returns how
+/// many recordings were removed.
+#[tauri::command]
+pub fn purge_local_captures(
+    app: tauri::AppHandle,
+    older_than_days: Option<u32>,
+) -> Result<u32, String> {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_millis() as u64;
+    purge_directory(&directory(&app)?, older_than_days, now_ms)
+}
+
+fn purge_directory(
+    directory: &std::path::Path,
+    older_than_days: Option<u32>,
+    now_ms: u64,
+) -> Result<u32, String> {
+    let cutoff_ms = older_than_days.map(|days| now_ms.saturating_sub(u64::from(days) * 86_400_000));
+    let mut removed = 0;
+    for entry in fs::read_dir(directory).map_err(|e| e.to_string())? {
+        let path = entry.map_err(|e| e.to_string())?.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        let expired = match cutoff_ms {
+            None => true,
+            Some(cutoff_ms) => {
+                if let Some(id) = name.strip_suffix(".json") {
+                    let created = fs::read(&path)
+                        .ok()
+                        .and_then(|data| serde_json::from_slice::<Capture>(&data).ok())
+                        .map(|capture| capture.created_at_ms);
+                    match created {
+                        Some(created) if created < cutoff_ms => {
+                            for extension in ["wav", "json.tmp"] {
+                                let _ =
+                                    fs::remove_file(directory.join(format!("{id}.{extension}")));
+                            }
+                            true
+                        }
+                        _ => false,
+                    }
+                } else if name.starts_with("system-") && name.ends_with(".wav") {
+                    // System-audio recordings have no record; use the file time.
+                    fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .map(|t| (t.as_millis() as u64) < cutoff_ms)
+                        .unwrap_or(false)
+                } else {
+                    false
+                }
+            }
+        };
+        if expired {
+            match fs::remove_file(&path) {
+                Ok(()) => {}
+                // Already removed alongside its record earlier in this loop.
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(format!("Could not delete {name}: {error}")),
+            }
+            // One record (or one system-audio file) per recording.
+            if name.ends_with(".json") || name.starts_with("system-") {
+                removed += 1;
+            }
+        }
+    }
+    Ok(removed)
+}
 #[tauri::command]
 pub async fn retry_local_capture(
     app: tauri::AppHandle,
@@ -147,6 +226,48 @@ pub async fn retry_local_capture(
 }
 #[cfg(test)]
 mod tests {
+    use super::{purge_directory, Capture};
+    use std::fs;
+
+    fn record(directory: &std::path::Path, id: &str, created_at_ms: u64) {
+        let capture = Capture {
+            id: id.into(),
+            created_at_ms,
+            duration_ms: 1000,
+            transcript: Some("hello".into()),
+            error: None,
+            language: None,
+        };
+        fs::write(
+            directory.join(format!("{id}.json")),
+            serde_json::to_vec(&capture).unwrap(),
+        )
+        .unwrap();
+        fs::write(directory.join(format!("{id}.wav")), b"RIFF").unwrap();
+    }
+
+    #[test]
+    fn retention_deletes_only_expired_recordings() {
+        let directory = std::env::temp_dir().join(format!("sonolect-purge-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        let day = 86_400_000;
+        let now = 100 * day;
+        record(&directory, "1-1", now - 40 * day);
+        record(&directory, "2-1", now - 2 * day);
+        fs::write(directory.join("notes.txt"), b"keep").unwrap();
+
+        assert_eq!(purge_directory(&directory, Some(30), now).unwrap(), 1);
+        assert!(!directory.join("1-1.json").exists());
+        assert!(!directory.join("1-1.wav").exists());
+        assert!(directory.join("2-1.json").exists());
+        assert!(directory.join("2-1.wav").exists());
+
+        assert_eq!(purge_directory(&directory, None, now).unwrap(), 1);
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 0);
+        fs::remove_dir_all(&directory).unwrap();
+    }
+
     #[test]
     fn rejects_paths_outside_capture_directory() {
         for value in ["../model", "", "C:\\model", "123/4", "1.json"] {
