@@ -67,3 +67,84 @@ describe("other schemas", () => {
     assert.deepEqual(parsed.arguments, { length: 3 });
   });
 });
+
+describe("input limits", () => {
+  it("accepts language tags and rejects option-like or malformed values", async () => {
+    const { languageTagSchema } = await import("./index.js");
+    for (const tag of ["en", "fr-CA", "zh-Hant-TW", "es-419", "auto"])
+      assert.equal(languageTagSchema.safeParse(tag).success, true, tag);
+    for (const tag of ["-x", "--model=/etc/passwd", "en US", "e", "en;rm", ""])
+      assert.equal(languageTagSchema.safeParse(tag).success, false, tag);
+    assert.equal(
+      updateTranscriptSchema.safeParse({ language: "--threads" }).success,
+      false,
+    );
+  });
+
+  it("caps free text and collection sizes", async () => {
+    const { refinementRequestSchema, syncPushSchema, trackUsageSchema } =
+      await import("./index.js");
+    assert.equal(
+      createTranscriptSchema.safeParse({ rawText: "a".repeat(2_000_001) })
+        .success,
+      false,
+    );
+    assert.equal(
+      createTranscriptSchema.safeParse({
+        tags: Array.from({ length: 51 }, (_, index) => `tag-${index}`),
+      }).success,
+      false,
+    );
+    assert.equal(
+      agentCommandExecutionRequestSchema.safeParse({
+        command: "summarize",
+        context: "a".repeat(50_001),
+      }).success,
+      false,
+    );
+    assert.equal(
+      refinementRequestSchema.safeParse({
+        action: "translate",
+        text: "Bonjour",
+        targetLanguage: "en; DROP",
+      }).success,
+      false,
+    );
+    assert.equal(
+      trackUsageSchema.safeParse({
+        userId: "../other-user",
+        metric: "minutes",
+        quantity: 1,
+        source: "audio",
+      }).success,
+      false,
+    );
+    assert.equal(
+      syncPushSchema.safeParse({
+        userId: "user one",
+        deviceId: "desktop",
+        changes: [],
+      }).success,
+      false,
+    );
+  });
+
+  it("only accepts audio MIME types and https callbacks", async () => {
+    const { transcriptionJobRequestSchema } = await import("./index.js");
+    const base = { audio: { uri: "gs://bucket/object" } };
+    assert.equal(transcriptionJobRequestSchema.safeParse(base).success, true);
+    assert.equal(
+      transcriptionJobRequestSchema.safeParse({
+        audio: { uri: "gs://bucket/object", mimeType: "text/html" },
+      }).success,
+      false,
+    );
+    assert.equal(
+      transcriptionJobRequestSchema.safeParse({
+        ...base,
+        callbackUrl: "http://169.254.169.254/latest/meta-data",
+      }).success,
+      false,
+    );
+  });
+});

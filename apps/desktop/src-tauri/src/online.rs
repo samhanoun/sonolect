@@ -18,6 +18,10 @@ pub struct ProviderModel {
     pub voices: Vec<String>,
 }
 
+/// Whether the user has chosen cloud processing (false means Local only).
+pub fn cloud_enabled() -> bool {
+    CLOUD_ENABLED.load(Ordering::SeqCst)
+}
 fn provider_ok(provider: &str) -> Result<(), String> {
     if matches!(provider, "openrouter" | "opencode") {
         Ok(())
@@ -283,37 +287,76 @@ fn post_json(
         .send()
         .map_err(|_| "The provider connection failed or timed out.".into())
 }
+/// The recording is the raw IPC body; provider, model and settings are headers.
 #[tauri::command]
 pub async fn provider_transcribe(
     app: tauri::AppHandle,
-    provider: String,
-    model: String,
-    payload: super::WhisperPayload,
+    request: tauri::ipc::Request<'_>,
 ) -> Result<super::WhisperResult, String> {
+    let provider = super::ipc_audio::header(&request, "x-sonolect-provider").unwrap_or_default();
+    let model = super::ipc_audio::header(&request, "x-sonolect-model").unwrap_or_default();
     let endpoint = speech_endpoint(&provider, "stt")?;
     model_ok(&model)?;
     guard_cloud(CLOUD_ENABLED.load(Ordering::SeqCst))?;
+    let payload = super::ipc_audio::whisper_payload(&request)?;
     tauri::async_runtime::spawn_blocking(move || {
         super::local_history::process_with(&app, payload, None, |payload| {
-            let body =
-                transcription_body(&model, &payload.audio_bytes, payload.language.as_deref());
-            let bytes = response_bytes(post_json(&provider, endpoint, &body)?)?;
-            let response: Value =
-                serde_json::from_slice(&bytes).map_err(|_| "Invalid transcription response.")?;
-            let text = response
-                .get("text")
-                .and_then(Value::as_str)
-                .ok_or("The provider returned no transcript field.")?
-                .to_owned();
-            Ok(super::WhisperResult {
-                text,
-                segments: vec![],
-                language: payload.language,
-            })
+            transcribe_wav(
+                &provider,
+                endpoint,
+                &model,
+                &payload.audio_bytes,
+                payload.language,
+            )
         })
     })
     .await
     .map_err(|_| "Online transcription was interrupted.".to_string())?
+}
+/// Sends one WAV to the provider. The provider returns text without timings.
+fn transcribe_wav(
+    provider: &str,
+    endpoint: &str,
+    model: &str,
+    wav: &[u8],
+    language: Option<String>,
+) -> Result<super::WhisperResult, String> {
+    let body = transcription_body(model, wav, language.as_deref());
+    let bytes = response_bytes(post_json(provider, endpoint, &body)?)?;
+    let response: Value =
+        serde_json::from_slice(&bytes).map_err(|_| "Invalid transcription response.")?;
+    let text = response
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or("The provider returned no transcript field.")?
+        .to_owned();
+    Ok(super::WhisperResult {
+        text,
+        segments: vec![],
+        language,
+        capture_id: None,
+    })
+}
+/// Checks an online speech model before a live recording starts, and returns
+/// what transcribes each piece of it. Every piece is checked against Local
+/// only again when it is sent.
+pub fn chunk_transcriber(
+    provider: String,
+    model: String,
+    language: Option<String>,
+) -> Result<impl FnMut(&[i16]) -> Result<super::WhisperResult, String> + Send, String> {
+    let endpoint = speech_endpoint(&provider, "stt")?;
+    model_ok(&model)?;
+    guard_cloud(CLOUD_ENABLED.load(Ordering::SeqCst))?;
+    Ok(move |samples: &[i16]| {
+        transcribe_wav(
+            &provider,
+            endpoint,
+            &model,
+            &super::streaming::wav_bytes(samples),
+            language.clone(),
+        )
+    })
 }
 #[tauri::command]
 pub async fn provider_speak(
@@ -323,7 +366,7 @@ pub async fn provider_speak(
     voice: String,
     response_format: Option<String>,
     sample_rate: Option<u32>,
-) -> Result<SpeechAudio, String> {
+) -> Result<tauri::ipc::Response, String> {
     let endpoint = speech_endpoint(&provider, "tts")?;
     model_ok(&model)?;
     guard_cloud(CLOUD_ENABLED.load(Ordering::SeqCst))?;
@@ -352,20 +395,16 @@ pub async fn provider_speak(
             .to_owned();
         let bytes = response_bytes(response)?;
         if bytes.is_empty() { return Err("The provider returned empty audio.".into()); }
+        // Raw binary response: PCM is returned as WAV (audio/wav), MP3 as-is
+        // (audio/mpeg); the web layer derives the MIME type from the format.
         if format == "pcm" && (content_type.starts_with("audio/pcm") || content_type.starts_with("application/octet-stream")) {
-            Ok(SpeechAudio { bytes: wav_from_pcm(&bytes, rate)?, mime_type: "audio/wav".into() })
+            Ok(tauri::ipc::Response::new(wav_from_pcm(&bytes, rate)?))
         } else if format == "mp3" && (content_type.starts_with("audio/mpeg") || content_type.starts_with("audio/mp3") || content_type.starts_with("application/octet-stream")) {
-            Ok(SpeechAudio { bytes, mime_type: "audio/mpeg".into() })
+            Ok(tauri::ipc::Response::new(bytes))
         } else { Err("The provider returned an unexpected audio format. Check the model's format settings.".into()) }
     })
     .await
     .map_err(|_| "Speech generation was interrupted.".to_string())?
-}
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SpeechAudio {
-    bytes: Vec<u8>,
-    mime_type: String,
 }
 fn wav_from_pcm(bytes: &[u8], sample_rate: u32) -> Result<Vec<u8>, String> {
     if bytes.is_empty()

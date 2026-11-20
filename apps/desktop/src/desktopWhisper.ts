@@ -2,12 +2,15 @@ import type { VoiceCaptureMetadata } from "./voiceApi";
 import type { TranscriptSegment } from "./segmentEditor";
 import { prepareLocalAudio } from "./localAudio";
 
-export type DesktopWhisperPayload = {
-  audioBytes: number[];
-  mimeType: string;
-  durationMs: number;
-  language?: string;
-  modelPath?: string;
+/**
+ * Audio goes to the native engine as the raw IPC body. Sending it as a JSON
+ * number array (the old format) inflated a three-minute recording from 5.8 MB
+ * to roughly 20 MB of JSON that both sides had to build and parse.
+ * Settings travel as percent-encoded headers so non-ASCII model paths work.
+ */
+export type DesktopWhisperRequest = {
+  body: Uint8Array;
+  headers: Record<string, string>;
 };
 
 export type DesktopWhisperSegmentPayload = {
@@ -21,21 +24,26 @@ export type DesktopWhisperResult = {
   text: string;
   segments: TranscriptSegment[];
   language?: string;
+  /** The saved recording behind this transcript, for playback in the editor. */
+  captureId?: string;
 };
 
-export function createDesktopWhisperPayload(
+export function createDesktopWhisperRequest(
   audioBytes: Uint8Array,
   metadata: VoiceCaptureMetadata,
   language?: string,
   modelPath?: string,
-): DesktopWhisperPayload {
-  return {
-    audioBytes: Array.from(audioBytes),
-    mimeType: metadata.mimeType,
-    durationMs: Math.max(1, Math.round(metadata.durationMs)),
-    ...(language && language !== "auto" ? { language } : {}),
-    ...(modelPath?.trim() ? { modelPath: modelPath.trim() } : {}),
+): DesktopWhisperRequest {
+  const headers: Record<string, string> = {
+    "x-sonolect-duration-ms": String(
+      Math.max(1, Math.round(metadata.durationMs)),
+    ),
   };
+  if (language && language !== "auto")
+    headers["x-sonolect-language"] = encodeURIComponent(language);
+  if (modelPath?.trim())
+    headers["x-sonolect-model-path"] = encodeURIComponent(modelPath.trim());
+  return { body: audioBytes, headers };
 }
 
 export function normalizeWhisperSegments(
@@ -72,9 +80,9 @@ export async function transcribeWithDesktopWhisper(
     import("@tauri-apps/api/core"),
     prepareLocalAudio(audio),
   ]);
-  const payload = createDesktopWhisperPayload(
+  const request = createDesktopWhisperRequest(
     audioBytes,
-    { ...metadata, mimeType: "audio/wav" },
+    metadata,
     language,
     modelPath,
   );
@@ -82,11 +90,13 @@ export async function transcribeWithDesktopWhisper(
     text: string;
     segments?: DesktopWhisperSegmentPayload[];
     language?: string;
-  }>("transcribe_audio", { payload });
+    captureId?: string;
+  }>("transcribe_audio", request.body, { headers: request.headers });
 
   return {
     text: result.text.trim(),
     segments: normalizeWhisperSegments(result.segments ?? []),
     ...(result.language ? { language: result.language } : {}),
+    ...(result.captureId ? { captureId: result.captureId } : {}),
   };
 }

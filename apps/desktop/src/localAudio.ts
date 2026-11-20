@@ -1,3 +1,5 @@
+import { getT } from "./i18n";
+
 /** PCM adapter for the embedded Whisper engine (16 kHz, mono, signed 16-bit WAV). */
 export function encodeMonoWav(
   channels: Float32Array[],
@@ -11,9 +13,8 @@ export function encodeMonoWav(
     sampleRate > 192000 ||
     channels.some((channel) => channel.length !== frames)
   )
-    throw new Error("Invalid audio format.");
-  if (frames / sampleRate > 180)
-    throw new Error("Recordings are limited to three minutes.");
+    throw new Error(getT()("audio.invalidFormat"));
+  if (frames / sampleRate > 180) throw new Error(getT()("audio.tooLong"));
   const count = Math.max(1, Math.round((frames * 16000) / sampleRate));
   const bytes = new Uint8Array(44 + count * 2);
   const view = new DataView(bytes.buffer);
@@ -46,7 +47,7 @@ export function encodeMonoWav(
       for (let frame = start; frame < end; frame++) {
         const value = channel[frame]!;
         if (!Number.isFinite(value))
-          throw new Error("Audio contains invalid samples.");
+          throw new Error(getT()("audio.invalidSamples"));
         total += value;
       }
     }

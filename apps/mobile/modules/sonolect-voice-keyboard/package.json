@@ -1,0 +1,8 @@
+{
+  "name": "sonolect-voice-keyboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sonolect voice keyboard: an Android input method that dictates into any app.",
+  "main": "index.ts",
+  "types": "index.ts"
+}

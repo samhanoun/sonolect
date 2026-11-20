@@ -1,0 +1,20 @@
+# Keep the build context small and keep local state and secrets out of images.
+.git
+.github
+.turbo
+**/.turbo
+**/node_modules
+**/dist
+**/build
+**/coverage
+**/*.log
+.env
+.env.*
+!.env.example
+apps
+docs
+infra
+local-test
+**/src-tauri/target
+**/test-results
+**/playwright-report

@@ -1,6 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -9,49 +8,53 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
-import { DICTATION_LANGUAGES, type PrivacyLevel } from "../src/domain";
+import { openPrivacyPolicy, privacyPolicyUrl } from "../src/appInfo";
+import {
+  DICTATION_LANGUAGES,
+  RETENTION_DAY_CHOICES,
+  keepsHistory,
+  type CompanionSettings,
+  type PrivacyLevel,
+  type RetentionDays,
+} from "../src/domain";
+import { API_FEATURES_ENABLED } from "../src/features";
 import { LANGUAGE_NAMES, strings } from "../src/i18n";
 import { isAllowedApiUrl } from "../src/localApi";
+import { noticeText, storageBanner } from "../src/notices";
+import {
+  clearHistoryPrompt,
+  historyOffConfirmation,
+  historyOffPrompt,
+  retentionPrompt,
+} from "../src/settingsPolicy";
 import { useCompanionStore } from "../src/store";
 import {
   Button,
   Card,
   Chip,
   Label,
+  NoticeBanner,
   Segmented,
+  TextLink,
   Title,
   ToggleRow,
+  inputColors,
 } from "../src/ui/components";
-import { colors, fonts, radius, space } from "../src/ui/theme";
-
-function confirm(
-  message: string,
-  confirmLabel: string,
-  cancelLabel: string,
-): Promise<boolean> {
-  if (Platform.OS === "web") {
-    return Promise.resolve(
-      typeof window !== "undefined" ? window.confirm(message) : false,
-    );
-  }
-  return new Promise((resolve) => {
-    Alert.alert(message, undefined, [
-      { text: cancelLabel, style: "cancel", onPress: () => resolve(false) },
-      {
-        text: confirmLabel,
-        style: "destructive",
-        onPress: () => resolve(true),
-      },
-    ]);
-  });
-}
+import { confirm } from "../src/ui/confirm";
+import { FadeIn, GlassScreen } from "../src/ui/glass";
+import { useTabBarClearance } from "../src/ui/GlassTabBar";
+import { colors, fonts, glass, radius, space } from "../src/ui/theme";
+import { VoiceKeyboardCard } from "../src/ui/VoiceKeyboardCard";
 
 type TestState = "idle" | "testing" | "ok" | "fail";
 
+/** Fixed for the build (app.config.js); null hides the link. */
+const POLICY_URL = privacyPolicyUrl();
+
 export default function SettingsScreen() {
   const settings = useCompanionStore((s) => s.settings);
+  const history = useCompanionStore((s) => s.history);
   const apiToken = useCompanionStore((s) => s.apiToken);
   const dictionary = useCompanionStore((s) => s.dictionary);
   const snippets = useCompanionStore((s) => s.snippets);
@@ -65,7 +68,12 @@ export default function SettingsScreen() {
   const removeSnippet = useCompanionStore((s) => s.removeSnippet);
   const clearHistory = useCompanionStore((s) => s.clearHistory);
   const eraseAll = useCompanionStore((s) => s.eraseAll);
+  const notice = useCompanionStore((s) => s.notice);
+  const storageDegraded = useCompanionStore((s) => s.storageDegraded);
+  const dismissNotice = useCompanionStore((s) => s.dismissNotice);
   const t = strings(settings.uiLanguage);
+  const banner = storageBanner(notice, storageDegraded);
+  const clearance = useTabBarClearance();
 
   const [url, setUrl] = useState(settings.localApiUrl ?? "");
   const [token, setToken] = useState(apiToken ?? "");
@@ -77,6 +85,70 @@ export default function SettingsScreen() {
   const [body, setBody] = useState("");
 
   const urlValid = !url.trim() || isAllowedApiUrl(url.trim());
+
+  // One confirmation at a time: a second tap while it is open does nothing.
+  const confirming = useRef(false);
+
+  /**
+   * Applies a settings change. A change that turns history off deletes the
+   * saved notes, so it asks first; Cancel leaves the settings as they were
+   * (data-4, ux-7).
+   */
+  const changeSettings = async (patch: Partial<CompanionSettings>) => {
+    if (confirming.current) return;
+    const state = useCompanionStore.getState();
+    const confirmation = historyOffConfirmation(
+      state.settings,
+      { ...state.settings, ...patch },
+      state.history.length,
+      state.storageDegraded,
+    );
+    if (confirmation) {
+      confirming.current = true;
+      try {
+        const confirmed = await confirm({
+          ...historyOffPrompt(t, confirmation),
+          confirmLabel: t.settings.deleteNotes,
+          cancelLabel: t.common.cancel,
+          destructive: true,
+        });
+        if (!confirmed) return;
+      } finally {
+        confirming.current = false;
+      }
+    }
+    await updateSettings(patch);
+  };
+
+  /**
+   * Changes how long notes are kept. A shorter limit deletes the notes
+   * already past it, so it asks first and says how many.
+   */
+  const changeRetention = async (retentionDays: RetentionDays) => {
+    if (confirming.current) return;
+    const state = useCompanionStore.getState();
+    if (retentionDays === state.settings.retentionDays) return;
+    const prompt = state.storageDegraded
+      ? null
+      : retentionPrompt(t, state.history, retentionDays, Date.now());
+    if (prompt) {
+      confirming.current = true;
+      try {
+        const confirmed = await confirm({
+          ...prompt,
+          confirmLabel: t.settings.deleteNotes,
+          cancelLabel: t.common.cancel,
+          destructive: true,
+        });
+        if (!confirmed) return;
+      } finally {
+        confirming.current = false;
+      }
+    }
+    await updateSettings({ retentionDays });
+  };
+
+  const clearPrompt = clearHistoryPrompt(t, history.length, storageDegraded);
 
   const saveApi = async () => {
     if (!urlValid) return;
@@ -110,37 +182,72 @@ export default function SettingsScreen() {
   ];
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]}>
+    <GlassScreen>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
-          contentContainerStyle={styles.container}
+          contentContainerStyle={[
+            styles.container,
+            { paddingBottom: clearance + space.xl },
+          ]}
           keyboardShouldPersistTaps="handled"
         >
-          <Title>{t.settings.title}</Title>
+          <FadeIn>
+            <Title>{t.settings.title}</Title>
+          </FadeIn>
+          {banner ? (
+            <NoticeBanner
+              text={noticeText(t, banner.notice)}
+              {...(banner.dismissable
+                ? {
+                    actionLabel: t.capture.actions.dismiss,
+                    onAction: dismissNotice,
+                  }
+                : {})}
+            />
+          ) : null}
 
-          <View style={styles.section}>
-            <Label>{t.settings.privacy}</Label>
+          <FadeIn index={1} style={styles.section}>
+            <Label heading>{t.settings.privacy}</Label>
             <Segmented
               accessibilityLabel={t.settings.privacy}
               options={privacyOptions}
               value={settings.privacyLevel}
-              onChange={(privacyLevel) => void updateSettings({ privacyLevel })}
+              onChange={(privacyLevel) => void changeSettings({ privacyLevel })}
             />
             <Text style={styles.help}>
               {t.settings.privacyHelp[settings.privacyLevel]}
             </Text>
-          </View>
+            {settings.privacyLevel !== "standard" ? (
+              <>
+                <Card style={styles.toggles}>
+                  <ToggleRow
+                    label={t.settings.allowSystemService}
+                    value={settings.allowSystemService}
+                    onChange={(allowSystemService) =>
+                      void updateSettings({ allowSystemService })
+                    }
+                    last
+                  />
+                </Card>
+                <Text style={styles.help}>
+                  {t.settings.allowSystemServiceHelp}
+                </Text>
+              </>
+            ) : null}
+          </FadeIn>
 
-          <Card style={styles.toggles}>
+          <Card style={styles.toggles} enterIndex={2}>
             <ToggleRow
               label={t.settings.saveHistory}
               value={
                 settings.saveHistory && settings.privacyLevel !== "ephemeral"
               }
-              onChange={(saveHistory) => void updateSettings({ saveHistory })}
+              // Ephemeral never saves: the switch would only snap back.
+              disabled={settings.privacyLevel === "ephemeral"}
+              onChange={(saveHistory) => void changeSettings({ saveHistory })}
             />
             <ToggleRow
               label={t.settings.haptics}
@@ -148,19 +255,43 @@ export default function SettingsScreen() {
               onChange={(hapticsEnabled) =>
                 void updateSettings({ hapticsEnabled })
               }
+              last={!API_FEATURES_ENABLED}
             />
-            <ToggleRow
-              label={t.settings.sync}
-              value={settings.cloudSyncEnabled}
-              onChange={(cloudSyncEnabled) =>
-                void updateSettings({ cloudSyncEnabled })
-              }
-              last
-            />
+            {API_FEATURES_ENABLED ? (
+              <ToggleRow
+                label={t.settings.sync}
+                value={settings.cloudSyncEnabled}
+                onChange={(cloudSyncEnabled) =>
+                  void updateSettings({ cloudSyncEnabled })
+                }
+                last
+              />
+            ) : null}
           </Card>
 
-          <View style={styles.section}>
-            <Label>{t.settings.dictation}</Label>
+          {keepsHistory(settings) ? (
+            <FadeIn index={2} style={styles.section}>
+              <Label heading>{t.settings.retention}</Label>
+              <View style={styles.chips}>
+                {RETENTION_DAY_CHOICES.map((days) => (
+                  <Chip
+                    key={days}
+                    label={t.settings.retentionChoices[days]}
+                    selected={settings.retentionDays === days}
+                    onPress={() => void changeRetention(days)}
+                  />
+                ))}
+              </View>
+              <Text style={styles.help}>
+                {t.settings.retentionHelp(settings.retentionDays)}
+              </Text>
+            </FadeIn>
+          ) : null}
+
+          <VoiceKeyboardCard enterIndex={3} />
+
+          <FadeIn index={4} style={styles.section}>
+            <Label heading>{t.settings.dictation}</Label>
             <View style={styles.chips}>
               {DICTATION_LANGUAGES.map((language) => (
                 <Chip
@@ -171,10 +302,10 @@ export default function SettingsScreen() {
                 />
               ))}
             </View>
-          </View>
+          </FadeIn>
 
-          <View style={styles.section}>
-            <Label>{t.settings.interface}</Label>
+          <FadeIn index={5} style={styles.section}>
+            <Label heading>{t.settings.interface}</Label>
             <Segmented
               accessibilityLabel={t.settings.interface}
               options={[
@@ -184,75 +315,79 @@ export default function SettingsScreen() {
               value={settings.uiLanguage}
               onChange={(uiLanguage) => void updateSettings({ uiLanguage })}
             />
-          </View>
+          </FadeIn>
+
+          {API_FEATURES_ENABLED ? (
+            <View style={styles.section}>
+              <Label heading>{t.settings.api}</Label>
+              <Card>
+                <Text style={styles.fieldLabel} nativeID="api-url-label">
+                  {t.settings.apiUrl}
+                </Text>
+                <TextInput
+                  accessibilityLabelledBy="api-url-label"
+                  accessibilityLabel={t.settings.apiUrl}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                  placeholder="https://api.example.com"
+                  placeholderTextColor={colors.muted}
+                  value={url}
+                  onChangeText={(value) => {
+                    setUrl(value);
+                    setApiMessage(null);
+                  }}
+                  style={[styles.input, !urlValid && styles.inputError]}
+                  {...inputColors}
+                />
+                <Text style={styles.fieldLabel}>{t.settings.apiToken}</Text>
+                <TextInput
+                  accessibilityLabel={t.settings.apiToken}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  secureTextEntry
+                  placeholder="••••••••"
+                  placeholderTextColor={colors.muted}
+                  value={token}
+                  onChangeText={setToken}
+                  style={styles.input}
+                  {...inputColors}
+                />
+                <Text
+                  style={[styles.help, !urlValid && { color: colors.danger }]}
+                >
+                  {!urlValid
+                    ? t.settings.apiInvalid
+                    : (apiMessage ??
+                      (test === "ok"
+                        ? t.settings.testOk
+                        : test === "fail"
+                          ? t.settings.testFail
+                          : settings.localApiUrl
+                            ? settings.localApiUrl
+                            : t.settings.apiNotSet))}
+                </Text>
+                <View style={styles.row}>
+                  <Button
+                    variant="primary"
+                    label={t.settings.save}
+                    disabled={!urlValid}
+                    onPress={() => void saveApi()}
+                  />
+                  <Button
+                    label={
+                      test === "testing" ? t.settings.testing : t.settings.test
+                    }
+                    disabled={!url.trim() || !urlValid || test === "testing"}
+                    onPress={() => void testApi()}
+                  />
+                </View>
+              </Card>
+            </View>
+          ) : null}
 
           <View style={styles.section}>
-            <Label>{t.settings.api}</Label>
-            <Card>
-              <Text style={styles.fieldLabel} nativeID="api-url-label">
-                {t.settings.apiUrl}
-              </Text>
-              <TextInput
-                accessibilityLabelledBy="api-url-label"
-                accessibilityLabel={t.settings.apiUrl}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="url"
-                placeholder="https://api.example.com"
-                placeholderTextColor={colors.muted}
-                value={url}
-                onChangeText={(value) => {
-                  setUrl(value);
-                  setApiMessage(null);
-                }}
-                style={[styles.input, !urlValid && styles.inputError]}
-              />
-              <Text style={styles.fieldLabel}>{t.settings.apiToken}</Text>
-              <TextInput
-                accessibilityLabel={t.settings.apiToken}
-                autoCapitalize="none"
-                autoCorrect={false}
-                secureTextEntry
-                placeholder="••••••••"
-                placeholderTextColor={colors.muted}
-                value={token}
-                onChangeText={setToken}
-                style={styles.input}
-              />
-              <Text
-                style={[styles.help, !urlValid && { color: colors.danger }]}
-              >
-                {!urlValid
-                  ? t.settings.apiInvalid
-                  : (apiMessage ??
-                    (test === "ok"
-                      ? t.settings.testOk
-                      : test === "fail"
-                        ? t.settings.testFail
-                        : settings.localApiUrl
-                          ? settings.localApiUrl
-                          : t.settings.apiNotSet))}
-              </Text>
-              <View style={styles.row}>
-                <Button
-                  variant="primary"
-                  label={t.settings.save}
-                  disabled={!urlValid}
-                  onPress={() => void saveApi()}
-                />
-                <Button
-                  label={
-                    test === "testing" ? t.settings.testing : t.settings.test
-                  }
-                  disabled={!url.trim() || !urlValid || test === "testing"}
-                  onPress={() => void testApi()}
-                />
-              </View>
-            </Card>
-          </View>
-
-          <View style={styles.section}>
-            <Label>{t.settings.dictionary}</Label>
+            <Label heading>{t.settings.dictionary}</Label>
             <Card>
               <Text style={styles.help}>{t.settings.dictionaryHelp}</Text>
               {dictionary.map((entry) => (
@@ -276,7 +411,8 @@ export default function SettingsScreen() {
                   placeholderTextColor={colors.muted}
                   value={spoken}
                   onChangeText={setSpoken}
-                  style={[styles.input, styles.flex]}
+                  style={[styles.input, styles.pairInput]}
+                  {...inputColors}
                 />
                 <TextInput
                   accessibilityLabel={t.settings.written}
@@ -284,7 +420,8 @@ export default function SettingsScreen() {
                   placeholderTextColor={colors.muted}
                   value={written}
                   onChangeText={setWritten}
-                  style={[styles.input, styles.flex]}
+                  style={[styles.input, styles.pairInput]}
+                  {...inputColors}
                 />
               </View>
               <Button
@@ -302,7 +439,7 @@ export default function SettingsScreen() {
           </View>
 
           <View style={styles.section}>
-            <Label>{t.settings.snippets}</Label>
+            <Label heading>{t.settings.snippets}</Label>
             <Card>
               <Text style={styles.help}>{t.settings.snippetsHelp}</Text>
               {snippets.map((snippet) => (
@@ -328,6 +465,7 @@ export default function SettingsScreen() {
                 value={trigger}
                 onChangeText={setTrigger}
                 style={styles.input}
+                {...inputColors}
               />
               <TextInput
                 accessibilityLabel={t.settings.body}
@@ -337,6 +475,7 @@ export default function SettingsScreen() {
                 onChangeText={setBody}
                 multiline
                 style={[styles.input, styles.multiline]}
+                {...inputColors}
               />
               <Button
                 icon="plus"
@@ -353,19 +492,23 @@ export default function SettingsScreen() {
           </View>
 
           <View style={styles.section}>
-            <Label>{t.settings.data}</Label>
+            <Label heading>{t.settings.data}</Label>
             <View style={styles.row}>
               <Button
                 variant="danger"
                 icon="trash"
                 label={t.settings.clearHistory}
+                // Nothing to delete: no notes, and none that couldn't be read.
+                disabled={clearPrompt === null}
                 onPress={async () => {
                   if (
-                    await confirm(
-                      t.settings.clearHistory,
-                      t.common.confirm,
-                      t.common.cancel,
-                    )
+                    clearPrompt !== null &&
+                    (await confirm({
+                      ...clearPrompt,
+                      confirmLabel: t.settings.clearButton,
+                      cancelLabel: t.common.cancel,
+                      destructive: true,
+                    }))
                   )
                     await clearHistory();
                 }}
@@ -375,11 +518,13 @@ export default function SettingsScreen() {
                 label={t.settings.eraseAll}
                 onPress={async () => {
                   if (
-                    await confirm(
-                      t.settings.eraseConfirm,
-                      t.common.confirm,
-                      t.common.cancel,
-                    )
+                    await confirm({
+                      title: t.settings.eraseTitle,
+                      message: t.settings.eraseMessage,
+                      confirmLabel: t.settings.eraseButton,
+                      cancelLabel: t.common.cancel,
+                      destructive: true,
+                    })
                   ) {
                     await eraseAll();
                     setUrl("");
@@ -389,17 +534,22 @@ export default function SettingsScreen() {
               />
             </View>
             <Text style={styles.help}>{t.settings.about}</Text>
+            {POLICY_URL ? (
+              <TextLink
+                label={t.settings.privacyPolicy}
+                onPress={() => openPrivacyPolicy(POLICY_URL)}
+              />
+            ) : null}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </GlassScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
-  container: { padding: space.xl, gap: space.xl, paddingBottom: 48 },
+  container: { padding: space.xl, gap: space.xl },
   section: { gap: space.sm },
   toggles: { paddingVertical: 4, gap: 0 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
@@ -419,9 +569,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: radius.md,
-    backgroundColor: colors.bg,
+    // Set into the glass card: darker than it, with a 3:1 outline (ux-26).
+    backgroundColor: glass.well,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.lineInteractive,
     color: colors.text,
     fontFamily: fonts.body,
     fontSize: 15,
@@ -430,6 +581,9 @@ const styles = StyleSheet.create({
   multiline: { minHeight: 80, textAlignVertical: "top" },
   row: { flexDirection: "row", gap: space.sm, flexWrap: "wrap" },
   pair: { flexDirection: "row", gap: space.sm },
+  // Two fields share the row; without minWidth 0 a field keeps its
+  // intrinsic width and pushes the second one past the card's edge.
+  pairInput: { flex: 1, minWidth: 0 },
   entry: {
     flexDirection: "row",
     alignItems: "center",

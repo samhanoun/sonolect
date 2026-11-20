@@ -21,9 +21,17 @@ import {
   type RefinementInput,
   type TranscriptionJobInput,
 } from "@sonolect/validation";
+import {
+  BoundedMap,
+  ServiceHttpError,
+  getServiceUserId,
+  registerServiceSecurity,
+  resolveListenOptions,
+} from "@sonolect/service-kit";
 
 const serviceName = "sonolect-audio-service";
-const localUserId = "local-user";
+const MAX_TRANSCRIPTION_JOBS = 5_000;
+const MAX_REFINEMENTS = 5_000;
 
 interface SttProvider {
   name: SttProviderName;
@@ -58,9 +66,21 @@ class ProviderNotConfiguredError extends Error {
   }
 }
 
+class ProviderUnavailableError extends Error {
+  readonly code = "provider_unavailable";
+
+  constructor(provider: SttProviderName, reason: string) {
+    super(`${provider} STT provider_unavailable: ${reason}`);
+    this.name = "ProviderUnavailableError";
+  }
+}
+
 type SttProviderEnv = Partial<
-  Pick<NodeJS.ProcessEnv, "STT_PROVIDER" | "GOOGLE_CLOUD_PROJECT">
+  Pick<NodeJS.ProcessEnv, "STT_PROVIDER" | "GOOGLE_CLOUD_PROJECT" | "NODE_ENV">
 >;
+
+const isProduction = (env: SttProviderEnv): boolean =>
+  env.NODE_ENV === "production";
 
 interface ProviderSelectionOptions {
   requested?: SttProviderName | undefined;
@@ -68,18 +88,15 @@ interface ProviderSelectionOptions {
 }
 
 const createStores = (): InMemoryStores => ({
-  transcriptionJobs: new Map<string, TranscriptionJob>(),
-  refinements: new Map<string, RefinementResult>(),
+  transcriptionJobs: new BoundedMap<string, TranscriptionJob>(
+    MAX_TRANSCRIPTION_JOBS,
+  ),
+  refinements: new BoundedMap<string, RefinementResult>(MAX_REFINEMENTS),
 });
 
-const getRouteContext = (request: FastifyRequest): { userId: string } => {
-  const header = request.headers["x-user-id"];
-  return {
-    userId: Array.isArray(header)
-      ? (header[0] ?? localUserId)
-      : (header ?? localUserId),
-  };
-};
+const getRouteContext = (request: FastifyRequest): { userId: string } => ({
+  userId: getServiceUserId(request),
+});
 
 const parseBody = <T>(
   schema: { parse: (value: unknown) => T },
@@ -119,22 +136,6 @@ const mockProvider: SttProvider = {
   },
 };
 
-const googlePlaceholderProvider: SttProvider = {
-  name: "google",
-  async transcribe(input) {
-    const model = input.model ?? "latest_long";
-    const source = input.audio.uri
-      ? `audio at ${input.audio.uri}`
-      : "inline audio payload";
-    const text = `[google speech-to-text placeholder:${model}:${input.language}] Transcription would be requested for ${source}.`;
-    return {
-      text,
-      confidence: 0,
-      segments: [{ text, startMs: 0, confidence: 0 }],
-    };
-  },
-};
-
 const validateGoogleSttConfiguration = (env: SttProviderEnv): void => {
   const missingEnv = ["GOOGLE_CLOUD_PROJECT"].filter(
     (key) => !env[key as keyof SttProviderEnv],
@@ -144,13 +145,34 @@ const validateGoogleSttConfiguration = (env: SttProviderEnv): void => {
   }
 };
 
+// Google Speech-to-Text runs in the API service (POST /v1/transcribe). This
+// service has no Google client yet, so a google job fails with a clear error
+// instead of returning made-up transcript text.
 const createGoogleProvider = (env: SttProviderEnv): SttProvider => ({
   name: "google",
-  async transcribe(input) {
+  async transcribe() {
     validateGoogleSttConfiguration(env);
-    return googlePlaceholderProvider.transcribe(input);
+    throw new ProviderUnavailableError(
+      "google",
+      "Google Speech-to-Text is served by the API service at POST /v1/transcribe",
+    );
   },
 });
+
+// The mock provider exists for local development and tests only. Production
+// must never hand a fabricated transcript back to a user.
+const createMockProvider = (env: SttProviderEnv): SttProvider =>
+  isProduction(env)
+    ? {
+        name: "mock",
+        async transcribe() {
+          throw new ProviderUnavailableError(
+            "mock",
+            "the mock provider is disabled in production",
+          );
+        },
+      }
+    : mockProvider;
 
 const resolveConfiguredProviderName = (
   env: SttProviderEnv = process.env,
@@ -164,7 +186,9 @@ const resolveProvider = ({
   env = process.env,
 }: ProviderSelectionOptions = {}): SttProvider => {
   const selected = requested ?? resolveConfiguredProviderName(env);
-  return selected === "google" ? createGoogleProvider(env) : mockProvider;
+  return selected === "google"
+    ? createGoogleProvider(env)
+    : createMockProvider(env);
 };
 
 const processTranscriptionJob = async (
@@ -228,11 +252,16 @@ export async function createApp(
 
   await app.register(helmet);
   await app.register(cors, { origin: false });
+  registerServiceSecurity(app, { serviceName, env });
 
   app.get("/health", async () => ({
     status: "ok",
     service: serviceName,
-    sttProvider: resolveConfiguredProviderName(env),
+    // The mock provider is switched off in production, so do not advertise it.
+    sttProvider:
+      isProduction(env) && resolveConfiguredProviderName(env) === "mock"
+        ? "unconfigured"
+        : resolveConfiguredProviderName(env),
   }));
 
   app.post(
@@ -318,6 +347,18 @@ export async function createApp(
           refinementRequestSchema,
           request,
         );
+        // Rewrite and translate need a language model. The template output
+        // below is a development stand-in, so production refuses it rather
+        // than return text that only looks rewritten or translated.
+        if (
+          isProduction(env) &&
+          (input.action === "rewrite" || input.action === "translate")
+        )
+          throw new ServiceHttpError(
+            501,
+            "refinement_unavailable",
+            `The ${input.action} refinement is not available on this service`,
+          );
         const createdAt = new Date().toISOString();
         const result = {
           id: randomUUID(),
@@ -349,6 +390,5 @@ const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isDirectRun) {
   const app = await createApp();
-  const port = Number(process.env.PORT ?? 8080);
-  await app.listen({ host: "0.0.0.0", port });
+  await app.listen(resolveListenOptions());
 }

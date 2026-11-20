@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AudioUploadJob, Transcript } from "@sonolect/types";
 
@@ -62,6 +62,31 @@ const mockTranscriptText = (job: AudioUploadJob): string => {
 const isEnabled = (value: string | undefined): boolean =>
   value === "1" || value?.toLowerCase() === "true";
 
+const languageTagPattern = /^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/;
+const audioMimeTypePattern = /^audio\/[a-z0-9.+-]+$/i;
+
+// execFile passes each value as its own argument, so no shell ever sees them.
+// A value can still be read as an option by the speech engine ("--model=..."),
+// and language and MIME type come from user-editable records. Each placeholder
+// is checked before it is substituted so it can only ever be plain data.
+const placeholderValidators: Record<
+  string,
+  { valid: (value: string) => boolean; reason: string }
+> = {
+  audioPath: {
+    valid: (value) => isAbsolute(value),
+    reason: "the audio path must be an absolute file path",
+  },
+  mimeType: {
+    valid: (value) => value.length <= 100 && audioMimeTypePattern.test(value),
+    reason: "the MIME type must be an audio MIME type",
+  },
+  language: {
+    valid: (value) => value.length <= 35 && languageTagPattern.test(value),
+    reason: "the language must be a language tag such as en or fr-CA",
+  },
+};
+
 const commandReplacements = (job: AudioUploadJob, transcript: Transcript) =>
   new Map<string, string>([
     ["audioPath", job.upload.localPath ?? ""],
@@ -76,10 +101,13 @@ const resolveLocalSttCommandArgs = (
 ): string[] => {
   const replacements = commandReplacements(job, transcript);
   return commandArgsTemplate.map((arg) =>
-    arg.replace(
-      /\{(audioPath|mimeType|language)\}/g,
-      (_match, key: string) => replacements.get(key) ?? "",
-    ),
+    arg.replace(/\{(audioPath|mimeType|language)\}/g, (_match, key: string) => {
+      const value = replacements.get(key) ?? "";
+      const validator = placeholderValidators[key];
+      if (validator && !validator.valid(value))
+        throw new Error(`Local STT command refused: ${validator.reason}`);
+      return value;
+    }),
   );
 };
 

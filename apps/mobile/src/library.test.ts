@@ -5,13 +5,20 @@ import type { TranscriptTurn } from "./domain";
 import { normalizeSettings } from "./domain";
 import { STRINGS } from "./i18n";
 import {
+  EXPORT_FORMATS,
+  exportAsJson,
   exportAsMarkdown,
+  exportAsText,
+  exportFileName,
+  exportLibrary,
   filterHistory,
   formatDuration,
+  formatNoteDate,
+  formattingLocale,
   sortHistory,
 } from "./library";
 import { isAllowedApiUrl } from "./localApi";
-import { TranscriptAccumulator, levelFromVolume } from "./speech";
+import { TranscriptAccumulator, levelFromVolume } from "./speechPolicy";
 
 const turn = (overrides: Partial<TranscriptTurn>): TranscriptTurn => ({
   id: "t",
@@ -83,6 +90,141 @@ describe("library", () => {
       /^## 2026-11-01 10:00 · dictate\n\nClient summary due at four$/,
     );
   });
+
+  it("exports with the phone's date format and mode names (ux-23)", () => {
+    const late = turn({
+      refinedText: "• Book room",
+      mode: "task_creation",
+      createdAt: "2026-11-08T22:30:00.000Z",
+    });
+    const markdown = exportAsMarkdown([late, history[1]!], {
+      formatDate: (iso) => formatNoteDate(iso, "en-US", "America/New_York"),
+      modeLabel: (mode) => STRINGS.en.modeTag[mode] ?? mode,
+    });
+    // Older ICU versions put a narrow no-break space before PM.
+    assert.equal(
+      markdown.replace(/[^\S\n]/g, " "),
+      "## Nov 8, 2026, 05:30 PM · TASKS\n\n• Book room\n\n" +
+        "## Nov 2, 2026, 05:00 AM · SUMMARY\n\nProduct sync notes",
+    );
+  });
+
+  it("formats note dates in the phone's time zone", () => {
+    const iso = "2026-11-08T22:30:00.000Z";
+    assert.equal(
+      formatNoteDate(iso, "en-GB", "Europe/London"),
+      "8 Nov 2026, 22:30",
+    );
+    // 22:30 UTC is 17:30 the same day in New York, 08:30 the next in Sydney.
+    assert.match(formatNoteDate(iso, "en-US", "America/New_York"), /^Nov 8,/);
+    assert.match(formatNoteDate(iso, "en-US", "America/New_York"), /05:30/);
+    assert.match(
+      formatNoteDate(iso, "fr", "Australia/Sydney"),
+      /^9 nov\. 2026/,
+    );
+    assert.match(formatNoteDate(iso, "fr", "Australia/Sydney"), /09:30/);
+    assert.equal(formatNoteDate("not a date", "en"), "not a date");
+  });
+
+  it("names export files with the local date", () => {
+    assert.equal(
+      exportFileName(new Date(2026, 0, 5, 23, 59)),
+      "sonolect-notes-2026-01-05.md",
+    );
+    assert.equal(
+      exportFileName(new Date(2026, 10, 12, 0, 1)),
+      "sonolect-notes-2026-11-12.md",
+    );
+  });
+
+  it("names text and JSON exports with their own extension", () => {
+    const date = new Date(2026, 10, 12, 0, 1);
+    assert.equal(exportFileName(date, "text"), "sonolect-notes-2026-11-12.txt");
+    assert.equal(
+      exportFileName(date, "json"),
+      "sonolect-notes-2026-11-12.json",
+    );
+  });
+
+  it("exports plain text with a rule between notes", () => {
+    const several = turn({
+      refinedText: "First paragraph.\n\nSecond paragraph.",
+      createdAt: "2026-11-03T10:00:00.000Z",
+    });
+    assert.equal(
+      exportAsText([several, history[1]!]),
+      "2026-11-03 10:00 · dictate\n\nFirst paragraph.\n\nSecond paragraph." +
+        "\n\n----------\n\n" +
+        "2026-11-02 10:00 · summarize\n\nProduct sync notes",
+    );
+    assert.equal(exportAsText([]), "");
+  });
+
+  it("exports JSON that keeps dates, modes and the text as dictated", () => {
+    const refined = turn({
+      id: "r",
+      rawText: "um client summary due at four",
+      refinedText: "Client summary due at four.",
+      pinned: true,
+      source: "typed",
+      durationMs: 0,
+    });
+    const same = turn({ id: "s", rawText: "As said", refinedText: "As said" });
+    const parsed = JSON.parse(
+      exportAsJson([refined, same], new Date("2026-11-20T08:00:00.000Z")),
+    ) as {
+      app: string;
+      formatVersion: number;
+      exportedAt: string;
+      notes: Record<string, unknown>[];
+    };
+    assert.equal(parsed.app, "Sonolect");
+    assert.equal(parsed.formatVersion, 1);
+    assert.equal(parsed.exportedAt, "2026-11-20T08:00:00.000Z");
+    assert.deepEqual(parsed.notes[0], {
+      id: "r",
+      createdAt: "2026-11-01T10:00:00.000Z",
+      mode: "dictate",
+      language: "en-US",
+      source: "typed",
+      durationMs: 0,
+      pinned: true,
+      text: "Client summary due at four.",
+      original: "um client summary due at four",
+    });
+    // No copy of the text when refining changed nothing.
+    assert.equal("original" in parsed.notes[1]!, false);
+    assert.equal(parsed.notes[1]!.pinned, false);
+    // Nothing about sync or privacy settings leaves the phone.
+    assert.equal("syncState" in parsed.notes[0]!, false);
+    assert.equal("privacyMode" in parsed.notes[0]!, false);
+  });
+
+  it("exports the library in every offered format", () => {
+    assert.deepEqual([...EXPORT_FORMATS], ["markdown", "text", "json"]);
+    const options = { exportedAt: new Date("2026-11-20T08:00:00.000Z") };
+    assert.equal(
+      exportLibrary(history, "markdown", options),
+      exportAsMarkdown(history),
+    );
+    assert.equal(
+      exportLibrary(history, "text", options),
+      exportAsText(history),
+    );
+    assert.equal(
+      exportLibrary(history, "json", options),
+      exportAsJson(history, options.exportedAt),
+    );
+  });
+
+  it("uses the device's formats only when it speaks the UI language", () => {
+    assert.equal(formattingLocale("fr", "fr-CA"), undefined);
+    assert.equal(formattingLocale("en", "en-GB"), undefined);
+    assert.equal(formattingLocale("fr", "en-US"), "fr");
+    assert.equal(formattingLocale("en", "fr-FR"), "en");
+    assert.equal(formattingLocale("en", undefined), "en");
+    assert.equal(formattingLocale("fr", "fr_BE"), undefined);
+  });
 });
 
 describe("settings and safety", () => {
@@ -94,6 +236,18 @@ describe("settings and safety", () => {
     assert.equal(settings.language, "en-US");
     assert.equal(settings.speechRate, 2);
     assert.equal(settings.uiLanguage, "en");
+  });
+
+  it("keeps notes forever unless a known retention was chosen", () => {
+    assert.equal(normalizeSettings({}).retentionDays, 0);
+    assert.equal(normalizeSettings({ retentionDays: 30 }).retentionDays, 30);
+    for (const bad of [-1, 2, 365, "7", null, Number.NaN]) {
+      assert.equal(
+        normalizeSettings({ retentionDays: bad as never }).retentionDays,
+        0,
+        String(bad),
+      );
+    }
   });
 
   it("only sends data to https or local-network http endpoints", () => {
