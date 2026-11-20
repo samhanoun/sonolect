@@ -11,7 +11,6 @@ import {
 import * as Speech from "expo-speech";
 import { useLocales } from "expo-localization";
 import { useFocusEffect } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import { strings } from "../src/i18n";
 import { formattingLocale } from "../src/library";
@@ -26,6 +25,9 @@ import {
   Title,
   inputColors,
 } from "../src/ui/components";
+import { FadeIn, GlassScreen, glassStyles } from "../src/ui/glass";
+import { useTabBarClearance } from "../src/ui/GlassTabBar";
+import { useReducedTransparency } from "../src/ui/motion";
 import { colors, fonts, radius, space } from "../src/ui/theme";
 
 const RATES = [0.75, 1, 1.25, 1.5];
@@ -39,6 +41,8 @@ export default function ReaderScreen() {
   const updateSettings = useCompanionStore((s) => s.updateSettings);
   const t = strings(settings.uiLanguage);
   const tts = useTts();
+  const clearance = useTabBarClearance();
+  const opaque = useReducedTransparency();
   const [text, setText] = useState("");
   /** The language of a capture loaded with 'Use latest' (ux-21). */
   const [sourceLanguage, setSourceLanguage] = useState<string | null>(null);
@@ -113,21 +117,24 @@ export default function ReaderScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]}>
+    <GlassScreen>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
-          contentContainerStyle={styles.container}
+          contentContainerStyle={[
+            styles.container,
+            { paddingBottom: clearance + space.lg },
+          ]}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.header}>
+          <FadeIn style={styles.header}>
             <Title>{t.reader.title}</Title>
             <Text style={styles.muted}>{t.reader.subtitle}</Text>
-          </View>
+          </FadeIn>
 
-          <View style={styles.field}>
+          <FadeIn index={1} style={styles.field}>
             <Label>{t.reader.text}</Label>
             {/* A long article scrolls inside the box, so Play stays in
                 reach (ux-21). */}
@@ -139,7 +146,11 @@ export default function ReaderScreen() {
               onChangeText={onChangeText}
               placeholder={t.reader.placeholder}
               placeholderTextColor={colors.muted}
-              style={styles.textarea}
+              style={[
+                glassStyles.panel,
+                styles.textarea,
+                opaque && glassStyles.panelOpaque,
+              ]}
               {...inputColors}
             />
             {latest && !text ? (
@@ -150,9 +161,9 @@ export default function ReaderScreen() {
                 onPress={loadLatest}
               />
             ) : null}
-          </View>
+          </FadeIn>
 
-          <Card>
+          <Card enterIndex={2}>
             <Label>{t.reader.speed}</Label>
             <View style={styles.chips}>
               {RATES.map((rate) => (
@@ -225,14 +236,13 @@ export default function ReaderScreen() {
           </Card>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </GlassScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
-  container: { padding: space.xl, gap: space.lg, paddingBottom: 40 },
+  container: { padding: space.xl, gap: space.lg },
   header: { gap: 6 },
   muted: {
     fontFamily: fonts.body,
@@ -241,14 +251,15 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   field: { gap: space.sm },
+  // A text field: its outline reaches 3:1 on every edge (ux-26).
   textarea: {
     minHeight: 220,
     maxHeight: 280,
-    padding: 14,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
+    padding: 16,
+    borderRadius: radius.xl,
     borderColor: colors.lineInteractive,
+    borderTopColor: colors.lineInteractive,
+    borderBottomColor: colors.lineInteractive,
     color: colors.text,
     fontFamily: fonts.body,
     fontSize: 16,
