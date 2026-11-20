@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { isTauriRuntime } from "./desktopNative";
+import { getT } from "./i18n";
+import { localizeNativeMessage } from "./nativeMessages";
 import { prepareLocalAudio } from "./localAudio";
 import type { VoiceCaptureMetadata } from "./voiceApi";
 import {
@@ -86,14 +88,21 @@ export async function nativeProviderCall<T>(
   args?: Record<string, unknown> | Uint8Array,
   headers?: Record<string, string>,
 ): Promise<T> {
-  if (!isTauriRuntime())
-    throw new Error(
-      "Open the Windows app to use secure keys and native speech. This window is a browser preview.",
-    );
+  if (!isTauriRuntime()) throw new Error(getT()("provider.previewOnly"));
   const { invoke } = await import("@tauri-apps/api/core");
-  return headers
-    ? invoke<T>(command, args, { headers })
-    : invoke<T>(command, args);
+  try {
+    return await (headers
+      ? invoke<T>(command, args, { headers })
+      : invoke<T>(command, args));
+  } catch (error) {
+    // Native commands fail with an English sentence; show it in the
+    // interface language.
+    throw new Error(
+      localizeNativeMessage(
+        error instanceof Error ? error.message : String(error),
+      ),
+    );
+  }
 }
 export async function setProviderMode(enabled: boolean) {
   if (isTauriRuntime())
@@ -105,14 +114,11 @@ async function withCloudConsent<T>(
   args: Record<string, unknown> | Uint8Array,
   headers?: Record<string, string>,
 ): Promise<T> {
-  if (!allowed())
-    throw new Error(
-      "Choose cloud processing before sending audio or text online.",
-    );
+  if (!allowed()) throw new Error(getT()("provider.cloudRequired"));
   await setProviderMode(true);
   if (!allowed()) {
     await setProviderMode(false);
-    throw new Error("Cloud processing was cancelled.");
+    throw new Error(getT()("provider.cloudCancelled"));
   }
   return nativeProviderCall<T>(command, args, headers);
 }
@@ -124,9 +130,7 @@ export async function transcribeUsingProvider(
   allowed: () => boolean,
 ): Promise<DesktopWhisperResult> {
   if (choice.provider !== "openrouter" || !choice.model)
-    throw new Error(
-      "Select an OpenRouter speech-to-text model in Models & voices.",
-    );
+    throw new Error(getT()("provider.selectStt"));
   const request = createDesktopWhisperRequest(
     await prepareLocalAudio(audio),
     metadata,
@@ -151,7 +155,7 @@ export async function speakUsingProvider(
   sampleRate = 24000,
 ): Promise<Blob> {
   if (choice.provider !== "openrouter" || !choice.model)
-    throw new Error("Select an OpenRouter text-to-speech model first.");
+    throw new Error(getT()("provider.selectTts"));
   // The audio comes back as a raw binary response, not a JSON number array.
   const audio = await withCloudConsent<ArrayBuffer>(allowed, "provider_speak", {
     provider: choice.provider,
@@ -170,7 +174,7 @@ export async function rewriteUsingProvider(
   allowed: () => boolean,
 ) {
   if (choice.provider === "local" || !choice.model)
-    throw new Error("Select a text editing model in Models & voices.");
+    throw new Error(getT()("provider.selectText"));
   return withCloudConsent<string>(allowed, "provider_rewrite", {
     provider: choice.provider,
     model: choice.model,
@@ -243,7 +247,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       );
       set({
         models: { ...get().models, [provider]: models },
-        message: `${models.length} compatible models loaded from ${PROVIDER_NAMES[provider]}.`,
+        message: getT().count("provider.modelsLoaded", models.length, {
+          provider: PROVIDER_NAMES[provider],
+        }),
       });
     } catch (error) {
       set({ message: error instanceof Error ? error.message : String(error) });
@@ -256,7 +262,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       await nativeProviderCall("save_provider_key", { provider, key });
       set({
         keys: { ...get().keys, [provider]: true },
-        message: `${PROVIDER_NAMES[provider]} key saved in Windows Credential Manager. It has not been billed or used for a test request.`,
+        message: getT()("provider.keySaved", {
+          provider: PROVIDER_NAMES[provider],
+        }),
       });
       return true;
     } catch (error) {
@@ -269,7 +277,7 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       await nativeProviderCall("delete_provider_key", { provider });
       set({
         keys: { ...get().keys, [provider]: false },
-        message: "Saved key removed.",
+        message: getT()("provider.keyRemoved"),
       });
     } catch (error) {
       set({ message: error instanceof Error ? error.message : String(error) });

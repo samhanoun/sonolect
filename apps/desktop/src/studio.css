@@ -120,11 +120,19 @@ body {
   margin: 30px 0 26px;
   font-size: 12px !important;
   font-weight: 600 !important;
+  /* Longer labels (French) wrap onto two tidy lines beside the icon. */
+  text-align: left;
+  line-height: 1.25;
+}
+.studio-new-recording svg {
+  flex-shrink: 0;
 }
 .studio-new-recording kbd {
   margin-left: auto;
   opacity: 0.6;
   font-size: 9px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .studio-nav-group {
   margin-bottom: 24px;

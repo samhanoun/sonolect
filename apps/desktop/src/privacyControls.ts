@@ -8,6 +8,8 @@
  * the operating system's credential store.
  */
 
+import { getT } from "./i18n";
+
 /** 0 keeps recordings until the user deletes them. */
 export const RETENTION_DAY_CHOICES = [0, 1, 7, 30, 90] as const;
 export type RetentionDays = (typeof RETENTION_DAY_CHOICES)[number];
@@ -34,8 +36,10 @@ function browserStorage(): StorageLike | undefined {
 }
 
 export function retentionLabel(days: RetentionDays) {
-  if (days === 0) return "Until I delete them";
-  return days === 1 ? "1 day" : `${days} days`;
+  const t = getT();
+  return days === 0
+    ? t("studio.retention.forever")
+    : t.count("studio.retention.days", days);
 }
 
 export function loadCaptureRetentionDays(
@@ -95,7 +99,9 @@ export async function deleteAllLocalData(
     });
   } catch (error) {
     problems.push(
-      `Recordings: ${error instanceof Error ? error.message : String(error)}`,
+      getT()("studio.privacy.problemRecordings", {
+        reason: error instanceof Error ? error.message : String(error),
+      }),
     );
   }
   for (const provider of PROVIDERS) {
@@ -119,7 +125,9 @@ export async function deleteAllLocalData(
     }
   } catch (error) {
     problems.push(
-      `Settings: ${error instanceof Error ? error.message : String(error)}`,
+      getT()("studio.privacy.problemSettings", {
+        reason: error instanceof Error ? error.message : String(error),
+      }),
     );
   }
   return { recordingsRemoved, settingsRemoved, problems };

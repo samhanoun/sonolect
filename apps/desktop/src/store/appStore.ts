@@ -11,7 +11,12 @@ import {
   type TranscriptHistoryRow,
 } from "../transcriptHistory";
 import { resolveDesktopAuthConfig } from "../localDevAuth";
-import { useI18nStore, type SupportedLocale } from "../i18n";
+import {
+  getT,
+  isSupportedLocale,
+  useI18nStore,
+  type SupportedLocale,
+} from "../i18n";
 import {
   saveSettings,
   loadSettings,
@@ -317,6 +322,19 @@ function stopActiveStream() {
   activeStream = undefined;
 }
 
+/**
+ * The saved interface language wins over the detected one, and the i18n store
+ * has to learn it before the first render.
+ */
+function initialLocale(): SupportedLocale {
+  const saved = loadSettings(SETTINGS_KEYS.locale);
+  if (isSupportedLocale(saved)) {
+    useI18nStore.getState().setLocale(saved);
+    return saved;
+  }
+  return useI18nStore.getState().locale;
+}
+
 export const useDesktopStore = create<DesktopState>((set, get) => ({
   commandOpen: false,
   recordingState: "idle",
@@ -352,9 +370,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
   onboardingChecklist: loadOnboardingChecklist(),
   transforming: false,
   toasts: [],
-  locale:
-    (loadSettings(SETTINGS_KEYS.locale) as SupportedLocale) ||
-    useI18nStore.getState().locale,
+  locale: initialLocale(),
   setLocale: (locale) => {
     useI18nStore.getState().setLocale(locale);
     saveSettings(SETTINGS_KEYS.locale, locale);

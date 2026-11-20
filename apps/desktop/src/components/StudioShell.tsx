@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useDesktopStore, type ViewId } from "../store/appStore";
 import { useProviderStore, setProviderMode } from "../providerSettings";
+import { useT, type LocaleKeys } from "../i18n";
 import StudioModels from "./StudioModels";
 import {
   StudioOverview,
@@ -30,42 +31,74 @@ import {
 import "../studio.css";
 import "../studio-night.css";
 
+type NavigationGroup = "workspace" | "personalize";
 const navigation: {
   id: ViewId;
-  label: string;
+  label: LocaleKeys;
   Icon: typeof Mic;
-  group: string;
+  group: NavigationGroup;
 }[] = [
-  { id: "home", label: "Overview", Icon: LayoutDashboard, group: "Workspace" },
+  {
+    id: "home",
+    label: "studio.nav.home",
+    Icon: LayoutDashboard,
+    group: "workspace",
+  },
   {
     id: "transcribe",
-    label: "Transcribe",
+    label: "studio.nav.transcribe",
     Icon: AudioLines,
-    group: "Workspace",
+    group: "workspace",
   },
-  { id: "speech", label: "Text to speech", Icon: Volume2, group: "Workspace" },
-  { id: "library", label: "Library", Icon: Folder, group: "Workspace" },
+  {
+    id: "speech",
+    label: "studio.nav.speech",
+    Icon: Volume2,
+    group: "workspace",
+  },
+  {
+    id: "library",
+    label: "studio.nav.library",
+    Icon: Folder,
+    group: "workspace",
+  },
   {
     id: "dictionary",
-    label: "Dictionary",
+    label: "studio.nav.dictionary",
     Icon: BookOpen,
-    group: "Personalize",
+    group: "personalize",
   },
-  { id: "snippets", label: "Snippets", Icon: Quote, group: "Personalize" },
+  {
+    id: "snippets",
+    label: "studio.nav.snippets",
+    Icon: Quote,
+    group: "personalize",
+  },
   {
     id: "models",
-    label: "Models & voices",
+    label: "studio.nav.models",
     Icon: SlidersHorizontal,
-    group: "Personalize",
+    group: "personalize",
   },
-  { id: "settings", label: "Settings", Icon: Settings2, group: "Personalize" },
+  {
+    id: "settings",
+    label: "studio.nav.settings",
+    Icon: Settings2,
+    group: "personalize",
+  },
+];
+const navigationGroups: { id: NavigationGroup; label: LocaleKeys }[] = [
+  { id: "workspace", label: "studio.group.workspace" },
+  { id: "personalize", label: "studio.group.personalize" },
 ];
 function QuickNavigation() {
   const { commandOpen, setCommandOpen, setActiveView } = useDesktopStore();
+  const t = useT();
   const [query, setQuery] = useState("");
   const dialog = useRef<HTMLDialogElement>(null);
+  const needle = query.trim().toLocaleLowerCase(t.locale);
   const matches = navigation.filter((item) =>
-    item.label.toLowerCase().includes(query.trim().toLowerCase()),
+    t(item.label).toLocaleLowerCase(t.locale).includes(needle),
   );
   const go = (id: ViewId) => {
     setActiveView(id);
@@ -79,7 +112,7 @@ function QuickNavigation() {
   }, [commandOpen]);
   return (
     <dialog
-      aria-label="Quick navigation"
+      aria-label={t("studio.quickNav.label")}
       ref={dialog}
       className="studio-command"
       onCancel={() => setCommandOpen(false)}
@@ -87,8 +120,8 @@ function QuickNavigation() {
       <div>
         <Search size={19} />
         <input
-          aria-label="Find a page"
-          placeholder="Where would you like to go?"
+          aria-label={t("studio.quickNav.find")}
+          placeholder={t("studio.quickNav.placeholder")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
@@ -100,7 +133,7 @@ function QuickNavigation() {
         />
         <button
           className="studio-icon-button"
-          aria-label="Close navigation"
+          aria-label={t("studio.quickNav.close")}
           onClick={() => setCommandOpen(false)}
         >
           <X size={17} />
@@ -110,12 +143,14 @@ function QuickNavigation() {
         {matches.map(({ id, label, Icon }) => (
           <button key={id} onClick={() => go(id)}>
             <Icon size={18} />
-            {label}
+            {t(label)}
             <span>↵</span>
           </button>
         ))}
         {!matches.length && (
-          <p className="studio-command-empty">No page matches “{query}”.</p>
+          <p className="studio-command-empty">
+            {t("studio.quickNav.empty", { query })}
+          </p>
         )}
       </nav>
     </dialog>
@@ -124,6 +159,7 @@ function QuickNavigation() {
 function RecordingDock() {
   const { recordingState, voiceError, toggleRecording, resetVoiceCapture } =
     useDesktopStore();
+  const t = useT();
   if (recordingState === "idle") return null;
   const processing =
     recordingState === "uploading" ||
@@ -136,13 +172,13 @@ function RecordingDock() {
       <AudioLines size={24} />
       <span>
         {recordingState === "recording"
-          ? "Listening…"
+          ? t("studio.dock.listening")
           : processing
-            ? "Processing…"
+            ? t("studio.dock.processing")
             : recordingState === "error"
-              ? "Recording needs attention"
-              : "Your words are ready"}
-        {voiceError && <small>{voiceError}</small>}
+              ? t("studio.dock.error")
+              : t("studio.dock.ready")}
+        {voiceError && <small>{t.message(voiceError)}</small>}
       </span>
       <button
         onClick={
@@ -150,7 +186,9 @@ function RecordingDock() {
         }
         disabled={processing}
       >
-        {recordingState === "recording" ? "Stop" : "Dismiss"}
+        {recordingState === "recording"
+          ? t("studio.dock.stop")
+          : t("studio.dock.dismiss")}
       </button>
     </div>
   );
@@ -165,6 +203,7 @@ export default function StudioShell() {
     toggleRecording,
     recordingState,
   } = useDesktopStore();
+  const t = useT();
   const { captures, refresh, error } = useSavedCaptures();
   const refreshKeyStatus = useProviderStore((s) => s.refreshKeyStatus);
   useEffect(() => {
@@ -191,7 +230,7 @@ export default function StudioShell() {
       <aside className="studio-sidebar">
         <div className="studio-brand">
           sonolect<span>.</span>
-          <small>Voice workspace</small>
+          <small>{t("studio.brand.tagline")}</small>
         </div>
         <button
           className="studio-new-recording"
@@ -202,15 +241,17 @@ export default function StudioShell() {
           disabled={recordingState === "uploading"}
         >
           <Mic size={18} />
-          {recordingState === "recording" ? "Stop dictation" : "New dictation"}
+          {recordingState === "recording"
+            ? t("studio.dictation.stop")
+            : t("studio.dictation.new")}
           <kbd>Ctrl ⇧ M</kbd>
         </button>
-        {["Workspace", "Personalize"].map((group) => (
-          <div className="studio-nav-group" key={group}>
-            <p>{group}</p>
-            <nav aria-label={group}>
+        {navigationGroups.map((group) => (
+          <div className="studio-nav-group" key={group.id}>
+            <p>{t(group.label)}</p>
+            <nav aria-label={t(group.label)}>
               {navigation
-                .filter((item) => item.group === group)
+                .filter((item) => item.group === group.id)
                 .map(({ id, label, Icon }) => (
                   <button
                     className={activeView === id ? "active" : ""}
@@ -218,7 +259,7 @@ export default function StudioShell() {
                     onClick={() => setActiveView(id)}
                   >
                     <Icon size={18} />
-                    {label}
+                    {t(label)}
                     {activeView === id && <span>•</span>}
                   </button>
                 ))}
@@ -229,46 +270,50 @@ export default function StudioShell() {
           <div className="studio-sidebar-policy">
             <span>
               <i />
-              {privacyLevel === "local" ? "Local processing" : "Cloud enabled"}
+              {privacyLevel === "local"
+                ? t("studio.mode.localProcessing")
+                : t("studio.mode.cloud")}
             </span>
             <p>
               {privacyLevel === "local"
-                ? "Your recordings stay on this device unless you choose online processing."
-                : "Online requests use your selected provider and API key."}
+                ? t("studio.mode.localHint")
+                : t("studio.mode.cloudHint")}
             </p>
           </div>
           <p className="studio-version">
-            Windows workspace <span>v0.1</span>
+            {t("studio.version")} <span>v0.1</span>
           </p>
         </div>
       </aside>
       <main className="studio-main">
         <header className="studio-topbar">
           <div>
-            Workspace <span>/</span>
+            {t("studio.group.workspace")} <span>/</span>
             <strong>
-              {navigation.find((item) => item.id === activeView)?.label ||
-                "Settings"}
+              {t(
+                navigation.find((item) => item.id === activeView)?.label ??
+                  "studio.nav.settings",
+              )}
             </strong>
           </div>
           <div className="studio-topbar-actions">
             <label className="studio-mode-control">
               <ShieldCheck size={16} />
               <select
-                aria-label="Processing mode"
+                aria-label={t("studio.mode.label")}
                 value={privacyLevel}
                 onChange={(event) =>
                   setPrivacyLevel(event.target.value as "local" | "cloud")
                 }
               >
-                <option value="local">Local only</option>
-                <option value="cloud">Cloud enabled</option>
+                <option value="local">{t("studio.mode.local")}</option>
+                <option value="cloud">{t("studio.mode.cloud")}</option>
               </select>
             </label>
             <button
               className="studio-search-button"
               onClick={() => setCommandOpen(true)}
-              aria-label="Search pages"
+              aria-label={t("studio.topbar.search")}
             >
               <Search size={17} />
               <kbd>Ctrl K</kbd>
