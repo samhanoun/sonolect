@@ -3,7 +3,8 @@
 Expo SDK 58 app (React Native 0.88, React 19.3, New Architecture) for iOS and
 Android: capture → refine → library, plus a text-to-speech reader, dictionary,
 snippets and privacy controls. Design: the "Night" variant of the desktop
-Studio palette (forest `#1F3429`, lime `#DDF39A`).
+Studio palette (forest `#1F3429`, lime `#DDF39A`), drawn as glass (see
+[Mobile glass](../../docs/design-system.md#mobile-glass)).
 
 ## How it works
 

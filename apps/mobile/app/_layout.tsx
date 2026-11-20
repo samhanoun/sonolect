@@ -6,7 +6,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  type ColorValue,
 } from "react-native";
 import { Tabs, type ErrorBoundaryProps } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -20,23 +19,16 @@ import { Inter_400Regular } from "@expo-google-fonts/inter/400Regular";
 import { Inter_500Medium } from "@expo-google-fonts/inter/500Medium";
 import { Inter_600SemiBold } from "@expo-google-fonts/inter/600SemiBold";
 import { JetBrainsMono_500Medium } from "@expo-google-fonts/jetbrains-mono/500Medium";
-import {
-  SafeAreaProvider,
-  SafeAreaView,
-  useSafeAreaInsets,
-} from "react-native-safe-area-context";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
 import { syncVoiceKeyboardPreferences } from "../modules/sonolect-voice-keyboard";
 import { strings, type Strings } from "../src/i18n";
 import { noticeText } from "../src/notices";
 import { useCompanionStore } from "../src/store";
-import {
-  CHROME_MAX_FONT_SCALE,
-  Icon,
-  MIN_TOUCH_SIZE,
-  type IconName,
-} from "../src/ui/components";
+import { MIN_TOUCH_SIZE } from "../src/ui/components";
 import { confirm } from "../src/ui/confirm";
+import { GlassTabBar } from "../src/ui/GlassTabBar";
+import { useReducedMotion } from "../src/ui/motion";
 import { colors, fonts, radius, space } from "../src/ui/theme";
 
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
@@ -51,65 +43,17 @@ const FONTS = {
   JetBrainsMono_500Medium,
 };
 
-function tabIcon(name: IconName) {
-  return ({ color }: { color: ColorValue }) => (
-    <Icon name={name} size={22} color={color} />
-  );
-}
-
-/**
- * Tab names grow with the font size up to 1.5x, then shrink to fit the tab
- * width, on one line (ux-19): "Bibliothèque" at 1.5x is wider than a tab on
- * a 360 dp phone or a 375 pt iPhone. There it needs about 0.81x of that
- * size, which is still larger than at 1.0x.
- */
-function tabLabel({
-  color,
-  position,
-  children,
-}: {
-  color: ColorValue;
-  position: "beside-icon" | "below-icon";
-  children: string;
-}) {
-  return (
-    <Text
-      maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
-      numberOfLines={1}
-      adjustsFontSizeToFit
-      style={[
-        styles.tabLabel,
-        // Wide screens (iPad) put the name beside the icon.
-        position === "beside-icon" && styles.tabLabelBeside,
-        { color },
-      ]}
-    >
-      {children}
-    </Text>
-  );
-}
-
-/** Tab bar height above the system navigation area (icon, label, padding). */
-const TAB_BAR_HEIGHT = 62;
-
 /** Visible tabs in the bar; +not-found is hidden and not counted. */
 const TAB_COUNT = 4;
 
 /**
- * A tab's name and icon. With a function tabBarLabel the tab bar no longer
- * builds the iOS label itself, and iOS tabs have the button role, so
- * VoiceOver gets "Capture, tab, 1 of 4" from here. Android keeps the "tab"
- * role and its own reading.
+ * A tab's name. iOS tabs have the button role, so VoiceOver gets
+ * "Capture, tab, 1 of 4" from here (GlassTabBar reads it). Android keeps
+ * the "tab" role and its own reading.
  */
-function tabOptions(
-  t: Strings,
-  title: string,
-  icon: IconName,
-  position: number,
-) {
+function tabOptions(t: Strings, title: string, position: number) {
   return {
     title,
-    tabBarIcon: tabIcon(icon),
     ...(Platform.OS === "ios"
       ? {
           tabBarAccessibilityLabel: t.tabs.a11yLabel(
@@ -140,9 +84,6 @@ function NoticeAnnouncer() {
 }
 
 export default function RootLayout() {
-  // Android draws edge to edge, so the bar must grow by the navigation bar
-  // inset (gesture pill or 3-button bar) instead of using a fixed height.
-  const insets = useSafeAreaInsets();
   const [fontsLoaded, fontError] = useFonts(FONTS);
   const hydrate = useCompanionStore((s) => s.hydrate);
   const hydrated = useCompanionStore((s) => s.hydrated);
@@ -150,6 +91,7 @@ export default function RootLayout() {
   const privacyLevel = useCompanionStore((s) => s.settings.privacyLevel);
   const dictationLanguage = useCompanionStore((s) => s.settings.language);
   const t = strings(uiLanguage);
+  const reducedMotion = useReducedMotion();
 
   useEffect(() => {
     if (hydrationStarted) return;
@@ -179,39 +121,26 @@ export default function RootLayout() {
       <StatusBar style="light" />
       <NoticeAnnouncer />
       <Tabs
+        // A floating glass capsule over the page; it hides itself while the
+        // keyboard is up (android-9).
+        tabBar={(props) => <GlassTabBar {...props} />}
         screenOptions={{
           headerShown: false,
           sceneStyle: { backgroundColor: colors.bg },
-          // The keyboard covers the bar instead of pushing it up above the
-          // keys, where a mis-tap leaves the text being typed (android-9).
-          tabBarHideOnKeyboard: true,
-          tabBarStyle: {
-            backgroundColor: colors.bgRaised,
-            borderTopColor: colors.line,
-            borderTopWidth: 1,
-            height: TAB_BAR_HEIGHT + insets.bottom,
-            paddingTop: 8,
-          },
-          tabBarActiveTintColor: colors.lime,
-          tabBarInactiveTintColor: colors.muted,
-          tabBarLabel: tabLabel,
+          // Pages cross-fade instead of cutting, unless Reduce Motion is on
+          // (the tab navigator doesn't check it).
+          animation: reducedMotion ? "none" : "fade",
         }}
       >
-        <Tabs.Screen
-          name="index"
-          options={tabOptions(t, t.tabs.capture, "mic", 1)}
-        />
+        <Tabs.Screen name="index" options={tabOptions(t, t.tabs.capture, 1)} />
         <Tabs.Screen
           name="library"
-          options={tabOptions(t, t.tabs.library, "list", 2)}
+          options={tabOptions(t, t.tabs.library, 2)}
         />
-        <Tabs.Screen
-          name="reader"
-          options={tabOptions(t, t.tabs.reader, "speaker", 3)}
-        />
+        <Tabs.Screen name="reader" options={tabOptions(t, t.tabs.reader, 3)} />
         <Tabs.Screen
           name="settings"
-          options={tabOptions(t, t.tabs.settings, "settings", 4)}
+          options={tabOptions(t, t.tabs.settings, 4)}
         />
         <Tabs.Screen
           name="dictate"
@@ -347,8 +276,6 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
 }
 
 const styles = StyleSheet.create({
-  tabLabel: { fontFamily: fonts.bodyMedium, fontSize: 11, textAlign: "center" },
-  tabLabelBeside: { marginStart: 5, marginEnd: 12 },
   recovery: { flex: 1, backgroundColor: colors.bg },
   recoveryContent: { padding: 24, gap: space.md },
   recoveryTitle: { fontSize: 24, fontWeight: "700", color: colors.text },

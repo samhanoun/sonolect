@@ -8,7 +8,6 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import { openPrivacyPolicy, privacyPolicyUrl } from "../src/appInfo";
 import {
@@ -39,7 +38,9 @@ import {
   inputColors,
 } from "../src/ui/components";
 import { confirm } from "../src/ui/confirm";
-import { colors, fonts, radius, space } from "../src/ui/theme";
+import { FadeIn, GlassScreen } from "../src/ui/glass";
+import { useTabBarClearance } from "../src/ui/GlassTabBar";
+import { colors, fonts, glass, radius, space } from "../src/ui/theme";
 import { VoiceKeyboardCard } from "../src/ui/VoiceKeyboardCard";
 
 type TestState = "idle" | "testing" | "ok" | "fail";
@@ -68,6 +69,7 @@ export default function SettingsScreen() {
   const dismissNotice = useCompanionStore((s) => s.dismissNotice);
   const t = strings(settings.uiLanguage);
   const banner = storageBanner(notice, storageDegraded);
+  const clearance = useTabBarClearance();
 
   const [url, setUrl] = useState(settings.localApiUrl ?? "");
   const [token, setToken] = useState(apiToken ?? "");
@@ -148,16 +150,21 @@ export default function SettingsScreen() {
   ];
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]}>
+    <GlassScreen>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
-          contentContainerStyle={styles.container}
+          contentContainerStyle={[
+            styles.container,
+            { paddingBottom: clearance + space.xl },
+          ]}
           keyboardShouldPersistTaps="handled"
         >
-          <Title>{t.settings.title}</Title>
+          <FadeIn>
+            <Title>{t.settings.title}</Title>
+          </FadeIn>
           {banner ? (
             <NoticeBanner
               text={noticeText(t, banner.notice)}
@@ -170,7 +177,7 @@ export default function SettingsScreen() {
             />
           ) : null}
 
-          <View style={styles.section}>
+          <FadeIn index={1} style={styles.section}>
             <Label heading>{t.settings.privacy}</Label>
             <Segmented
               accessibilityLabel={t.settings.privacy}
@@ -198,9 +205,9 @@ export default function SettingsScreen() {
                 </Text>
               </>
             ) : null}
-          </View>
+          </FadeIn>
 
-          <Card style={styles.toggles}>
+          <Card style={styles.toggles} enterIndex={2}>
             <ToggleRow
               label={t.settings.saveHistory}
               value={
@@ -230,9 +237,9 @@ export default function SettingsScreen() {
             ) : null}
           </Card>
 
-          <VoiceKeyboardCard />
+          <VoiceKeyboardCard enterIndex={3} />
 
-          <View style={styles.section}>
+          <FadeIn index={4} style={styles.section}>
             <Label heading>{t.settings.dictation}</Label>
             <View style={styles.chips}>
               {DICTATION_LANGUAGES.map((language) => (
@@ -244,9 +251,9 @@ export default function SettingsScreen() {
                 />
               ))}
             </View>
-          </View>
+          </FadeIn>
 
-          <View style={styles.section}>
+          <FadeIn index={5} style={styles.section}>
             <Label heading>{t.settings.interface}</Label>
             <Segmented
               accessibilityLabel={t.settings.interface}
@@ -257,7 +264,7 @@ export default function SettingsScreen() {
               value={settings.uiLanguage}
               onChange={(uiLanguage) => void updateSettings({ uiLanguage })}
             />
-          </View>
+          </FadeIn>
 
           {API_FEATURES_ENABLED ? (
             <View style={styles.section}>
@@ -485,14 +492,13 @@ export default function SettingsScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </GlassScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
-  container: { padding: space.xl, gap: space.xl, paddingBottom: 48 },
+  container: { padding: space.xl, gap: space.xl },
   section: { gap: space.sm },
   toggles: { paddingVertical: 4, gap: 0 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
@@ -512,7 +518,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: radius.md,
-    backgroundColor: colors.bg,
+    // Set into the glass card: darker than it, with a 3:1 outline (ux-26).
+    backgroundColor: glass.well,
     borderWidth: 1,
     borderColor: colors.lineInteractive,
     color: colors.text,

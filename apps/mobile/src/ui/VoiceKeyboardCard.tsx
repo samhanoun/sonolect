@@ -16,8 +16,9 @@ import { colors, fonts, space } from "./theme";
  * (an input method) types straight into other apps. iOS keyboards cannot use
  * the microphone, so iOS gets Quick dictation, which copies the text for
  * pasting and can be bound to the Action button or Back Tap via Shortcuts.
+ * `enterIndex` is its place in the screen's fade-in cascade.
  */
-export function VoiceKeyboardCard() {
+export function VoiceKeyboardCard({ enterIndex }: { enterIndex: number }) {
   const router = useRouter();
   const [status, setStatus] = useState<VoiceKeyboardStatus>(() =>
     getVoiceKeyboardStatus(),
@@ -38,7 +39,7 @@ export function VoiceKeyboardCard() {
         ? "Switch to the Sonolect voice keyboard in any text field, or here."
         : "Sonolect voice is your keyboard. Tap its mic in any app and speak.";
     return (
-      <Card>
+      <Card enterIndex={enterIndex}>
         <Label>Dictate in any app</Label>
         <Text style={s.body}>{step}</Text>
         <Text style={s.note}>
@@ -72,7 +73,7 @@ export function VoiceKeyboardCard() {
   }
 
   return (
-    <Card>
+    <Card enterIndex={enterIndex}>
       <Label>Dictate in any app</Label>
       <Text style={s.body}>
         {Platform.OS === "ios"
