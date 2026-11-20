@@ -49,7 +49,9 @@ pub struct Chunk {
 
 fn frame_levels(samples: &[i16]) -> Vec<f32> {
     samples
-        .chunks_exact(FRAME)
+        .as_chunks::<FRAME>()
+        .0
+        .iter()
         .map(|frame| {
             let energy: f64 = frame.iter().map(|s| f64::from(*s) * f64::from(*s)).sum();
             (energy / FRAME as f64).sqrt() as f32
@@ -257,8 +259,10 @@ fn read_chunk(file: &mut File, job: &Job) -> std::io::Result<Chunk> {
     Ok(Chunk {
         start_sample: job.start_sample,
         samples: bytes
-            .chunks_exact(2)
-            .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| i16::from_le_bytes(*pair))
             .collect(),
         silent: false,
     })
@@ -331,8 +335,10 @@ impl Recorder {
             self.sync_header()?;
         }
         let samples: Vec<i16> = pcm
-            .chunks_exact(2)
-            .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| i16::from_le_bytes(*pair))
             .collect();
         for chunk in self.chunker.push(&samples) {
             self.send(chunk);
