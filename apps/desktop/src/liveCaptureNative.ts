@@ -6,6 +6,7 @@ import type { DesktopWhisperResult } from "./desktopWhisper";
 import {
   LiveCaptureSession,
   streamRecordedAudio,
+  type LiveCaptureHandlers,
   type LiveCaptureNativeResult,
   type LiveCaptureSettings,
   type LiveCaptureTransport,
@@ -114,6 +115,56 @@ export const nativeLiveCapture: LiveCaptureTransport = {
     );
   },
 };
+
+export type LiveRecording = {
+  captureId: string;
+  /** Stops the microphone feed and resolves with the whole transcript. */
+  finish: () => Promise<DesktopWhisperResult & { durationMs: number }>;
+  /** Stops and throws the recording away. */
+  cancel: () => Promise<void>;
+};
+
+/**
+ * Records a microphone stream through the native recorder: no length limit
+ * short of four hours, and text arrives while the user is still speaking.
+ * Resolves with `undefined` when the recorder or the audio capture cannot
+ * start, so the caller can fall back to the short-recording path. The stream
+ * itself stays the caller's to stop.
+ */
+export async function recordLive(
+  stream: MediaStream,
+  settings: LiveCaptureSettings,
+  handlers: LiveCaptureHandlers = {},
+  transport: LiveCaptureTransport = nativeLiveCapture,
+): Promise<LiveRecording | undefined> {
+  let session: LiveCaptureSession;
+  try {
+    session = await LiveCaptureSession.start(transport, settings, handlers);
+  } catch {
+    return undefined;
+  }
+  let source: PcmSource;
+  try {
+    source = await openPcmSource(stream, (block, sampleRate) =>
+      session.push(block, sampleRate),
+    );
+  } catch {
+    await session.cancel().catch(() => undefined);
+    return undefined;
+  }
+  return {
+    captureId: session.captureId,
+    finish: async () => {
+      await source.close().catch(() => undefined);
+      const result = await session.finish();
+      return { ...result, durationMs: session.durationMs };
+    },
+    cancel: async () => {
+      await source.close().catch(() => undefined);
+      await session.cancel();
+    },
+  };
+}
 
 /** Decodes an audio file, at 16 kHz when the webview can do that itself. */
 async function decodeForSpeech(file: Blob) {
