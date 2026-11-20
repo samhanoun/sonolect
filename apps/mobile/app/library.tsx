@@ -8,12 +8,14 @@ import { exportNotes } from "../src/exportNotes";
 import { API_FEATURES_ENABLED } from "../src/features";
 import { strings } from "../src/i18n";
 import {
-  exportAsMarkdown,
+  EXPORT_FORMATS,
+  exportLibrary,
   filterHistory,
   formatDuration,
   formatNoteDate,
   formattingLocale,
   sortHistory,
+  type ExportFormat,
   type LibraryFilter,
 } from "../src/library";
 import { noticeText, storageBanner } from "../src/notices";
@@ -69,6 +71,8 @@ export default function LibraryScreen() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exporting = useRef(false);
+  // Export first asks for the file format, in a row under the filters.
+  const [choosingFormat, setChoosingFormat] = useState(false);
   const tts = useTts();
   const clearance = useTabBarClearance();
   const reduced = useReducedMotion();
@@ -115,16 +119,18 @@ export default function LibraryScreen() {
     copiedTimer.current = setTimeout(() => setCopiedId(null), 1500);
   };
 
-  const exportAll = async () => {
+  const exportAll = async (format: ExportFormat) => {
     if (exporting.current) return;
     exporting.current = true;
+    setChoosingFormat(false);
     try {
       await exportNotes(
-        exportAsMarkdown(sortHistory(history), {
+        exportLibrary(sortHistory(history), format, {
           formatDate: (iso) => formatNoteDate(iso, locale),
           modeLabel: (mode) => t.modeTag[mode] ?? mode,
         }),
         t,
+        format,
       );
     } finally {
       exporting.current = false;
@@ -313,10 +319,23 @@ export default function LibraryScreen() {
                   icon="share"
                   label={t.library.exportAll}
                   variant="ghost"
-                  onPress={() => void exportAll()}
+                  selected={choosingFormat}
+                  onPress={() => setChoosingFormat((open) => !open)}
                 />
               ) : null}
             </View>
+            {choosingFormat && history.length > 0 ? (
+              <View style={styles.filters} accessibilityRole="toolbar">
+                <Label>{t.library.exportAs}</Label>
+                {EXPORT_FORMATS.map((format) => (
+                  <Chip
+                    key={format}
+                    label={t.library.exportFormats[format]}
+                    onPress={() => void exportAll(format)}
+                  />
+                ))}
+              </View>
+            ) : null}
           </FadeIn>
         }
         ListEmptyComponent={

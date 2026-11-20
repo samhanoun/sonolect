@@ -52,6 +52,21 @@ export interface Snippet {
   body: string;
 }
 
+/**
+ * How many days a saved note is kept before it is deleted automatically.
+ * 0 keeps notes until they are deleted by hand. The same choices as the
+ * desktop app's recording retention.
+ */
+export const RETENTION_DAY_CHOICES = [0, 1, 7, 30, 90] as const;
+export type RetentionDays = (typeof RETENTION_DAY_CHOICES)[number];
+
+export function isRetentionDays(value: unknown): value is RetentionDays {
+  return (
+    typeof value === "number" &&
+    (RETENTION_DAY_CHOICES as readonly number[]).includes(value)
+  );
+}
+
 export interface CompanionSettings {
   language: DictationLanguage;
   uiLanguage: UiLanguage;
@@ -63,6 +78,8 @@ export interface CompanionSettings {
    */
   allowSystemService: boolean;
   saveHistory: boolean;
+  /** Notes older than this many days are deleted; 0 keeps them. */
+  retentionDays: RetentionDays;
   cloudSyncEnabled: boolean;
   localApiUrl?: string | undefined;
   hapticsEnabled: boolean;
@@ -93,6 +110,7 @@ export const DEFAULT_SETTINGS: CompanionSettings = {
   privacyLevel: "local_first",
   allowSystemService: false,
   saveHistory: true,
+  retentionDays: 0,
   cloudSyncEnabled: false,
   hapticsEnabled: true,
   speechRate: 1,
@@ -166,6 +184,8 @@ export function normalizeSettings(
   for (const key of BOOLEAN_SETTINGS) {
     if (typeof merged[key] !== "boolean") merged[key] = DEFAULT_SETTINGS[key];
   }
+  // Anything but a known choice keeps the notes: a bad value never deletes.
+  if (!isRetentionDays(merged.retentionDays)) merged.retentionDays = 0;
   if (
     typeof merged.speechRate !== "number" ||
     !Number.isFinite(merged.speechRate)

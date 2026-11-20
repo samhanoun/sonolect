@@ -58,7 +58,8 @@ This build runs entirely on the phone. The switch is `API_FEATURES_ENABLED`
 in `src/features.ts`, and it is `false`.
 
 - **Works**: on-device dictation, the library on the phone, local clean-up,
-  Summary, Tasks, the Reader and export.
+  Summary, Tasks, the Reader, export (Markdown, plain text or JSON) and
+  automatic deletion of old notes (Settings, _Keep notes for_).
 - **Hidden**: sync, _Rewrite_ and _Reply_ through the API, audio upload, and
   the Settings API section (URL, token, connection test). The library shows
   no LOCAL / QUEUED / SYNCED labels.
