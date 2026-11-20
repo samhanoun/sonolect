@@ -15,11 +15,9 @@ const FRENCH_PAGES: Array<[string, RegExp]> = [
 const ENGLISH_LEFTOVERS =
   /\b(Settings|Library|Recordings?|Transcript|Delete|Download|Language|Provider|Local only|Cloud enabled|Your |Choose |Save |Search)\b/;
 
+/** A navigation entry; its label may be followed by a description. */
 function nav(page: Page, name: string) {
-  return page
-    .getByRole("navigation")
-    .getByRole("button", { name: new RegExp(`^${name}`) })
-    .first();
+  return page.getByRole("navigation").getByRole("button", { name }).first();
 }
 
 async function visibleText(page: Page) {

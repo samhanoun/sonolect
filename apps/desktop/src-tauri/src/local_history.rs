@@ -16,6 +16,10 @@ pub struct Capture {
     pub transcript: Option<String>,
     pub error: Option<String>,
     pub language: Option<String>,
+    /// Timed segments from the engine, or as edited in the studio. Records
+    /// written before segments were stored simply have none.
+    #[serde(default)]
+    pub segments: Vec<super::WhisperSegment>,
 }
 fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let directory = app
@@ -76,14 +80,17 @@ pub fn process_with(
         transcript: None,
         error: Some("Processing was interrupted. Retry this recording.".into()),
         language: payload.language.clone(),
+        segments: vec![],
     };
     write_record(app, &record)?;
-    let result = transcribe(payload);
-    match &result {
+    let mut result = transcribe(payload);
+    match &mut result {
         Ok(output) => {
+            output.capture_id = Some(record.id.clone());
             record.transcript = Some(output.text.clone());
             record.error = None;
             record.language = output.language.clone();
+            record.segments = output.segments.clone();
         }
         Err(error) => record.error = Some(error.clone()),
     }
@@ -106,6 +113,91 @@ pub fn list_local_captures(app: tauri::AppHandle) -> Result<Vec<Capture>, String
     }
     captures.sort_by_key(|capture| std::cmp::Reverse(capture.created_at_ms));
     Ok(captures)
+}
+/// The saved audio of one recording, as a raw binary response, so the studio
+/// can play it back and jump to a segment.
+#[tauri::command]
+pub async fn read_local_capture_audio(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<tauri::ipc::Response, String> {
+    valid_id(&id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::read(directory(&app)?.join(format!("{id}.wav")))
+            .map(tauri::ipc::Response::new)
+            .map_err(|_| "The audio of this recording is no longer on this device.".to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+const MAX_EDIT_TRANSCRIPT_BYTES: usize = 2_000_000;
+const MAX_EDIT_SEGMENTS: usize = 20_000;
+const MAX_SPEAKER_CHARS: usize = 80;
+
+/// Checks an edited transcript before it replaces the saved one, and tidies
+/// the speaker labels.
+fn validated_edit(
+    transcript: String,
+    segments: Vec<super::WhisperSegment>,
+) -> Result<(String, Vec<super::WhisperSegment>), String> {
+    let segment_bytes: usize = segments.iter().map(|segment| segment.text.len()).sum();
+    if transcript.len() > MAX_EDIT_TRANSCRIPT_BYTES
+        || segment_bytes > MAX_EDIT_TRANSCRIPT_BYTES
+        || segments.len() > MAX_EDIT_SEGMENTS
+    {
+        return Err("The edited transcript is too large to save.".into());
+    }
+    let mut cleaned = Vec::with_capacity(segments.len());
+    for mut segment in segments {
+        if segment.end_ms < segment.start_ms {
+            return Err("A segment ends before it starts.".into());
+        }
+        segment.speaker = match segment.speaker.as_deref().map(str::trim) {
+            None | Some("") => None,
+            Some(speaker) if speaker.chars().count() > MAX_SPEAKER_CHARS => {
+                return Err("Speaker names can have up to 80 characters.".into());
+            }
+            Some(speaker) => Some(speaker.to_owned()),
+        };
+        cleaned.push(segment);
+    }
+    Ok((transcript, cleaned))
+}
+
+fn update_record(
+    directory: &std::path::Path,
+    id: &str,
+    transcript: String,
+    segments: Vec<super::WhisperSegment>,
+) -> Result<(), String> {
+    let (transcript, segments) = validated_edit(transcript, segments)?;
+    let path = directory.join(format!("{id}.json"));
+    let mut record = fs::read(&path)
+        .ok()
+        .and_then(|data| serde_json::from_slice::<Capture>(&data).ok())
+        .ok_or("This recording is no longer in your library.")?;
+    record.transcript = Some(transcript);
+    record.segments = segments;
+    let temp = directory.join(format!("{id}.json.tmp"));
+    fs::write(
+        &temp,
+        serde_json::to_vec(&record).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    fs::rename(temp, path).map_err(|e| e.to_string())
+}
+
+/// Saves the transcript and segments edited in the studio back to a recording.
+#[tauri::command]
+pub fn update_local_capture(
+    app: tauri::AppHandle,
+    id: String,
+    transcript: String,
+    segments: Vec<super::WhisperSegment>,
+) -> Result<(), String> {
+    valid_id(&id)?;
+    update_record(&directory(&app)?, &id, transcript, segments)
 }
 #[tauri::command]
 pub fn delete_local_capture(app: tauri::AppHandle, id: String) -> Result<(), String> {
@@ -226,7 +318,8 @@ pub async fn retry_local_capture(
 }
 #[cfg(test)]
 mod tests {
-    use super::{purge_directory, Capture};
+    use super::{purge_directory, update_record, Capture};
+    use crate::WhisperSegment;
     use std::fs;
 
     fn record(directory: &std::path::Path, id: &str, created_at_ms: u64) {
@@ -237,6 +330,7 @@ mod tests {
             transcript: Some("hello".into()),
             error: None,
             language: None,
+            segments: vec![],
         };
         fs::write(
             directory.join(format!("{id}.json")),
@@ -266,6 +360,94 @@ mod tests {
         assert_eq!(purge_directory(&directory, None, now).unwrap(), 1);
         assert_eq!(fs::read_dir(&directory).unwrap().count(), 0);
         fs::remove_dir_all(&directory).unwrap();
+    }
+
+    fn segment(start_ms: u64, end_ms: u64, text: &str, speaker: Option<&str>) -> WhisperSegment {
+        WhisperSegment {
+            start_ms,
+            end_ms,
+            text: text.into(),
+            speaker: speaker.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn edits_are_saved_with_their_segments_and_speakers() {
+        let folder = tempfile::tempdir().unwrap();
+        let directory = folder.path();
+        record(directory, "3-1", 5);
+
+        update_record(
+            directory,
+            "3-1",
+            "Hello there. General Kenobi.".into(),
+            vec![
+                segment(0, 900, "Hello there.", Some("  Obi-Wan ")),
+                segment(900, 2000, "General Kenobi.", Some(" ")),
+            ],
+        )
+        .unwrap();
+
+        let saved: Capture =
+            serde_json::from_slice(&fs::read(directory.join("3-1.json")).unwrap()).unwrap();
+        assert_eq!(
+            saved.transcript.as_deref(),
+            Some("Hello there. General Kenobi.")
+        );
+        assert_eq!(saved.created_at_ms, 5);
+        assert_eq!(saved.segments.len(), 2);
+        assert_eq!(saved.segments[0].speaker.as_deref(), Some("Obi-Wan"));
+        assert_eq!(saved.segments[1].speaker, None);
+        assert!(!directory.join("3-1.json.tmp").exists());
+    }
+
+    #[test]
+    fn edits_are_refused_when_invalid_or_the_recording_is_gone() {
+        let folder = tempfile::tempdir().unwrap();
+        let directory = folder.path();
+        record(directory, "4-1", 5);
+
+        assert_eq!(
+            update_record(directory, "9-9", "text".into(), vec![]).unwrap_err(),
+            "This recording is no longer in your library."
+        );
+        assert_eq!(
+            update_record(directory, "4-1", "x".repeat(2_000_001), vec![]).unwrap_err(),
+            "The edited transcript is too large to save."
+        );
+        assert_eq!(
+            update_record(
+                directory,
+                "4-1",
+                "text".into(),
+                vec![segment(500, 100, "text", None)]
+            )
+            .unwrap_err(),
+            "A segment ends before it starts."
+        );
+        assert_eq!(
+            update_record(
+                directory,
+                "4-1",
+                "text".into(),
+                vec![segment(0, 100, "text", Some(&"n".repeat(81)))]
+            )
+            .unwrap_err(),
+            "Speaker names can have up to 80 characters."
+        );
+        let saved: Capture =
+            serde_json::from_slice(&fs::read(directory.join("4-1.json")).unwrap()).unwrap();
+        assert_eq!(saved.transcript.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn records_saved_before_segments_existed_still_load() {
+        let old = br#"{"id":"1-1","createdAtMs":1,"durationMs":2,"transcript":"hi","error":null,"language":"en"}"#;
+        let capture: Capture = serde_json::from_slice(old).unwrap();
+        assert!(capture.segments.is_empty());
+        let with_segments = br#"{"id":"1-1","createdAtMs":1,"durationMs":2,"transcript":"hi","error":null,"language":"en","segments":[{"startMs":0,"endMs":10,"text":"hi"}]}"#;
+        let capture: Capture = serde_json::from_slice(with_segments).unwrap();
+        assert_eq!(capture.segments, vec![segment(0, 10, "hi", None)]);
     }
 
     #[test]

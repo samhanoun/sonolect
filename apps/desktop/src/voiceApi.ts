@@ -36,6 +36,8 @@ export type TranscriptJobResult = {
   jobId?: string;
   transcript?: string;
   segments?: TranscriptSegment[];
+  /** The saved recording behind this transcript, for playback in the editor. */
+  captureId?: string;
   status: "submitted" | "completed" | "offline";
   message?: string;
 };
@@ -123,6 +125,9 @@ export async function submitCapturedAudio(
       status: "completed",
       transcript: desktopResult.text.trim(),
       segments: desktopResult.segments,
+      ...(desktopResult.captureId
+        ? { captureId: desktopResult.captureId }
+        : {}),
       message: getT()("voice.localWhisper"),
     };
   }
@@ -264,6 +269,7 @@ export async function submitCapturedAudioCloud(
         status: "completed",
         transcript: result.text,
         segments: result.segments,
+        ...(result.captureId ? { captureId: result.captureId } : {}),
         message: getT()("voice.onlineModel"),
       };
     } catch (error) {
@@ -282,6 +288,9 @@ export async function submitCapturedAudioCloud(
       status: "completed",
       transcript: desktopResult.text.trim(),
       segments: desktopResult.segments,
+      ...(desktopResult.captureId
+        ? { captureId: desktopResult.captureId }
+        : {}),
       message: getT()("voice.localWhisper"),
     };
   }

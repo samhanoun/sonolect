@@ -237,6 +237,7 @@ pub fn transcribe_with_model(
             text: String::new(),
             segments: vec![],
             language: payload.language,
+            capture_id: None,
         });
     }
     with_engine(&model_path, |context| {
@@ -299,5 +300,6 @@ fn run(
         text,
         segments,
         language,
+        capture_id: None,
     })
 }
