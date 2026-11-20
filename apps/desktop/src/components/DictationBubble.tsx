@@ -13,6 +13,7 @@ import {
   BUBBLE_READY_EVENT,
   BUBBLE_STATE_EVENT,
   MAIN_WINDOW_LABEL,
+  canCancel,
   formatElapsed,
   pushLevel,
   type BubbleAction,
@@ -35,6 +36,7 @@ const INITIAL_STATE: BubbleState = {
   detail: null,
   hotkey: "",
   locale: getLocale(),
+  dictation: false,
 };
 
 const PHASE_LABELS: Record<BubblePhase, LocaleKeys> = {
@@ -79,7 +81,9 @@ export default function DictationBubble() {
           // This window has its own i18n store: it follows the main window's
           // interface language.
           if (isSupportedLocale(payload.locale)) setLocale(payload.locale);
-          setState(payload);
+          // Anything but a clear yes is read as a Studio recording, which
+          // the bubble never offers to discard.
+          setState({ ...payload, dictation: payload.dictation === true });
         },
       );
       const offLevel = await listen<number>(BUBBLE_LEVEL_EVENT, (event) => {
@@ -142,6 +146,13 @@ export default function DictationBubble() {
 
   const elapsed =
     state.startedAt !== null ? formatElapsed(now - state.startedAt) : "0:00";
+  const inProgress = phase === "listening" || phase === "transcribing";
+  // Only a dictation is cancelled from here, with ✕ or Esc. A recording made
+  // in the Studio can be stopped from the bubble, never thrown away.
+  const cancellable = canCancel(phase, state.dictation);
+  const stopLabel = state.dictation
+    ? t("bubble.stop")
+    : t("studio.transcribe.stopRecording");
 
   return (
     <div
@@ -154,19 +165,23 @@ export default function DictationBubble() {
         aria-live="polite"
         aria-label={t(PHASE_LABELS[phase])}
       >
-        <button
-          type="button"
-          className="bubble__icon-btn"
-          onClick={() => void send("cancel")}
-          aria-label={
-            phase === "listening" || phase === "transcribing"
-              ? t("bubble.cancel")
-              : t("bubble.dismiss")
-          }
-          title={t("bubble.cancelTitle", { key: t("studio.keys.esc") })}
-        >
-          <X size={15} strokeWidth={2} />
-        </button>
+        {inProgress && !cancellable ? (
+          <span className="bubble__spacer" />
+        ) : (
+          <button
+            type="button"
+            className="bubble__icon-btn"
+            onClick={() => void send("cancel")}
+            aria-label={cancellable ? t("bubble.cancel") : t("bubble.dismiss")}
+            title={
+              cancellable
+                ? t("bubble.cancelTitle", { key: t("studio.keys.esc") })
+                : t("bubble.dismiss")
+            }
+          >
+            <X size={15} strokeWidth={2} />
+          </button>
+        )}
 
         <div className="bubble__center">
           {phase === "listening" || phase === "transcribing" ? (
@@ -209,8 +224,8 @@ export default function DictationBubble() {
               type="button"
               className="bubble__stop"
               onClick={() => void send("finish")}
-              aria-label={t("bubble.stop")}
-              title={t("bubble.stop")}
+              aria-label={stopLabel}
+              title={stopLabel}
             >
               <Square size={11} strokeWidth={0} fill="currentColor" />
             </button>

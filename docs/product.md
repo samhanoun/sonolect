@@ -34,7 +34,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 
 ### Dictate Anywhere
 
-- **Desktop:** a floating dictation bubble, a small always-on-top glass pill that never takes focus. The global hotkeys (Ctrl+Shift+M to toggle, Ctrl+Shift+V to hold) dictate into whatever app is in front, and the polished text is pasted there when it's done. Esc cancels. Settings › Dictation bubble shows it always, only while dictating, or never.
+- **Desktop:** a floating dictation bubble, a small always-on-top glass pill that never takes focus. The global hotkeys (Ctrl+Shift+M to toggle, Ctrl+Shift+V to hold) dictate into whatever app is in front, and the polished text is pasted there when it's done. Esc cancels a dictation. A recording started in the Studio shows on the pill too, where it can be stopped but never discarded, and Esc stays with the app you are in. Settings › Dictation bubble shows it always, only while dictating, or never.
 - **Android:** the Sonolect voice keyboard, an input method with one big mic that types into any app. It recognizes speech on the phone, and uses the system speech service only where the app's privacy settings allow it without asking.
 - **iOS:** Quick dictation (`sonolect://dictate`) opens straight into listening and copies the polished text for pasting. iOS keyboards can't use the microphone, so this is the closest equivalent. It can be bound to the Action button or Back Tap through Shortcuts.
 
