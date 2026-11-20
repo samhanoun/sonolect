@@ -484,7 +484,7 @@ export const en = {
   "studio.settings.bubbleDictating": "Only while dictating",
   "studio.settings.bubbleOff": "Off",
   "studio.settings.storageHint":
-    "Recordings are limited to three minutes and saved on this device for as long as you choose above. API keys use Windows Credential Manager.",
+    "Recordings can run up to four hours and are saved on this device for as long as you choose above. API keys use Windows Credential Manager.",
   "studio.settings.previewNotice":
     "This is the browser preview. Model installation and local speech run in the Windows app.",
   "studio.privacy.title": "Privacy & retention",
@@ -790,6 +790,12 @@ export const en = {
     "New recordings are compressed once they are transcribed. You can still play them and transcribe them again.",
   "studio.storage.savedWav":
     "New recordings are kept in original quality. Recordings already compressed stay compressed.",
+  "studio.transcribe.liveLabel": "Heard so far",
+  "capture.keptForRetry":
+    "{error} The recording is in your Library, where you can transcribe it again.",
+  "native.invalidCompressed": "Invalid compressed audio.",
+  "native.cannotCompress": "Cannot write compressed audio: {reason}",
+  "native.opusError": "Opus error: {reason}",
 } as const;
 
 export type LocaleKeys = keyof typeof en;

@@ -491,7 +491,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.settings.bubbleDictating": "Seulement pendant la dictée",
   "studio.settings.bubbleOff": "Jamais",
   "studio.settings.storageHint":
-    "Les enregistrements sont limités à trois minutes et conservés sur cet appareil pendant la durée choisie ci-dessus. Les clés API utilisent le Gestionnaire d'identification Windows.",
+    "Les enregistrements peuvent durer jusqu'à quatre heures et sont conservés sur cet appareil pendant la durée choisie ci-dessus. Les clés API utilisent le Gestionnaire d'identification Windows.",
   "studio.settings.previewNotice":
     "Ceci est l'aperçu dans le navigateur. L'installation des modèles et la reconnaissance locale fonctionnent dans l'application Windows.",
   "studio.privacy.title": "Confidentialité et conservation",
@@ -835,4 +835,11 @@ export const fr: Record<LocaleKeys, string> = {
     "Les nouveaux enregistrements sont compressés une fois transcrits. Vous pouvez toujours les écouter et les transcrire à nouveau.",
   "studio.storage.savedWav":
     "Les nouveaux enregistrements sont conservés en qualité d'origine. Ceux déjà compressés le restent.",
+  "studio.transcribe.liveLabel": "Entendu jusqu'ici",
+  "capture.keptForRetry":
+    "{error} L'enregistrement est dans votre Bibliothèque, où vous pouvez le transcrire à nouveau.",
+  "native.invalidCompressed": "Audio compressé invalide.",
+  "native.cannotCompress":
+    "Impossible d'écrire l'audio compressé\u00a0: {reason}",
+  "native.opusError": "Erreur Opus\u00a0: {reason}",
 };

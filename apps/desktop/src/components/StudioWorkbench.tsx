@@ -16,7 +16,7 @@ import {
   Upload,
   WandSparkles,
 } from "lucide-react";
-import { useDesktopStore } from "../store/appStore";
+import { subscribeMicLevel, useDesktopStore } from "../store/appStore";
 import { isTauriRuntime } from "../desktopNative";
 import {
   nativeProviderCall,
@@ -92,6 +92,25 @@ const SIGNAL_BARS = [
 /** The hero centerpiece: a signal meter that comes alive while dictating. */
 function SignalMeter({ live }: { live: boolean }) {
   const t = useT();
+  const bars = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // The bars follow the microphone: they rise at once and fall slowly, so
+    // a pause between words does not flatten them. Without levels (no meter
+    // in this webview) they keep their own movement.
+    let shown = 0;
+    const unsubscribe = subscribeMicLevel((level) => {
+      shown = Math.max(level, shown * 0.85);
+      bars.current?.style.setProperty(
+        "--signal-level",
+        (0.2 + 0.8 * shown).toFixed(2),
+      );
+    });
+    const element = bars.current;
+    return () => {
+      unsubscribe();
+      element?.style.removeProperty("--signal-level");
+    };
+  }, []);
   return (
     <div className={`studio-signal ${live ? "live" : ""}`} aria-hidden="true">
       <div className="studio-signal-head">
@@ -101,7 +120,7 @@ function SignalMeter({ live }: { live: boolean }) {
         </span>
         <span className="studio-signal-meta">{t("studio.signal.meta")}</span>
       </div>
-      <div className="studio-signal-bars">
+      <div className="studio-signal-bars" ref={bars}>
         {SIGNAL_BARS.map((height, index) => (
           <i
             key={index}
@@ -641,6 +660,14 @@ export function StudioTranscribe({
               </button>
             )}
           </div>
+          {state.liveTranscript &&
+            (state.recordingState === "recording" ||
+              state.recordingState === "uploading") && (
+              <div className="studio-live-text">
+                <span>{t("studio.transcribe.liveLabel")}</span>
+                <p>{state.liveTranscript}</p>
+              </div>
+            )}
           {(message || player.error || state.voiceError) && (
             <StatusNotice
               text={

@@ -32,11 +32,18 @@ const toneWav = readFileSync(
  * ("Part 1.", "Part 2." and so on) as a `capture-partial` event.
  *
  * `compress_local_captures` compresses each saved recording once and reports
- * what that freed.
+ * what that freed. Pasting into another app always succeeds.
  */
-export async function installMockTauri(page: Page, captures: MockCapture[]) {
+export async function installMockTauri(
+  page: Page,
+  captures: MockCapture[],
+  options: {
+    /** false: the recorder cannot start, as when no speech model is installed. */
+    recorder?: boolean;
+  } = {},
+) {
   await page.addInitScript(
-    ({ captures, toneWav }) => {
+    ({ captures, toneWav, recorder }) => {
       window.localStorage.clear();
       const library = structuredClone(captures);
       /** Recordings already turned into Opus. */
@@ -74,6 +81,9 @@ export async function installMockTauri(page: Page, captures: MockCapture[]) {
       };
       Object.assign(window, {
         __sonolectE2eNativeCalls: calls,
+        __sonolectE2eEmit: emit,
+        __sonolectE2eListening: (event: string) =>
+          [...listeners.values()].some((listener) => listener.event === event),
         __TAURI_INTERNALS__: {
           metadata: {
             currentWindow: { label: "main" },
@@ -115,6 +125,8 @@ export async function installMockTauri(page: Page, captures: MockCapture[]) {
                 listeners.delete(args.eventId as number);
                 return null;
               case "capture_begin":
+                if (!recorder)
+                  throw "Install the local speech model in Settings first.";
                 live = {
                   id: `1700000000001-${nextId++}`,
                   bytes: 0,
@@ -150,6 +162,12 @@ export async function installMockTauri(page: Page, captures: MockCapture[]) {
               case "capture_cancel":
                 live = undefined;
                 return null;
+              case "insert_text_into_active_app":
+                return {
+                  ok: true,
+                  method: "native-insert",
+                  status: "Inserted dictation into the active app.",
+                };
               case "list_local_captures":
                 return structuredClone(library);
               case "read_local_capture_audio":
@@ -194,7 +212,7 @@ export async function installMockTauri(page: Page, captures: MockCapture[]) {
         },
       });
     },
-    { captures, toneWav },
+    { captures, toneWav, recorder: options.recorder ?? true },
   );
 }
 
@@ -207,5 +225,30 @@ export function nativeCalls(page: Page, command: string) {
         }
       ).__sonolectE2eNativeCalls.filter((call) => call.command === command),
     command,
+  );
+}
+
+/**
+ * Delivers an event to the page as if the native side had emitted it, once
+ * the page listens for it (listeners are registered after the first render).
+ */
+export async function emitNativeEvent(
+  page: Page,
+  event: string,
+  payload: unknown,
+) {
+  type Hooks = {
+    __sonolectE2eEmit: (event: string, payload: unknown) => void;
+    __sonolectE2eListening: (event: string) => boolean;
+  };
+  await page.waitForFunction(
+    (event) =>
+      (window as typeof window & Hooks).__sonolectE2eListening(event),
+    event,
+  );
+  await page.evaluate(
+    ({ event, payload }) =>
+      (window as typeof window & Hooks).__sonolectE2eEmit(event, payload),
+    { event, payload },
   );
 }
