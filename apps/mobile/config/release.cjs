@@ -8,6 +8,15 @@
  * then shows no link. A release build without it fails here, so a store
  * build can never ship without the link or with a placeholder.
  *
+ * EXPO_PUBLIC_SONOLECT_SYNC_URL is the end-to-end encrypted sync server
+ * (packages/sync-core). It is optional: without it the app has no sync and
+ * makes no sync request. When set it must be an https:// URL; development
+ * builds may also use plain http to this machine (127.0.0.1, localhost) or,
+ * from the Android emulator, to its host (10.0.2.2). The app reads the
+ * variable itself (Expo inlines EXPO_PUBLIC_ variables) and checks it again
+ * with sync-core's checkSyncServerUrl; this check makes a build with a bad
+ * URL fail instead of shipping without sync.
+ *
  * SONOLECT_BUILD_NUMBER is the build number of a local release archive
  * (ios-10, android-3): it sets ios.buildNumber (CFBundleVersion) and
  * android.versionCode. EAS builds use remote versioning (eas.json) instead,
@@ -16,12 +25,23 @@
  */
 
 const POLICY_URL_VAR = "SONOLECT_PRIVACY_POLICY_URL";
+const SYNC_URL_VAR = "EXPO_PUBLIC_SONOLECT_SYNC_URL";
 const BUILD_NUMBER_VAR = "SONOLECT_BUILD_NUMBER";
+/** Plain http is allowed only to these hosts, and only in development builds. */
+const LOCAL_HTTP_HOSTS = ["127.0.0.1", "localhost", "10.0.2.2"];
+/**
+ * scheme://host[:port][/path], with no user name, query or fragment: the
+ * shape sync-core's checkSyncServerUrl accepts (packages/sync-core/src/server-url.ts).
+ */
+const SYNC_URL_SHAPE =
+  /^(https?):\/\/([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::(\d{1,5}))?(\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*)?$/i;
 /** The largest versionCode Google Play accepts. */
 const MAX_BUILD_NUMBER = 2100000000;
 
 const MESSAGES = {
   invalidUrl: `${POLICY_URL_VAR} must be an https:// URL`,
+  invalidSyncUrl: `${SYNC_URL_VAR} must be an https:// URL with no user name, query or fragment (development builds may also use http://127.0.0.1, http://localhost or http://10.0.2.2)`,
+  localSyncUrlInRelease: `${SYNC_URL_VAR} must be an https:// URL in release builds`,
   missingUrl: `${POLICY_URL_VAR} is required for release builds (App Review 5.1.1(i), Google Play User Data policy). See docs/mobile-release.md.`,
   invalidBuildNumber: `${BUILD_NUMBER_VAR} must be a whole number from 1 to ${MAX_BUILD_NUMBER}`,
   missingBuildNumber: `Set ${BUILD_NUMBER_VAR} for local release builds (EAS builds use remote versioning)`,
@@ -76,6 +96,37 @@ function privacyPolicyUrlFrom(env) {
 }
 
 /**
+ * The sync server URL from the environment, without a trailing slash, or null
+ * when unset (no sync). Throws when it is malformed, plain http to another
+ * host, or plain http in a release build.
+ */
+function syncServerUrlFrom(env) {
+  const url = (env[SYNC_URL_VAR] ?? "").trim();
+  if (!url) return null;
+  const match = SYNC_URL_SHAPE.exec(url);
+  if (!match) throw new Error(MESSAGES.invalidSyncUrl);
+  const scheme = match[1].toLowerCase();
+  const host = match[2].toLowerCase();
+  const port = match[3];
+  if (
+    (port !== undefined && (Number(port) < 1 || Number(port) > 65535)) ||
+    host.startsWith(".") ||
+    host.endsWith(".") ||
+    host.includes("..")
+  ) {
+    throw new Error(MESSAGES.invalidSyncUrl);
+  }
+  if (scheme === "http") {
+    if (!LOCAL_HTTP_HOSTS.includes(host)) {
+      throw new Error(MESSAGES.invalidSyncUrl);
+    }
+    if (isReleaseBuild(env)) throw new Error(MESSAGES.localSyncUrlInRelease);
+  }
+  const path = (match[4] ?? "").replace(/\/+$/, "");
+  return `${scheme}://${host}${port !== undefined ? `:${port}` : ""}${path}`;
+}
+
+/**
  * The build number from the environment, or null when unset. Throws when it
  * is not a whole number from 1 to MAX_BUILD_NUMBER, and when a local release
  * build (SONOLECT_RELEASE=1, not on an EAS builder) has none.
@@ -97,7 +148,8 @@ function buildNumberFrom(env) {
 /**
  * The Expo config with `extra.privacyPolicyUrl` from the environment, and
  * ios.buildNumber and android.versionCode from SONOLECT_BUILD_NUMBER when it
- * is set. When the URL is unset the key is left out rather than set to null:
+ * is set. EXPO_PUBLIC_SONOLECT_SYNC_URL is only checked: the app reads it
+ * from the environment Expo inlines, so the config stays the same. When the URL is unset the key is left out rather than set to null:
  * @expo/config 58 turns a null in a dynamic config into {}
  * (serializeAndEvaluate). The app reads a missing key as no policy link. A
  * value in app.json is dropped, so the environment is the only source.
@@ -105,6 +157,7 @@ function buildNumberFrom(env) {
 function resolveReleaseConfig(config, env) {
   const privacyPolicyUrl = privacyPolicyUrlFrom(env);
   const buildNumber = buildNumberFrom(env);
+  syncServerUrlFrom(env);
   const { privacyPolicyUrl: _static, ...extra } = config.extra ?? {};
   const versions =
     buildNumber === null
@@ -122,12 +175,15 @@ function resolveReleaseConfig(config, env) {
 
 module.exports = {
   BUILD_NUMBER_VAR,
+  LOCAL_HTTP_HOSTS,
   MAX_BUILD_NUMBER,
   MESSAGES,
   POLICY_URL_VAR,
+  SYNC_URL_VAR,
   buildNumberFrom,
   isEasBuilder,
   isReleaseBuild,
   privacyPolicyUrlFrom,
   resolveReleaseConfig,
+  syncServerUrlFrom,
 };

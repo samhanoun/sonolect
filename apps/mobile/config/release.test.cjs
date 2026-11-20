@@ -7,6 +7,7 @@ const {
   isEasBuilder,
   isReleaseBuild,
   resolveReleaseConfig,
+  syncServerUrlFrom,
 } = require("./release.cjs");
 
 const CONFIG = {
@@ -285,5 +286,130 @@ describe("isReleaseBuild", () => {
     assert.equal(isReleaseBuild({ EAS_BUILD_PROFILE: "preview" }), false);
     assert.equal(isReleaseBuild({ EAS_BUILD_PROFILE: "production" }), true);
     assert.equal(isReleaseBuild({ SONOLECT_RELEASE: "1" }), true);
+  });
+});
+
+describe("EXPO_PUBLIC_SONOLECT_SYNC_URL", () => {
+  const SYNC = "https://sync.example.org";
+
+  it("is optional, in development and release builds alike", () => {
+    for (const env of [
+      {},
+      { EXPO_PUBLIC_SONOLECT_SYNC_URL: "" },
+      { EXPO_PUBLIC_SONOLECT_SYNC_URL: "  " },
+    ]) {
+      assert.equal(syncServerUrlFrom(env), null);
+      assert.equal(
+        syncServerUrlFrom({ ...env, EAS_BUILD_PROFILE: "production" }),
+        null,
+      );
+    }
+    assert.deepEqual(
+      resolveReleaseConfig(CONFIG, {
+        SONOLECT_PRIVACY_POLICY_URL: POLICY,
+        EAS_BUILD_PROFILE: "production",
+      }),
+      { ...CONFIG, extra: { supportsRTL: false, privacyPolicyUrl: POLICY } },
+    );
+  });
+
+  it("accepts an https URL and leaves the config unchanged", () => {
+    for (const [raw, url] of [
+      [SYNC, SYNC],
+      [" https://Sync.Example.org/ ", SYNC],
+      ["https://example.org:8443/sync/", "https://example.org:8443/sync"],
+    ]) {
+      assert.equal(
+        syncServerUrlFrom({ EXPO_PUBLIC_SONOLECT_SYNC_URL: raw }),
+        url,
+        raw,
+      );
+      for (const env of [
+        {},
+        {
+          EAS_BUILD_PROFILE: "production",
+          SONOLECT_PRIVACY_POLICY_URL: POLICY,
+        },
+      ]) {
+        const resolved = resolveReleaseConfig(CONFIG, {
+          ...env,
+          EXPO_PUBLIC_SONOLECT_SYNC_URL: raw,
+        });
+        // The app reads the variable itself: nothing is added to extra.
+        assert.equal("syncUrl" in resolved.extra, false);
+        assert.equal(
+          JSON.stringify(resolved).includes("sync.example.org"),
+          false,
+        );
+      }
+    }
+  });
+
+  it("accepts plain http to this machine in development builds only", () => {
+    for (const url of [
+      "http://127.0.0.1:8713",
+      "http://localhost:8713",
+      "http://10.0.2.2:8713",
+    ]) {
+      assert.equal(
+        syncServerUrlFrom({ EXPO_PUBLIC_SONOLECT_SYNC_URL: url }),
+        url,
+      );
+      for (const release of [
+        { EAS_BUILD_PROFILE: "production" },
+        { SONOLECT_RELEASE: "1" },
+      ]) {
+        assert.throws(
+          () =>
+            syncServerUrlFrom({
+              ...release,
+              EXPO_PUBLIC_SONOLECT_SYNC_URL: url,
+            }),
+          { message: MESSAGES.localSyncUrlInRelease },
+          url,
+        );
+      }
+    }
+    assert.throws(
+      () =>
+        resolveReleaseConfig(CONFIG, {
+          EAS_BUILD_PROFILE: "production",
+          SONOLECT_PRIVACY_POLICY_URL: POLICY,
+          EXPO_PUBLIC_SONOLECT_SYNC_URL: "http://127.0.0.1:8713",
+        }),
+      { message: MESSAGES.localSyncUrlInRelease },
+    );
+  });
+
+  it("refuses anything else, in every build", () => {
+    for (const url of [
+      "http://sync.example.org",
+      "http://192.168.1.20:8713",
+      "ftp://sync.example.org",
+      "sync.example.org",
+      "https:sync.example.org",
+      "https://user:secret@sync.example.org",
+      "https://sync.example.org/?vault=1",
+      "https://sync.example.org/#key",
+      "https://sync example.org",
+      "https://sync.example.org:0",
+      "https://sync.example.org:70000",
+      "https://.example.org",
+      "https://sync..example.org",
+    ]) {
+      for (const env of [{}, { SONOLECT_RELEASE: "1" }]) {
+        assert.throws(
+          () =>
+            resolveReleaseConfig(CONFIG, {
+              ...env,
+              SONOLECT_PRIVACY_POLICY_URL: POLICY,
+              SONOLECT_BUILD_NUMBER: "3",
+              EXPO_PUBLIC_SONOLECT_SYNC_URL: url,
+            }),
+          { message: MESSAGES.invalidSyncUrl },
+          url,
+        );
+      }
+    }
   });
 });
