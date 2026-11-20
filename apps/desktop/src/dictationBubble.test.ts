@@ -16,6 +16,16 @@ import {
   pushLevel,
   shouldShowBubble,
 } from "./dictationBubble";
+import { getT, setLocale } from "./i18n";
+
+const french = <T>(run: () => T): T => {
+  setLocale("fr");
+  try {
+    return run();
+  } finally {
+    setLocale("en");
+  }
+};
 
 describe("dictation bubble phases", () => {
   it("maps capture states to bubble phases", () => {
@@ -72,11 +82,13 @@ describe("dictation bubble phases", () => {
   });
 
   it("writes short, human detail lines", () => {
+    const t = getT();
     assert.equal(
       bubbleDetailFor(
         "inserted",
         { kind: "inserted", text: "Hello   world" },
         undefined,
+        t,
       ),
       "Hello world",
     );
@@ -85,17 +97,78 @@ describe("dictation bubble phases", () => {
         "copied",
         { kind: "copied", text: "a", reason: "r" },
         undefined,
+        t,
       ) ?? "",
       /Ctrl\+V/,
     );
     assert.equal(
-      bubbleDetailFor("error", undefined, "error.micPermissionDenied"),
+      bubbleDetailFor("error", undefined, "error.micPermissionDenied", t),
       "Microphone access was denied.",
     );
-    assert.equal(bubbleDetailFor("listening", undefined, undefined), null);
+    assert.equal(
+      bubbleDetailFor("error", undefined, undefined, t),
+      "Something went wrong.",
+    );
+    assert.equal(bubbleDetailFor("listening", undefined, undefined, t), null);
     const long = previewDetail("x".repeat(200));
     assert.ok(long.length <= 64);
     assert.ok(long.endsWith("…"));
+  });
+
+  it("writes the detail lines in the interface language", () => {
+    const t = french(() => getT());
+    assert.equal(
+      bubbleDetailFor(
+        "copied",
+        { kind: "copied", text: "a", reason: "r" },
+        undefined,
+        t,
+      ),
+      "Copié. Appuyez sur Ctrl+V pour coller.",
+    );
+    assert.equal(
+      bubbleDetailFor("error", undefined, "error.micPermissionDenied", t),
+      "L'accès au micro a été refusé.",
+    );
+    assert.equal(
+      bubbleDetailFor("error", undefined, undefined, t),
+      "Une erreur s'est produite.",
+    );
+  });
+
+  it("keeps every error line whole under the pill, in each language", () => {
+    for (const t of [getT(), french(() => getT())]) {
+      for (const code of [
+        "error.micUnavailable",
+        "error.micPermissionDenied",
+        "error.mediaRecorderUnsupported",
+        "error.recordingError",
+        "error.sendFailed",
+      ]) {
+        const line = bubbleDetailFor("error", undefined, code, t) ?? "";
+        assert.ok(line.length > 0 && !line.endsWith("…"), `${code}: ${line}`);
+      }
+      const pasteFailed = bubbleDetailFor(
+        "error",
+        { kind: "error", message: t("bubble.pasteFailed") },
+        undefined,
+        t,
+      );
+      assert.equal(pasteFailed, t("bubble.pasteFailed"));
+    }
+  });
+
+  it("shows other errors as the store reports them", () => {
+    const t = getT();
+    // Another error key is translated; a plain message is shown as it is.
+    assert.equal(
+      bubbleDetailFor("error", undefined, "error.historyLoadFailed", t),
+      t("error.historyLoadFailed"),
+    );
+    assert.equal(
+      bubbleDetailFor("error", undefined, "Backend offline", t),
+      "Backend offline",
+    );
   });
 });
 
@@ -154,6 +227,15 @@ describe("dictation bubble meter and labels", () => {
       "Ctrl+Shift+M",
     );
     assert.equal(displayAccelerator("CommandOrControl+Shift+M", true), "⌘⇧M");
+    // Keys take their name in the interface language; macOS keeps symbols.
+    assert.equal(
+      displayAccelerator("CommandOrControl+Shift+M", false, { Shift: "Maj" }),
+      "Ctrl+Maj+M",
+    );
+    assert.equal(
+      displayAccelerator("CommandOrControl+Shift+M", true, { Shift: "Maj" }),
+      "⌘⇧M",
+    );
   });
 });
 

@@ -25,6 +25,7 @@ import {
   type BubbleVisibility,
 } from "./dictationBubble";
 import { DEFAULT_TOGGLE_SHORTCUT, isTauriRuntime } from "./desktopNative";
+import { getLocale, getT, useI18nStore } from "./i18n";
 import { subscribeMicLevel, useDesktopStore } from "./store/appStore";
 
 type VisibilityListener = (visibility: BubbleVisibility) => void;
@@ -81,7 +82,6 @@ export function useDictationBubbleBridge(): void {
       let lingerTimer: ReturnType<typeof setTimeout> | undefined;
       let lastShown: string | undefined;
       let escapeRegistered = false;
-      const hotkey = displayAccelerator(DEFAULT_TOGGLE_SHORTCUT, isMac());
 
       const setEscape = async (active: boolean) => {
         if (active === escapeRegistered) return;
@@ -119,11 +119,16 @@ export function useDictationBubbleBridge(): void {
         if (disposed) return;
         const st = useDesktopStore.getState();
         const phase = computePhase();
+        // In the interface language as it is now: the bubble follows it.
+        const t = getT();
         const state: BubbleState = {
           phase,
           startedAt: phase === "listening" ? startedAt : null,
-          detail: bubbleDetailFor(phase, st.dictationOutcome, st.voiceError),
-          hotkey,
+          detail: bubbleDetailFor(phase, st.dictationOutcome, st.voiceError, t),
+          hotkey: displayAccelerator(DEFAULT_TOGGLE_SHORTCUT, isMac(), {
+            Shift: t("studio.keys.shift"),
+          }),
+          locale: getLocale(),
         };
         void emitTo(BUBBLE_WINDOW_LABEL, BUBBLE_STATE_EVENT, state).catch(
           () => undefined,
@@ -175,6 +180,9 @@ export function useDictationBubbleBridge(): void {
           push();
         }),
       );
+
+      // A change of interface language reaches the bubble at once.
+      cleanups.push(useI18nStore.subscribe(() => push()));
 
       let lastFrame = 0;
       cleanups.push(

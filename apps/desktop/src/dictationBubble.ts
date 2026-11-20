@@ -9,6 +9,7 @@
  * pure helpers so both sides (and the tests) agree on it.
  */
 
+import type { LocaleKeys, SupportedLocale, Translator } from "./i18n";
 import type { RecordingState } from "./store/appStore";
 
 export const BUBBLE_WINDOW_LABEL = "recorder";
@@ -47,6 +48,11 @@ export type BubbleState = {
   detail: string | null;
   /** Accelerator shown in the idle hint, e.g. "Ctrl+Shift+M". */
   hotkey: string;
+  /**
+   * The interface language. The bubble is a window of its own, with its own
+   * i18n store, so the main window tells it which language to speak.
+   */
+  locale: SupportedLocale;
 };
 
 export type BubbleAction = "toggle" | "finish" | "cancel" | "open-app";
@@ -113,31 +119,37 @@ export function bubbleDetailFor(
   phase: BubblePhase,
   outcome: DictationOutcome | undefined,
   voiceError: string | undefined,
+  t: Translator,
 ): string | null {
   if (phase === "inserted" && outcome?.kind === "inserted") {
     return previewDetail(outcome.text);
   }
   if (phase === "copied" && outcome?.kind === "copied") {
-    return "Copied. Press Ctrl+V to paste.";
+    return t("bubble.copiedDetail");
   }
   if (phase === "error") {
     if (outcome?.kind === "error") return previewDetail(outcome.message);
-    if (voiceError) return previewDetail(humanizeVoiceError(voiceError));
-    return "Something went wrong.";
+    if (voiceError) return previewDetail(humanizeVoiceError(voiceError, t));
+    return t("bubble.error.generic");
   }
   return null;
 }
 
-const VOICE_ERROR_TEXT: Record<string, string> = {
-  "error.micUnavailable": "No microphone found.",
-  "error.micPermissionDenied": "Microphone access was denied.",
-  "error.mediaRecorderUnsupported": "Recording is not supported here.",
-  "error.recordingError": "Recording stopped unexpectedly.",
-  "error.sendFailed": "Transcription failed.",
+/** The store's error keys, said short enough for the line under the pill. */
+const VOICE_ERROR_KEYS: Record<string, LocaleKeys> = {
+  "error.micUnavailable": "bubble.error.micUnavailable",
+  "error.micPermissionDenied": "bubble.error.micPermissionDenied",
+  "error.mediaRecorderUnsupported": "bubble.error.mediaRecorderUnsupported",
+  "error.recordingError": "bubble.error.recordingError",
+  "error.sendFailed": "bubble.error.sendFailed",
 };
 
-export function humanizeVoiceError(code: string): string {
-  return VOICE_ERROR_TEXT[code] ?? code;
+export function humanizeVoiceError(code: string, t: Translator): string {
+  const key = Object.hasOwn(VOICE_ERROR_KEYS, code)
+    ? VOICE_ERROR_KEYS[code]
+    : undefined;
+  // Any other error key the store reports, or a message as it arrived.
+  return key ? t(key) : t.message(code);
 }
 
 /** Whether the bubble window should be on screen. */
@@ -196,8 +208,15 @@ export function formatElapsed(ms: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-/** "CommandOrControl+Shift+M" → "Ctrl+Shift+M" (or ⌘⇧M on macOS). */
-export function displayAccelerator(accelerator: string, mac = false): string {
+/**
+ * "CommandOrControl+Shift+M" → "Ctrl+Shift+M" (or ⌘⇧M on macOS). `names`
+ * gives keys their name in the interface language, such as Shift → "Maj".
+ */
+export function displayAccelerator(
+  accelerator: string,
+  mac = false,
+  names: Readonly<Record<string, string>> = {},
+): string {
   const parts = accelerator.split("+").map((p) => p.trim());
   if (mac) {
     const map: Record<string, string> = {
@@ -209,6 +228,12 @@ export function displayAccelerator(accelerator: string, mac = false): string {
     return parts.map((p) => map[p] ?? p).join("");
   }
   return parts
-    .map((p) => (p === "CommandOrControl" || p === "Control" ? "Ctrl" : p))
+    .map((p) =>
+      p === "CommandOrControl" || p === "Control"
+        ? "Ctrl"
+        : Object.hasOwn(names, p)
+          ? (names[p] ?? p)
+          : p,
+    )
     .join("+");
 }

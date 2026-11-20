@@ -16,8 +16,16 @@ import {
   formatElapsed,
   pushLevel,
   type BubbleAction,
+  type BubblePhase,
   type BubbleState,
 } from "../dictationBubble";
+import {
+  getLocale,
+  isSupportedLocale,
+  setLocale,
+  useT,
+  type LocaleKeys,
+} from "../i18n";
 import "../dictation-bubble.css";
 
 const BAR_COUNT = 18;
@@ -26,6 +34,16 @@ const INITIAL_STATE: BubbleState = {
   startedAt: null,
   detail: null,
   hotkey: "",
+  locale: getLocale(),
+};
+
+const PHASE_LABELS: Record<BubblePhase, LocaleKeys> = {
+  idle: "bubble.phase.idle",
+  listening: "bubble.phase.listening",
+  transcribing: "bubble.phase.transcribing",
+  inserted: "bubble.phase.inserted",
+  copied: "bubble.phase.copied",
+  error: "bubble.phase.error",
 };
 
 async function send(action: BubbleAction) {
@@ -39,6 +57,7 @@ async function send(action: BubbleAction) {
 
 /** Rendered inside the always-on-top "recorder" window. */
 export default function DictationBubble() {
+  const t = useT();
   const [state, setState] = useState<BubbleState>(INITIAL_STATE);
   const [levels, setLevels] = useState<number[]>(() =>
     Array.from({ length: BAR_COUNT }, () => 0),
@@ -54,8 +73,14 @@ export default function DictationBubble() {
     const unlisteners: Array<() => void> = [];
     void (async () => {
       const { listen, emitTo } = await import("@tauri-apps/api/event");
-      const offState = await listen<BubbleState>(BUBBLE_STATE_EVENT, (event) =>
-        setState(event.payload),
+      const offState = await listen<BubbleState>(
+        BUBBLE_STATE_EVENT,
+        ({ payload }) => {
+          // This window has its own i18n store: it follows the main window's
+          // interface language.
+          if (isSupportedLocale(payload.locale)) setLocale(payload.locale);
+          setState(payload);
+        },
       );
       const offLevel = await listen<number>(BUBBLE_LEVEL_EVENT, (event) => {
         const level = Number(event.payload) || 0;
@@ -102,13 +127,15 @@ export default function DictationBubble() {
           event.preventDefault();
           void send("open-app");
         }}
-        aria-label={`Start dictation (${state.hotkey})`}
-        title={`Click or press ${state.hotkey} to dictate. Right-click to open Sonolect.`}
+        aria-label={t("bubble.start", { hotkey: state.hotkey })}
+        title={t("bubble.idleTitle", { hotkey: state.hotkey })}
       >
         <span className="bubble__orb" aria-hidden="true">
           <Mic size={13} strokeWidth={2} />
         </span>
-        <span className="bubble__hint">{state.hotkey || "Dictate"}</span>
+        <span className="bubble__hint">
+          {state.hotkey || t("bubble.dictate")}
+        </span>
       </button>
     );
   }
@@ -125,7 +152,7 @@ export default function DictationBubble() {
         className={`bubble bubble--active bubble--${phase}`}
         role="status"
         aria-live="polite"
-        aria-label={labelFor(phase)}
+        aria-label={t(PHASE_LABELS[phase])}
       >
         <button
           type="button"
@@ -133,10 +160,10 @@ export default function DictationBubble() {
           onClick={() => void send("cancel")}
           aria-label={
             phase === "listening" || phase === "transcribing"
-              ? "Cancel dictation"
-              : "Dismiss"
+              ? t("bubble.cancel")
+              : t("bubble.dismiss")
           }
-          title="Cancel (Esc)"
+          title={t("bubble.cancelTitle", { key: t("studio.keys.esc") })}
         >
           <X size={15} strokeWidth={2} />
         </button>
@@ -170,7 +197,7 @@ export default function DictationBubble() {
                 <ClipboardCheck size={15} strokeWidth={2.2} />
               )}
               {phase === "error" && <AlertCircle size={15} strokeWidth={2.2} />}
-              {labelFor(phase)}
+              {t(PHASE_LABELS[phase])}
             </span>
           )}
         </div>
@@ -182,8 +209,8 @@ export default function DictationBubble() {
               type="button"
               className="bubble__stop"
               onClick={() => void send("finish")}
-              aria-label="Stop and insert"
-              title="Stop and insert"
+              aria-label={t("bubble.stop")}
+              title={t("bubble.stop")}
             >
               <Square size={11} strokeWidth={0} fill="currentColor" />
             </button>
@@ -197,21 +224,4 @@ export default function DictationBubble() {
       {state.detail && <p className="bubble__detail">{state.detail}</p>}
     </div>
   );
-}
-
-function labelFor(phase: BubbleState["phase"]): string {
-  switch (phase) {
-    case "listening":
-      return "Listening";
-    case "transcribing":
-      return "Transcribing";
-    case "inserted":
-      return "Inserted";
-    case "copied":
-      return "Copied";
-    case "error":
-      return "Couldn't dictate";
-    default:
-      return "Ready";
-  }
 }

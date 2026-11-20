@@ -248,4 +248,501 @@ export const fr: Record<LocaleKeys, string> = {
   "audio.recentCapture": "Capture récente",
   "audio.playPause": "Lire ou mettre en pause l'audio",
   "audio.waveform": "Forme d'onde audio",
+
+  // Studio shell
+  "studio.nav.home": "Vue d'ensemble",
+  "studio.nav.transcribe": "Transcrire",
+  "studio.nav.speech": "Synthèse vocale",
+  "studio.nav.library": "Bibliothèque",
+  "studio.nav.dictionary": "Dictionnaire",
+  "studio.nav.snippets": "Extraits",
+  "studio.nav.models": "Modèles et voix",
+  "studio.nav.settings": "Réglages",
+  "studio.group.workspace": "Espace de travail",
+  "studio.group.personalize": "Personnaliser",
+  "studio.brand.tagline": "Espace de travail vocal",
+  "studio.version": "Espace de travail Windows",
+  "studio.quickNav.label": "Navigation rapide",
+  "studio.quickNav.find": "Trouver une page",
+  "studio.quickNav.placeholder": "Où souhaitez-vous aller\u202f?",
+  "studio.quickNav.close": "Fermer la navigation",
+  "studio.quickNav.empty": "Aucune page ne correspond à «\u00a0{query}\u00a0».",
+  "studio.topbar.search": "Rechercher une page",
+  "studio.dock.listening": "Écoute en cours…",
+  "studio.dock.processing": "Traitement en cours…",
+  "studio.dock.error": "L'enregistrement demande votre attention",
+  "studio.dock.ready": "Votre texte est prêt",
+  "studio.dock.stop": "Arrêter",
+  "studio.dock.dismiss": "Fermer",
+  "studio.dictation.new": "Nouvelle dictée",
+  "studio.dictation.start": "Commencer à dicter",
+  "studio.dictation.stop": "Arrêter la dictée",
+  "studio.mode.label": "Mode de traitement",
+  "studio.mode.local": "Local uniquement",
+  "studio.mode.cloud": "Cloud activé",
+  "studio.mode.localProcessing": "Traitement local",
+  "studio.mode.localHint":
+    "Vos enregistrements restent sur cet appareil, sauf si vous choisissez le traitement en ligne.",
+  "studio.mode.cloudHint":
+    "Les requêtes en ligne utilisent le fournisseur et la clé API que vous avez choisis.",
+  "studio.common.copy": "Copier",
+  "studio.common.delete": "Supprimer",
+  "studio.common.refresh": "Actualiser",
+  "studio.common.undo": "Annuler",
+  "studio.common.redo": "Rétablir",
+  "studio.common.language": "Langue",
+  "studio.common.working": "En cours…",
+  "studio.common.saving": "Enregistrement…",
+  "studio.common.secondsShort": "{count} s",
+
+  // Studio overview
+  "studio.signal.listening": "Écoute",
+  "studio.signal.ready": "Prêt",
+  "studio.signal.meta": "16 kHz · mono · sur l'appareil",
+  "studio.overview.eyebrow": "Un peu moins de saisie",
+  "studio.overview.title": "Faites de la place à vos idées",
+  "studio.overview.subtitle":
+    "Parlez naturellement. Transformez votre voix en quelque chose d'utile.",
+  "studio.overview.chip": "Votre espace personnel",
+  "studio.overview.heroEyebrow": "Commencez par votre voix",
+  "studio.overview.heroTitle1": "Dites-le.",
+  "studio.overview.heroTitle2": "Laissez filer vos idées.",
+  "studio.overview.heroBody":
+    "Notez une idée, rédigez un message ou lancez un premier jet. La reconnaissance locale est prête quand vous l'êtes.",
+  "studio.overview.statRecordings": "Enregistrements",
+  "studio.overview.statRecordingsHint": "Enregistrés sur cet appareil",
+  "studio.overview.statWords": "Mots dictés",
+  "studio.overview.statWordsHint": "Dans vos transcriptions enregistrées",
+  "studio.overview.statRetry": "À reprendre",
+  "studio.overview.statRetryHint": "Enregistrements à relancer",
+  "studio.overview.ttsTitle": "Donnez une voix à votre texte",
+  "studio.overview.ttsBody":
+    "Choisissez un modèle vocal et écoutez vos écrits.",
+  "studio.overview.ttsLink": "Ouvrir la synthèse vocale →",
+  "studio.overview.modelsTitle": "Un modèle pour chaque tâche",
+  "studio.overview.modelsBody":
+    "Connectez OpenRouter ou OpenCode Zen. La reconnaissance locale reste à un clic.",
+  "studio.overview.modelsLink": "Explorer les modèles et les voix →",
+  "studio.overview.recent": "Enregistrements récents",
+  "studio.overview.viewLibrary": "Voir la bibliothèque →",
+  "studio.overview.empty": "Votre premier enregistrement apparaîtra ici.",
+
+  // Studio transcribe
+  "studio.transcribe.eyebrow": "De l'idée au texte",
+  "studio.transcribe.title": "Trouvez votre rythme",
+  "studio.transcribe.subtitle":
+    "Enregistrez votre voix, importez un fichier audio ou travaillez votre prochain brouillon.",
+  "studio.transcribe.import": "Importer un audio",
+  "studio.transcribe.yourTranscript": "Votre transcription",
+  "studio.transcribe.editorLabel": "Éditeur de transcription",
+  "studio.transcribe.placeholder":
+    "Vos mots apparaîtront ici. Vous pouvez aussi commencer à écrire…",
+  "studio.transcribe.words.one": "{count} mot",
+  "studio.transcribe.words.other": "{count} mots",
+  "studio.transcribe.stopRecording": "Arrêter l'enregistrement",
+  "studio.transcribe.record": "Enregistrer pour ajouter du texte",
+  "studio.transcribe.copied": "Transcription copiée.",
+  "studio.transcribe.copyBlocked":
+    "La copie a été bloquée. Sélectionnez le texte pour le copier manuellement.",
+  "studio.transcribe.exportFormat": "Format d'export",
+  "studio.transcribe.export": "Exporter la transcription",
+  "studio.transcribe.exportTitle": "Transcription Sonolect",
+  "studio.export.txt": "Texte brut (.txt)",
+  "studio.export.md": "Markdown (.md)",
+  "studio.export.srt": "Sous-titres (.srt)",
+  "studio.export.vtt": "Sous-titres web (.vtt)",
+  "studio.export.json": "JSON avec minutage (.json)",
+  "studio.transcribe.fileTooLarge":
+    "Choisissez un fichier audio de moins de 25 Mo et de trois minutes.",
+  "studio.transcribe.notReady": "La transcription n'est pas prête.",
+  "studio.transcribe.saved": "Audio transcrit et enregistré.",
+  "studio.transcribe.noSpeech": "Aucune parole n'a été détectée.",
+  "studio.transcribe.recognition": "Reconnaissance",
+  "studio.transcribe.polishTitle": "Une touche de finition",
+  "studio.transcribe.polishBody":
+    "Applique votre dictionnaire et une mise en forme locale prudente.",
+  "studio.transcribe.cleanLocal": "Nettoyer en local",
+  "studio.transcribe.refineOnline": "Affiner avec un modèle en ligne",
+  "studio.transcribe.instruction": "Consigne de réécriture",
+  "studio.transcribe.defaultInstruction":
+    "Rends ce texte clair et concis sans en changer le sens.",
+  "studio.transcribe.previewEdit": "Aperçu de la réécriture en ligne",
+  "studio.transcribe.chooseModel": "Choisir le modèle de réécriture →",
+  "studio.transcribe.reviewTitle": "Vérifiez la modification proposée",
+  "studio.transcribe.apply": "Appliquer la modification",
+  "studio.transcribe.keep": "Garder l'original",
+
+  // Studio text to speech
+  "studio.speech.eyebrow": "Des mots à écouter",
+  "studio.speech.title": "Donnez une voix à vos écrits",
+  "studio.speech.subtitle":
+    "Choisissez un modèle, trouvez une voix et écoutez avant de partager.",
+  "studio.speech.question": "Que souhaitez-vous écouter\u202f?",
+  "studio.speech.inputLabel": "Texte à lire",
+  "studio.speech.placeholder":
+    "Collez un script, un message ou un passage à écouter…",
+  "studio.speech.characters": "{count} / {max} caractères",
+  "studio.speech.generate": "Générer l'audio",
+  "studio.speech.generating": "Génération de l'audio…",
+  "studio.speech.download": "Télécharger en {format}",
+  "studio.speech.localNotice":
+    "Le mode Local uniquement est sélectionné. Passez le mode de traitement sur Cloud activé avant de générer de l'audio en ligne.",
+  "studio.speech.modelVoice": "Modèle et voix",
+  "studio.speech.format": "Format audio",
+  "studio.speech.pcmOption": "PCM → WAV lisible",
+  "studio.speech.sampleRate": "Fréquence d'échantillonnage PCM",
+  "studio.speech.sampleRateHint":
+    "16 bits mono. Utilisez la fréquence de sortie du modèle choisi.",
+  "studio.speech.formatHint":
+    "Les modèles vocaux Gemini et HeyGen exigent le PCM. D'autres modèles peuvent exiger le MP3.",
+  "studio.speech.voice": "Voix",
+  "studio.speech.voiceDefault": "Voix par défaut du fournisseur, si disponible",
+  "studio.speech.voicePlaceholder":
+    "Identifiant de voix, ou laissez vide pour la voix par défaut",
+  "studio.speech.voiceHint":
+    "Les voix disponibles dépendent du modèle. Si un modèle n'a pas de voix par défaut, saisissez l'un de ses identifiants de voix.",
+  "studio.speech.localCallout":
+    "La reconnaissance vocale locale reste disponible. La génération d'audio en ligne utilise votre compte OpenRouter.",
+
+  // Studio library
+  "studio.library.eyebrow": "Une place pour chaque idée",
+  "studio.library.title": "Votre bibliothèque vocale",
+  "studio.library.subtitle":
+    "Vos enregistrements, prêts à être repris. L'audio reste ici jusqu'à ce que vous le supprimiez.",
+  "studio.library.searchLabel": "Rechercher dans les enregistrements",
+  "studio.library.searchPlaceholder": "Rechercher dans vos enregistrements…",
+  "studio.library.noMatch": "Aucun enregistrement correspondant",
+  "studio.library.emptyTitle": "Tout commence ici.",
+  "studio.library.tryOther": "Essayez un autre mot.",
+  "studio.library.emptyBody":
+    "Vos enregistrements apparaîtront ici après une dictée ou un import audio dans l'application Windows.",
+  "studio.library.createFirst": "Créer votre premier enregistrement",
+  "studio.library.retryNeeded": "À relancer",
+  "studio.library.savedOnDevice": "Enregistré sur l'appareil",
+  "studio.library.noTranscript": "Pas encore de transcription.",
+  "studio.library.openEditor": "Ouvrir l'éditeur →",
+  "studio.library.copyBlocked": "La copie a été bloquée.",
+  "studio.library.transcribing": "Transcription…",
+  "studio.library.retryLocal": "Relancer en local",
+  "studio.library.retried": "Enregistrement transcrit en local.",
+  "studio.library.confirmDelete":
+    "Supprimer cet enregistrement et sa transcription de cet appareil\u202f?",
+
+  // Studio dictionary and snippets
+  "studio.vocab.eyebrow": "À votre image",
+  "studio.vocab.count.one": "{count} entrée · stockée en local",
+  "studio.vocab.count.other": "{count} entrées · stockées en local",
+  "studio.vocab.deleteLabel": "Supprimer {name}",
+  "studio.vocab.empty":
+    "Aucune entrée pour l'instant. Ajoutez-en une ci-dessus pour personnaliser vos brouillons.",
+  "studio.dictionary.title": "Vos mots, bien orthographiés",
+  "studio.dictionary.subtitle":
+    "Apprenez à la mise en forme locale les noms, les termes et les orthographes que vous utilisez.",
+  "studio.dictionary.spokenLabel": "Forme prononcée ou reconnue",
+  "studio.dictionary.spokenPlaceholder": "Un mot à corriger",
+  "studio.dictionary.replacementLabel": "Orthographe souhaitée",
+  "studio.dictionary.replacementPlaceholder": "Comment il doit s'écrire",
+  "studio.dictionary.add": "Ajouter le mot",
+  "studio.dictionary.listTitle": "Dictionnaire personnel",
+  "studio.snippets.title": "Dites-en moins, écrivez-en plus",
+  "studio.snippets.subtitle":
+    "Enregistrez des blocs de texte réutilisables, développés en local dans vos brouillons.",
+  "studio.snippets.triggerLabel": "Raccourci",
+  "studio.snippets.triggerPlaceholder": "/signature",
+  "studio.snippets.bodyLabel": "Texte à insérer",
+  "studio.snippets.bodyPlaceholder": "Votre texte réutilisable",
+  "studio.snippets.add": "Ajouter l'extrait",
+  "studio.snippets.listTitle": "Vos extraits",
+
+  // Studio settings and privacy
+  "studio.settings.eyebrow": "Votre espace, vos règles",
+  "studio.settings.title": "Faites comme chez vous",
+  "studio.settings.subtitle":
+    "Modèles locaux, langue et confidentialité au même endroit.",
+  "studio.settings.whisperTitle": "Whisper local",
+  "studio.settings.whisperMeta": "Base multilingue · CPU · 148 Mo",
+  "studio.settings.modelReady":
+    "Un modèle local est disponible sur cet ordinateur.",
+  "studio.settings.modelMissing":
+    "Installez un modèle une fois, puis dictez sans connexion Internet.",
+  "studio.settings.downloading": "Téléchargement {progress}\u00a0%",
+  "studio.settings.reinstall": "Réinstaller le modèle vérifié",
+  "studio.settings.install": "Installer le modèle local",
+  "studio.settings.modelDownloaded":
+    "Modèle téléchargé et somme de contrôle vérifiée. Vous pouvez l'utiliser hors ligne.",
+  "studio.settings.existingModel": "Utiliser un modèle existant",
+  "studio.settings.modelPath": "Chemin du fichier Whisper .bin",
+  "studio.settings.languageTitle": "Langue et traitement",
+  "studio.settings.interfaceLanguage": "Langue de l'interface",
+  "studio.settings.dictationLanguage": "Langue de dictée",
+  "studio.settings.languageAuto": "Détection automatique",
+  "studio.settings.modeHint":
+    "Le mode Local uniquement bloque tout traitement en ligne de l'audio et du texte. La consultation du catalogue et le téléchargement de modèles sont des actions distinctes.",
+  "studio.settings.shortcutsTitle": "Raccourcis et stockage",
+  "studio.settings.shortcutToggle": "Démarrer ou arrêter l'enregistrement",
+  "studio.settings.shortcutHold": "Maintenir pour parler",
+  "studio.settings.shortcutNav": "Navigation rapide",
+  "studio.settings.shortcutCancel": "Annuler la dictée",
+  "studio.settings.bubbleTitle": "Bulle de dictée",
+  "studio.settings.bubbleHint":
+    "Appuyez sur {toggle} (ou maintenez {hold}) dans n'importe quelle application. Une bulle flottante indique que Sonolect écoute, puis vos mots sont collés à l'emplacement du curseur. Cliquez sur la bulle pour démarrer ou arrêter, {cancel} pour annuler, clic droit pour ouvrir Sonolect.",
+  "studio.settings.bubbleShow": "Afficher la bulle",
+  "studio.settings.bubbleAlways": "Toujours (petite pastille au repos)",
+  "studio.settings.bubbleDictating": "Seulement pendant la dictée",
+  "studio.settings.bubbleOff": "Jamais",
+  "studio.settings.storageHint":
+    "Les enregistrements sont limités à trois minutes et conservés sur cet appareil pendant la durée choisie ci-dessus. Les clés API utilisent le Gestionnaire d'identification Windows.",
+  "studio.settings.previewNotice":
+    "Ceci est l'aperçu dans le navigateur. L'installation des modèles et la reconnaissance locale fonctionnent dans l'application Windows.",
+  "studio.privacy.title": "Confidentialité et conservation",
+  "studio.privacy.subtitle":
+    "En mode Local uniquement, les enregistrements et les transcriptions ne quittent jamais cet appareil.",
+  "studio.privacy.keep": "Conserver les enregistrements",
+  "studio.privacy.deleteAll": "Supprimer toutes mes données",
+  "studio.privacy.deleting": "Suppression…",
+  "studio.privacy.deleteAllHint":
+    "Supprime les enregistrements, les transcriptions, votre dictionnaire et vos extraits, les clés API enregistrées et les réglages. Les modèles vocaux téléchargés sont conservés.",
+  "studio.privacy.confirmDeleteAll":
+    "Supprimer de cet appareil tous vos enregistrements, transcriptions, dictionnaire, extraits, clés API enregistrées et réglages\u202f? Cette action est irréversible.",
+  "studio.privacy.partialFailure":
+    "Certaines données n'ont pas pu être supprimées\u00a0: {problems}",
+  "studio.privacy.keptForever":
+    "Les enregistrements sont conservés jusqu'à ce que vous les supprimiez.",
+  "studio.privacy.savedPreview":
+    "Enregistré. Le réglage s'applique dans l'application Windows.",
+  "studio.privacy.savedDeleted.one":
+    "Enregistré. {count} enregistrement de plus de {period} a été supprimé.",
+  "studio.privacy.savedDeleted.other":
+    "Enregistré. {count} enregistrements de plus de {period} ont été supprimés.",
+  "studio.privacy.savedAuto":
+    "Enregistré. Les enregistrements de plus de {period} sont supprimés automatiquement.",
+  "studio.retention.forever": "Jusqu'à ce que je les supprime",
+  "studio.retention.days.one": "{count} jour",
+  "studio.retention.days.other": "{count} jours",
+
+  // Studio models and providers
+  "studio.task.stt": "Reconnaissance vocale",
+  "studio.task.tts": "Synthèse vocale",
+  "studio.task.text": "Réécriture de texte",
+  "studio.models.eyebrow": "À votre façon",
+  "studio.models.title": "Vos modèles, votre choix",
+  "studio.models.subtitle":
+    "Choisissez comment Sonolect écoute, parle et affine vos mots.",
+  "studio.models.chip": "Vos clés restent sur votre appareil",
+  "studio.models.tabProviders": "Fournisseurs",
+  "studio.models.provider": "Fournisseur",
+  "studio.models.providerFor": "Fournisseur\u00a0: {task}",
+  "studio.models.model": "Modèle",
+  "studio.models.modelFor": "Modèle\u00a0: {task}",
+  "studio.models.localHint":
+    "Votre modèle Whisper installé fonctionne sur cet ordinateur.",
+  "studio.models.choose": "Choisir un modèle",
+  "studio.models.savedSelection": "{model} · sélection enregistrée",
+  "studio.models.loading": "Chargement des modèles…",
+  "studio.models.loadCatalog": "Charger le catalogue en ligne",
+  "studio.models.catalogHint.stt":
+    "Chargez le catalogue en ligne pour voir les modèles compatibles avec la reconnaissance vocale. Aucun audio ni texte n'est envoyé lors du chargement des modèles.",
+  "studio.models.catalogHint.tts":
+    "Chargez le catalogue en ligne pour voir les modèles compatibles avec la synthèse vocale. Aucun audio ni texte n'est envoyé lors du chargement des modèles.",
+  "studio.models.catalogHint.text":
+    "Chargez le catalogue en ligne pour voir les modèles compatibles avec la réécriture de texte. Aucun audio ni texte n'est envoyé lors du chargement des modèles.",
+  "studio.models.routerTagline": "Une clé, de nombreux modèles vocaux",
+  "studio.models.zenTagline": "Des modèles pour une réécriture soignée",
+  "studio.models.keySaved": "Clé enregistrée",
+  "studio.models.noKey": "Aucune clé enregistrée",
+  "studio.models.noSpeech": "Pas de modèle vocal dédié",
+  "studio.models.apiKey": "Clé API",
+  "studio.models.replaceKey":
+    "Collez une nouvelle clé pour remplacer la clé enregistrée",
+  "studio.models.pasteKey": "Collez votre clé {provider}",
+  "studio.models.saveKey": "Enregistrer la clé",
+  "studio.models.keyNote":
+    "Stockée dans le Gestionnaire d'identification Windows. Jamais dans les préférences du navigateur.",
+  "studio.models.browse": "Parcourir les modèles",
+  "studio.models.removeKey": "Supprimer la clé enregistrée",
+  "studio.models.previewNotice":
+    "Aperçu dans le navigateur. Ouvrez l'application Windows pour enregistrer des clés et utiliser la reconnaissance native.",
+  "studio.models.localTitle": "Vous préférez rester en local\u202f?",
+  "studio.models.localBody":
+    "Whisper fonctionne sur votre ordinateur. Sans clé API. Sans compte. Sans envoi d'audio.",
+  "studio.models.manageLocal": "Gérer le modèle local",
+  "studio.models.workflowTitle": "Configurez votre flux vocal",
+  "studio.models.workflowBody":
+    "Chaque tâche peut utiliser un modèle différent.",
+  "studio.models.chooseModel": "Choisir un modèle →",
+  "studio.models.controlTitle": "Toujours sous votre contrôle",
+  "studio.models.controlBody":
+    "Ajouter une clé ne change pas votre mode de traitement. L'audio et le texte ne partent en ligne que si vous choisissez le traitement cloud.",
+  "studio.models.privateDefault": "Privé par défaut",
+  "studio.models.filtered":
+    "Les modèles sont filtrés selon les capacités publiées par le fournisseur.",
+  "studio.models.zenNotice":
+    "OpenCode Zen est disponible pour la réécriture de texte. Son API publique ne propose pas actuellement de modèles vocaux dédiés.",
+  "provider.name.local": "Whisper local",
+  "provider.previewOnly":
+    "Ouvrez l'application Windows pour utiliser les clés sécurisées et la reconnaissance native. Cette fenêtre est un aperçu dans le navigateur.",
+  "provider.cloudRequired":
+    "Activez le traitement cloud avant d'envoyer de l'audio ou du texte en ligne.",
+  "provider.cloudCancelled": "Le traitement cloud a été annulé.",
+  "provider.selectStt":
+    "Sélectionnez un modèle de reconnaissance vocale OpenRouter dans Modèles et voix.",
+  "provider.selectTts":
+    "Sélectionnez d'abord un modèle de synthèse vocale OpenRouter.",
+  "provider.selectText":
+    "Sélectionnez un modèle de réécriture dans Modèles et voix.",
+  "provider.modelsLoaded.one":
+    "{count} modèle compatible chargé depuis {provider}.",
+  "provider.modelsLoaded.other":
+    "{count} modèles compatibles chargés depuis {provider}.",
+  "provider.keySaved":
+    "Clé {provider} enregistrée dans le Gestionnaire d'identification Windows. Elle n'a été ni facturée ni utilisée pour une requête de test.",
+  "provider.keyRemoved": "Clé enregistrée supprimée.",
+
+  // Capture and transcription status
+  "voice.localOnly":
+    "Local uniquement\u00a0: le traitement cloud est désactivé.",
+  "voice.localWhisper": "Transcrit sur cet appareil avec Whisper local.",
+  "voice.onlineModel": "Transcrit avec le modèle en ligne sélectionné.",
+  "voice.sentForTranscription":
+    "Enregistrement envoyé à Sonolect pour transcription.",
+  "voice.cloudPolish": "Reconnaissance cloud et finition Gemini.",
+  "voice.jobFailed": "La tâche audio du serveur a échoué ({status})",
+  "voice.transcribeFailed": "La transcription cloud a échoué ({status})",
+  "voice.polishFailed": "La finition cloud a échoué ({status})",
+  "voice.uploadFailed": "L'envoi de l'audio au serveur a échoué ({status})",
+  "audio.invalidFormat": "Format audio non valide.",
+  "audio.tooLong": "Les enregistrements sont limités à trois minutes.",
+  "audio.invalidSamples": "L'audio contient des échantillons non valides.",
+  "voice.localUnavailableApp":
+    "Transcription locale indisponible. Vérifiez le modèle installé dans Réglages. Aucun audio n'a été envoyé.",
+  "voice.localUnavailablePreview":
+    "La transcription locale fonctionne dans l'application Windows. Cet aperçu dans le navigateur n'a envoyé aucun audio.",
+  "voice.notConfigured":
+    "La transcription en ligne n'est pas configurée. Votre enregistrement est resté sur cet appareil.",
+  "voice.unreachable":
+    "Sonolect est injoignable, votre enregistrement est donc resté sur cet appareil.",
+  "voice.unreachableBecause":
+    "Sonolect est injoignable, votre enregistrement est donc resté sur cet appareil ({reason}).",
+  "studio.keys.shift": "Maj",
+  "studio.keys.esc": "Échap",
+  // Bulle de dictée (la pastille flottante, dans sa propre fenêtre)
+  "bubble.start": "Démarrer la dictée ({hotkey})",
+  "bubble.idleTitle":
+    "Cliquez ou appuyez sur {hotkey} pour dicter. Clic droit pour ouvrir Sonolect.",
+  "bubble.dictate": "Dicter",
+  "bubble.cancel": "Annuler la dictée",
+  "bubble.dismiss": "Fermer",
+  "bubble.cancelTitle": "Annuler ({key})",
+  "bubble.stop": "Arrêter et insérer",
+  "bubble.phase.idle": "Prêt",
+  "bubble.phase.listening": "Écoute",
+  "bubble.phase.transcribing": "Transcription",
+  "bubble.phase.inserted": "Inséré",
+  "bubble.phase.copied": "Copié",
+  "bubble.phase.error": "Dictée impossible",
+  "bubble.copiedDetail": "Copié. Appuyez sur Ctrl+V pour coller.",
+  "bubble.pasteFailed":
+    "Collage impossible. Vos mots sont enregistrés dans Sonolect.",
+  "bubble.error.generic": "Une erreur s'est produite.",
+  "bubble.error.micUnavailable": "Aucun micro détecté.",
+  "bubble.error.micPermissionDenied": "L'accès au micro a été refusé.",
+  "bubble.error.mediaRecorderUnsupported":
+    "L'enregistrement n'est pas pris en charge ici.",
+  "bubble.error.recordingError":
+    "L'enregistrement s'est arrêté de façon inattendue.",
+  "bubble.error.sendFailed": "La transcription a échoué.",
+  "bubble.status.inserted": "Dictée insérée dans l'application active.",
+  "bubble.status.copied": "Dictée copiée dans le presse-papiers. {status}",
+  "studio.privacy.problemRecordings": "Enregistrements\u00a0: {reason}",
+  "studio.privacy.problemSettings": "Réglages\u00a0: {reason}",
+  "native.downloadRunning": "Un téléchargement de modèle est déjà en cours.",
+  "native.cannotLoadModel":
+    "Impossible de charger le modèle vocal\u00a0: {reason}",
+  "native.cannotSaveRecording":
+    "Impossible d'enregistrer l'audio\u00a0: {reason}",
+  "native.chooseFormat": "Choisissez une sortie MP3 ou PCM.",
+  "native.chooseModel": "Choisissez un modèle valide dans le catalogue.",
+  "native.keyDeleteFailed": "Impossible de supprimer la clé enregistrée.",
+  "native.deleteFailed": "Impossible de supprimer {name}\u00a0: {reason}",
+  "native.providerInit":
+    "Impossible d'initialiser la connexion au fournisseur.",
+  "native.modelsLoadFailed":
+    "Impossible de charger les modèles. Vérifiez votre connexion Internet.",
+  "native.credentialRead":
+    "Impossible de lire le Gestionnaire d'identification Windows.",
+  "native.credentialSave":
+    "Impossible d'enregistrer la clé dans le Gestionnaire d'identification Windows.",
+  "native.credentialUnavailable":
+    "Le Gestionnaire d'identification Windows est indisponible.",
+  "native.invalidKey":
+    "Saisissez une clé API valide, sans espace ni retour à la ligne.",
+  "native.ttsLength": "Saisissez entre 1 et 12 000 caractères à synthétiser.",
+  "native.ttsLengthVoice":
+    "Saisissez entre 1 et 12 000 caractères et une voix valide.",
+  "native.rewriteLength":
+    "Saisissez jusqu'à 12 000 caractères et une courte consigne de réécriture.",
+  "native.installModel":
+    "Installez d'abord le modèle vocal local dans Réglages.",
+  "native.invalidPcm":
+    "Audio PCM 16 bits mono ou fréquence d'échantillonnage non valide.",
+  "native.invalidWav": "Audio WAV non valide\u00a0: {reason}",
+  "native.invalidCatalog": "Catalogue de modèles non valide.",
+  "native.invalidModelPath": "Chemin de modèle non valide",
+  "native.invalidRecordingId": "Identifiant d'enregistrement non valide.",
+  "native.invalidRecordingSize": "Taille d'enregistrement non valide.",
+  "native.invalidTextResponse": "Réponse texte non valide.",
+  "native.invalidTranscription": "Réponse de transcription non valide.",
+  "native.localPcm":
+    "La reconnaissance locale exige un audio PCM mono à 16 kHz.",
+  "native.checksum":
+    "La vérification du modèle a échoué. Relancez le téléchargement.",
+  "native.discoveryInterrupted": "La recherche de modèles a été interrompue.",
+  "native.downloadFailed":
+    "Le téléchargement du modèle a échoué\u00a0: {reason}",
+  "native.modelTooLarge": "Le modèle dépasse la taille attendue.",
+  "native.noAudio": "Aucun audio n'a été enregistré.",
+  "native.transcriptionInterrupted":
+    "La transcription en ligne a été interrompue.",
+  "native.zenNoSpeech":
+    "OpenCode Zen ne propose pas d'API vocale dédiée. Utilisez OpenRouter pour la voix en ligne, ou Whisper local pour la transcription.",
+  "native.processingInterrupted":
+    "Le traitement a été interrompu. Relancez cet enregistrement.",
+  "native.tooLong": "L'enregistrement dépasse la limite de trois minutes.",
+  "native.saveKeyFirst":
+    "Enregistrez d'abord la clé API de ce fournisseur dans Modèles et voix.",
+  "native.keysWindowsOnly":
+    "Le stockage sécurisé des clés API n'est actuellement disponible que sous Windows.",
+  "native.keyStorageWindows":
+    "Le stockage sécurisé des clés nécessite Windows.",
+  "native.speechInterrupted": "La génération de l'audio a été interrompue.",
+  "native.editInterrupted": "La réécriture a été interrompue.",
+  "native.noEditableText": "Le modèle n'a renvoyé aucun texte exploitable.",
+  "native.connectionFailed":
+    "La connexion au fournisseur a échoué ou a expiré.",
+  "native.responseTooLarge":
+    "La réponse du fournisseur dépasse la taille autorisée.",
+  "native.responseInterrupted": "La réponse du fournisseur a été interrompue.",
+  "native.providerCatalog":
+    "Le fournisseur a renvoyé un catalogue de modèles non valide.",
+  "native.unexpectedAudio":
+    "Le fournisseur a renvoyé un format audio inattendu. Vérifiez les réglages de format du modèle.",
+  "native.emptyAudio": "Le fournisseur a renvoyé un audio vide.",
+  "native.noTranscriptField":
+    "Le fournisseur n'a renvoyé aucune transcription.",
+  "native.notWhisperModel":
+    "Le fichier sélectionné n'est pas un modèle Whisper (.bin au format GGML).",
+  "native.unknownProvider": "Fournisseur de modèles inconnu.",
+  "native.unsupportedRate":
+    "Fréquence d'échantillonnage PCM non prise en charge.",
+  "native.engineUnavailable": "Moteur vocal indisponible",
+  "native.modelPathRequired": "Indiquez le chemin d'un modèle Whisper",
+  "native.keyRejected":
+    "Le fournisseur a refusé cette clé API ou l'accès à ce modèle.",
+  "native.needsCredits": "Le compte du fournisseur n'a plus de crédits.",
+  "native.rateLimited":
+    "Le fournisseur limite le nombre de requêtes. Réessayez plus tard.",
+  "native.modelUnavailable":
+    "Le modèle ou la voix est indisponible, ou ne prend pas en charge ces options. Actualisez le catalogue et vérifiez la sélection.",
+  "native.requestFailed":
+    "La requête au fournisseur a échoué. Vérifiez la connexion et réessayez.",
 };
