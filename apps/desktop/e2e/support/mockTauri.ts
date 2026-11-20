@@ -30,12 +30,17 @@ const toneWav = readFileSync(
  * Live recordings are imitated too: audio sent with `capture_append` is
  * counted, and every three seconds of it produces one segment of live text
  * ("Part 1.", "Part 2." and so on) as a `capture-partial` event.
+ *
+ * `compress_local_captures` compresses each saved recording once and reports
+ * what that freed.
  */
 export async function installMockTauri(page: Page, captures: MockCapture[]) {
   await page.addInitScript(
     ({ captures, toneWav }) => {
       window.localStorage.clear();
       const library = structuredClone(captures);
+      /** Recordings already turned into Opus. */
+      const compressed = new Set<string>();
       const calls: { command: string; args: unknown }[] = [];
       const audio = () =>
         Uint8Array.from(atob(toneWav), (char) => char.charCodeAt(0)).buffer;
@@ -159,6 +164,21 @@ export async function installMockTauri(page: Page, captures: MockCapture[]) {
               }
               case "purge_local_captures":
                 return 0;
+              case "compress_local_captures": {
+                // A WAV is 32 bytes a millisecond; Opus is about a tenth.
+                const fresh = library.filter(
+                  (item) => !compressed.has(item.id),
+                );
+                fresh.forEach((item) => compressed.add(item.id));
+                return {
+                  recordings: fresh.length,
+                  bytesFreed: fresh.reduce(
+                    (total, item) => total + item.durationMs * 29,
+                    0,
+                  ),
+                  failed: 0,
+                };
+              }
               case "provider_key_status":
                 return false;
               case "local_model_status":

@@ -803,12 +803,36 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.mic.systemDefault": "Micro par défaut du système",
   "studio.mic.numbered": "Microphone {position}",
   "studio.mic.notConnected": "Micro choisi (non connecté)",
-  "studio.mic.notConnectedHint": "Le micro choisi n'est pas connecté. En attendant, les enregistrements utilisent le micro par défaut du système.",
-  "studio.mic.namesHint": "Les noms des micros apparaissent une fois l'accès autorisé. Lancez un test pour l'autoriser.",
+  "studio.mic.notConnectedHint":
+    "Le micro choisi n'est pas connecté. En attendant, les enregistrements utilisent le micro par défaut du système.",
+  "studio.mic.namesHint":
+    "Les noms des micros apparaissent une fois l'accès autorisé. Lancez un test pour l'autoriser.",
   "studio.mic.test": "Tester le micro",
   "studio.mic.stopTest": "Arrêter le test",
-  "studio.mic.testHint": "Parlez normalement\u00a0: la barre doit suivre votre voix. Rien n'est enregistré.",
+  "studio.mic.testHint":
+    "Parlez normalement\u00a0: la barre doit suivre votre voix. Rien n'est enregistré.",
   "studio.mic.level": "Niveau du micro",
-  "studio.mic.fellBack": "Le micro choisi n'est pas connecté\u00a0: le micro par défaut du système est utilisé.",
-  "toast.micFellBack": "Micro choisi introuvable. Enregistrement avec le micro par défaut du système.",
+  "studio.mic.fellBack":
+    "Le micro choisi n'est pas connecté\u00a0: le micro par défaut du système est utilisé.",
+  "toast.micFellBack":
+    "Micro choisi introuvable. Enregistrement avec le micro par défaut du système.",
+  "studio.storage.format": "Format des enregistrements",
+  "studio.storage.wav": "Qualité d'origine (WAV)",
+  "studio.storage.opus": "Compressé (Opus, 10× plus léger)",
+  "studio.storage.compressNow": "Compresser les enregistrements",
+  "studio.storage.compressing": "Compression…",
+  "studio.storage.compressed.one":
+    "{count} enregistrement compressé, {size} libérés.",
+  "studio.storage.compressed.other":
+    "{count} enregistrements compressés, {size} libérés.",
+  "studio.storage.nothingToCompress":
+    "Tous les enregistrements sont déjà compressés.",
+  "studio.storage.failed.one":
+    "{count} enregistrement n'a pas pu être compressé et reste tel quel.",
+  "studio.storage.failed.other":
+    "{count} enregistrements n'ont pas pu être compressés et restent tels quels.",
+  "studio.storage.savedOpus":
+    "Les nouveaux enregistrements sont compressés une fois transcrits. Vous pouvez toujours les écouter et les transcrire à nouveau.",
+  "studio.storage.savedWav":
+    "Les nouveaux enregistrements sont conservés en qualité d'origine. Ceux déjà compressés le restent.",
 };

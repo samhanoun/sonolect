@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Archive,
   Check,
   Copy,
   Cpu,
@@ -36,6 +37,15 @@ import {
 import { submitCapturedAudioCloud } from "../voiceApi";
 import { prepareLocalAudio } from "../localAudio";
 import { copyTranscript } from "../richClipboard";
+import {
+  CAPTURE_FORMATS,
+  applyCaptureFormat,
+  compressCaptures,
+  formatSize,
+  loadCaptureFormat,
+  saveCaptureFormat,
+  type CaptureFormat,
+} from "../captureStorage";
 import { transcribeAudioFile } from "../liveCaptureNative";
 import { STT_LANGUAGES } from "../sttLanguages";
 import { loadBubbleVisibility, saveBubbleVisibility } from "../bubbleBridge";
@@ -152,6 +162,10 @@ export function useSavedCaptures() {
   useEffect(() => {
     let cancelled = false;
     if (isTauriRuntime()) {
+      // With compressed storage, a recording that just finished is turned
+      // into Opus in the background; the list does not wait for it.
+      if (recordingState === "idle")
+        void applyCaptureFormat(nativeProviderCall).catch(() => undefined);
       // Enforce the retention setting whenever the list is refreshed.
       void applyCaptureRetention(nativeProviderCall)
         .catch(() => 0)
@@ -347,6 +361,7 @@ export function StudioTranscribe({
             ),
         );
         if (long) {
+          void applyCaptureFormat(nativeProviderCall).catch(() => undefined);
           state.openCapture({
             id: long.captureId!,
             durationMs: long.durationMs,
@@ -1263,6 +1278,43 @@ function PrivacyControls() {
       setMessage(error instanceof Error ? error.message : String(error));
     }
   };
+  const [format, setFormat] = useState<CaptureFormat>(() =>
+    loadCaptureFormat(),
+  );
+  const [compressing, setCompressing] = useState(false);
+  const compressNow = async () => {
+    setCompressing(true);
+    setMessage("");
+    try {
+      const done = await compressCaptures(nativeProviderCall);
+      const parts = [
+        done.recordings
+          ? t.count("studio.storage.compressed", done.recordings, {
+              size: formatSize(done.bytesFreed, t.locale),
+            })
+          : done.failed
+            ? ""
+            : t("studio.storage.nothingToCompress"),
+        done.failed ? t.count("studio.storage.failed", done.failed) : "",
+      ];
+      setMessage(parts.filter(Boolean).join(" "));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCompressing(false);
+    }
+  };
+  const changeFormat = (next: CaptureFormat) => {
+    setFormat(next);
+    saveCaptureFormat(next);
+    setMessage(
+      !native
+        ? t("studio.privacy.savedPreview")
+        : next === "opus"
+          ? t("studio.storage.savedOpus")
+          : t("studio.storage.savedWav"),
+    );
+  };
   const deleteEverything = async () => {
     if (!window.confirm(t("studio.privacy.confirmDeleteAll"))) return;
     setBusy(true);
@@ -1315,6 +1367,33 @@ function PrivacyControls() {
             ))}
           </select>
         </label>
+        <label>
+          {t("studio.storage.format")}
+          <select
+            value={format}
+            onChange={(event) =>
+              changeFormat(event.target.value as CaptureFormat)
+            }
+          >
+            {CAPTURE_FORMATS.map((choice) => (
+              <option key={choice} value={choice}>
+                {t(`studio.storage.${choice}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+        {native && format === "opus" && (
+          <button
+            className="studio-button secondary"
+            disabled={compressing || busy || capturing}
+            onClick={() => void compressNow()}
+          >
+            <Archive size={15} />
+            {compressing
+              ? t("studio.storage.compressing")
+              : t("studio.storage.compressNow")}
+          </button>
+        )}
         <button
           className="studio-button danger"
           disabled={busy || capturing}

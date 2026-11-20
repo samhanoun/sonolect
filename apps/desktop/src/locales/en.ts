@@ -758,14 +758,38 @@ export const en = {
   "studio.mic.systemDefault": "System default",
   "studio.mic.numbered": "Microphone {position}",
   "studio.mic.notConnected": "Chosen microphone (not connected)",
-  "studio.mic.notConnectedHint": "The microphone you chose is not connected. Until it is back, recordings use the system default.",
-  "studio.mic.namesHint": "Microphone names appear once access is allowed. Run a test to allow it.",
+  "studio.mic.notConnectedHint":
+    "The microphone you chose is not connected. Until it is back, recordings use the system default.",
+  "studio.mic.namesHint":
+    "Microphone names appear once access is allowed. Run a test to allow it.",
   "studio.mic.test": "Test microphone",
   "studio.mic.stopTest": "Stop test",
-  "studio.mic.testHint": "Speak normally: the bar should move with your voice. Nothing is recorded.",
+  "studio.mic.testHint":
+    "Speak normally: the bar should move with your voice. Nothing is recorded.",
   "studio.mic.level": "Microphone level",
-  "studio.mic.fellBack": "The chosen microphone is not connected, so the system default is used.",
-  "toast.micFellBack": "Chosen microphone not found. Recording with the system default.",
+  "studio.mic.fellBack":
+    "The chosen microphone is not connected, so the system default is used.",
+  "toast.micFellBack":
+    "Chosen microphone not found. Recording with the system default.",
+  "studio.storage.format": "Save recordings as",
+  "studio.storage.wav": "Original quality (WAV)",
+  "studio.storage.opus": "Compressed (Opus, 10× smaller)",
+  "studio.storage.compressNow": "Compress saved recordings",
+  "studio.storage.compressing": "Compressing…",
+  "studio.storage.compressed.one":
+    "{count} recording compressed, {size} freed.",
+  "studio.storage.compressed.other":
+    "{count} recordings compressed, {size} freed.",
+  "studio.storage.nothingToCompress":
+    "Every saved recording is already compressed.",
+  "studio.storage.failed.one":
+    "{count} recording could not be compressed and stays as it is.",
+  "studio.storage.failed.other":
+    "{count} recordings could not be compressed and stay as they are.",
+  "studio.storage.savedOpus":
+    "New recordings are compressed once they are transcribed. You can still play them and transcribe them again.",
+  "studio.storage.savedWav":
+    "New recordings are kept in original quality. Recordings already compressed stay compressed.",
 } as const;
 
 export type LocaleKeys = keyof typeof en;

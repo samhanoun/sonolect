@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 mod bubble;
+mod compact_audio;
 mod insertion;
 mod ipc_audio;
 mod local_engine;
@@ -269,6 +270,7 @@ fn main() {
             local_history::purge_local_captures,
             local_history::read_local_capture_audio,
             local_history::update_local_capture,
+            local_history::compress_local_captures,
             streaming::capture_begin,
             streaming::capture_append,
             streaming::capture_finish,

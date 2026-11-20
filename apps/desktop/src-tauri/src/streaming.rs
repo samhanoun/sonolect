@@ -19,7 +19,7 @@ use std::{
 };
 use tauri::Emitter;
 
-use super::{local_history, WhisperResult, WhisperSegment};
+use super::{compact_audio, local_history, WhisperResult, WhisperSegment};
 
 pub const SAMPLE_RATE: u64 = 16_000;
 /// Four hours, the longest session the product promises.
@@ -135,7 +135,7 @@ pub fn wav_bytes(samples: &[i16]) -> Vec<u8> {
     bytes
 }
 
-fn wav_header(samples: u64) -> [u8; 44] {
+pub fn wav_header(samples: u64) -> [u8; 44] {
     let data = (samples * 2).min(u64::from(u32::MAX - 36)) as u32;
     let mut header = [0u8; 44];
     header[0..4].copy_from_slice(b"RIFF");
@@ -396,14 +396,18 @@ impl Recorder {
     }
 }
 
-/// Transcribes a saved recording chunk by chunk, however long it is.
+/// Transcribes a saved recording chunk by chunk, however long it is and
+/// whichever format it is kept in.
 pub fn transcribe_file(
-    wav_path: &Path,
+    audio_path: &Path,
     transcribe: Transcriber,
     on_partial: PartialSink,
 ) -> Result<Outcome, String> {
-    let mut reader =
-        hound::WavReader::open(wav_path).map_err(|e| format!("Invalid WAV audio: {e}"))?;
+    if compact_audio::is_compressed(audio_path) {
+        return transcribe_samples(compact_audio::open(audio_path)?, transcribe, on_partial);
+    }
+    let reader =
+        hound::WavReader::open(audio_path).map_err(|e| format!("Invalid WAV audio: {e}"))?;
     let spec = reader.spec();
     if spec.channels != 1
         || u64::from(spec.sample_rate) != SAMPLE_RATE
@@ -412,12 +416,26 @@ pub fn transcribe_file(
     {
         return Err("Local speech requires mono 16 kHz PCM audio.".into());
     }
+    transcribe_samples(
+        reader
+            .into_samples::<i16>()
+            .map(|sample| sample.map_err(|e| format!("Invalid WAV audio: {e}"))),
+        transcribe,
+        on_partial,
+    )
+}
+
+fn transcribe_samples(
+    samples: impl Iterator<Item = Result<i16, String>>,
+    transcribe: Transcriber,
+    on_partial: PartialSink,
+) -> Result<Outcome, String> {
     let mut transcript = Transcript::new(transcribe, on_partial);
     let mut chunker = Chunker::default();
     let mut block = Vec::with_capacity(SAMPLE_RATE as usize);
     let mut total = 0u64;
-    for sample in reader.samples::<i16>() {
-        block.push(sample.map_err(|e| format!("Invalid WAV audio: {e}"))?);
+    for sample in samples {
+        block.push(sample?);
         if block.len() == SAMPLE_RATE as usize {
             total += block.len() as u64;
             for chunk in chunker.push(&block) {
@@ -445,6 +463,8 @@ struct Live {
     id: String,
     record: local_history::Capture,
     recorder: Recorder,
+    /// Keeps the WAV from being compressed while it is still being written.
+    hold: compact_audio::Hold,
 }
 
 /// The one recording in progress. The microphone is a single device, so a
@@ -548,6 +568,7 @@ pub fn capture_begin(
         language,
         segments: vec![],
     };
+    let hold = compact_audio::hold(&id);
     let recorder = Recorder::begin(
         &directory.join(format!("{id}.wav")),
         transcribe,
@@ -561,6 +582,7 @@ pub fn capture_begin(
             id: id.clone(),
             record,
             recorder,
+            hold,
         });
     if let Some(previous) = previous {
         // Never finished (the window was reloaded, say). Its audio stays in
@@ -605,10 +627,12 @@ fn take_live(id: &str) -> Result<Live, String> {
 #[tauri::command]
 pub async fn capture_finish(app: tauri::AppHandle, id: String) -> Result<WhisperResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        // `_hold` lasts until the record is written.
         let Live {
             id,
             mut record,
             recorder,
+            hold: _hold,
         } = take_live(&id)?;
         let outcome = recorder.finish()?;
         if outcome.duration_ms == 0 {
@@ -639,7 +663,9 @@ pub fn retranscribe(
     language: Option<String>,
 ) -> Result<WhisperResult, String> {
     let directory = local_history::directory(app)?;
-    let wav = directory.join(format!("{id}.wav"));
+    let _hold = compact_audio::hold(id);
+    let wav = compact_audio::audio_file(&directory, id)
+        .unwrap_or_else(|| directory.join(format!("{id}.wav")));
     let transcribe = transcriber(app, language.clone(), model_path, None, None)?;
     let mut record =
         local_history::read_record(&directory, id).unwrap_or_else(|| local_history::Capture {
@@ -910,6 +936,32 @@ mod tests {
         assert_eq!(
             transcribe_file(&wav, fake_engine(), Box::new(|_| {})).unwrap_err(),
             "No audio was recorded."
+        );
+    }
+
+    #[test]
+    fn a_compressed_recording_is_transcribed_like_the_original() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut audio = Vec::new();
+        for _ in 0..10 {
+            audio.extend(speech(5.0));
+            audio.extend(silence(1.0));
+        }
+        fs::write(folder.path().join("6-1.wav"), wav_bytes(&audio)).unwrap();
+        assert!(compact_audio::compress(folder.path(), "6-1").unwrap() > 0);
+        let opus = compact_audio::audio_file(folder.path(), "6-1").unwrap();
+        assert!(compact_audio::is_compressed(&opus));
+        let (seen, sink) = collector();
+        let outcome = transcribe_file(&opus, fake_engine(), sink).unwrap();
+        // Same length and the same pauses found as in the WAV.
+        assert_eq!(outcome.duration_ms, 60_000);
+        assert_eq!(outcome.segments.len(), 10);
+        assert_eq!(seen.lock().unwrap().len(), 10);
+
+        fs::write(&opus, b"not audio").unwrap();
+        assert_eq!(
+            transcribe_file(&opus, fake_engine(), Box::new(|_| {})).unwrap_err(),
+            "Invalid compressed audio."
         );
     }
 
