@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Archive,
   Check,
   Copy,
   Cpu,
@@ -15,15 +16,17 @@ import {
   Upload,
   WandSparkles,
 } from "lucide-react";
-import { useDesktopStore } from "../store/appStore";
+import { subscribeMicLevel, useDesktopStore } from "../store/appStore";
 import { isTauriRuntime } from "../desktopNative";
 import {
   nativeProviderCall,
+  setProviderMode,
   useProviderStore,
   speakUsingProvider,
   rewriteUsingProvider,
   transcribeUsingProvider,
 } from "../providerSettings";
+import { MicrophoneSettings } from "./StudioMicrophone";
 import { StudioModelSelector } from "./StudioModels";
 import { SegmentEditor, useCapturePlayer } from "./StudioSegments";
 import {
@@ -34,6 +37,16 @@ import {
 import { submitCapturedAudioCloud } from "../voiceApi";
 import { prepareLocalAudio } from "../localAudio";
 import { copyTranscript } from "../richClipboard";
+import {
+  CAPTURE_FORMATS,
+  applyCaptureFormat,
+  compressCaptures,
+  formatSize,
+  loadCaptureFormat,
+  saveCaptureFormat,
+  type CaptureFormat,
+} from "../captureStorage";
+import { transcribeAudioFile } from "../liveCaptureNative";
 import { STT_LANGUAGES } from "../sttLanguages";
 import { loadBubbleVisibility, saveBubbleVisibility } from "../bubbleBridge";
 import type { BubbleVisibility } from "../dictationBubble";
@@ -79,6 +92,25 @@ const SIGNAL_BARS = [
 /** The hero centerpiece: a signal meter that comes alive while dictating. */
 function SignalMeter({ live }: { live: boolean }) {
   const t = useT();
+  const bars = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // The bars follow the microphone: they rise at once and fall slowly, so
+    // a pause between words does not flatten them. Without levels (no meter
+    // in this webview) they keep their own movement.
+    let shown = 0;
+    const unsubscribe = subscribeMicLevel((level) => {
+      shown = Math.max(level, shown * 0.85);
+      bars.current?.style.setProperty(
+        "--signal-level",
+        (0.2 + 0.8 * shown).toFixed(2),
+      );
+    });
+    const element = bars.current;
+    return () => {
+      unsubscribe();
+      element?.style.removeProperty("--signal-level");
+    };
+  }, []);
   return (
     <div className={`studio-signal ${live ? "live" : ""}`} aria-hidden="true">
       <div className="studio-signal-head">
@@ -88,7 +120,7 @@ function SignalMeter({ live }: { live: boolean }) {
         </span>
         <span className="studio-signal-meta">{t("studio.signal.meta")}</span>
       </div>
-      <div className="studio-signal-bars">
+      <div className="studio-signal-bars" ref={bars}>
         {SIGNAL_BARS.map((height, index) => (
           <i
             key={index}
@@ -149,6 +181,11 @@ export function useSavedCaptures() {
   useEffect(() => {
     let cancelled = false;
     if (isTauriRuntime()) {
+      // With compressed storage, a recording that just finished is turned
+      // into Opus in the background; the list does not wait for it.
+      // A recording in progress is skipped by the recorder itself.
+      if (["idle", "completed", "error"].includes(recordingState))
+        void applyCaptureFormat(nativeProviderCall).catch(() => undefined);
       // Enforce the retention setting whenever the list is refreshed.
       void applyCaptureRetention(nativeProviderCall)
         .catch(() => 0)
@@ -294,6 +331,13 @@ export function StudioOverview({ captures }: { captures: SavedCapture[] }) {
   );
 }
 
+/** Whether a recording is being made or finished right now. */
+function isCapturing(recordingState: string) {
+  return ["requesting-permission", "recording", "uploading"].includes(
+    recordingState,
+  );
+}
+
 export function StudioTranscribe({
   onSaved,
 }: {
@@ -311,11 +355,62 @@ export function StudioTranscribe({
   const instruction =
     customInstruction ?? t("studio.transcribe.defaultInstruction");
   const allowCloud = () => useDesktopStore.getState().privacyLevel === "cloud";
+  // The app's recorder holds one recording at a time: a file is not imported
+  // while it records, and nothing is recorded while it takes a file.
+  const capturing = isCapturing(state.recordingState);
   const importAudio = async (file?: File) => {
     if (!file) return;
+    const native = isTauriRuntime();
+    if (native && isCapturing(useDesktopStore.getState().recordingState))
+      return;
+    if (native) useDesktopStore.setState({ importingAudio: true });
     setBusy(true);
     setMessage("");
     try {
+      if (isTauriRuntime()) {
+        // The app records files of any length through its chunked recorder.
+        if (file.size > 100 * 1024 * 1024)
+          throw new Error(t("studio.transcribe.fileTooLargeApp"));
+        setMessage(t("studio.transcribe.reading"));
+        const online = preferences.stt.provider !== "local" && allowCloud();
+        if (online) await setProviderMode(true);
+        const long = await transcribeAudioFile(
+          file,
+          {
+            language: state.sttLanguage,
+            modelPath: state.whisperConfig.modelPath,
+            ...(online
+              ? {
+                  provider: preferences.stt.provider,
+                  model: preferences.stt.model,
+                }
+              : {}),
+          },
+          ({ transcribedMs, durationMs }) =>
+            setMessage(
+              t("studio.transcribe.progress", {
+                done: formatTimestamp(transcribedMs),
+                total: formatTimestamp(durationMs),
+              }),
+            ),
+        );
+        if (long) {
+          void applyCaptureFormat(nativeProviderCall).catch(() => undefined);
+          state.openCapture({
+            id: long.captureId!,
+            durationMs: long.durationMs,
+            transcript: long.text,
+            segments: long.segments,
+          });
+          setMessage(
+            long.text
+              ? t("studio.transcribe.saved")
+              : t("studio.transcribe.noSpeech"),
+          );
+          return;
+        }
+        setMessage("");
+      }
       if (file.size > 25 * 1024 * 1024)
         throw new Error(t("studio.transcribe.fileTooLarge"));
       const wav = await prepareLocalAudio(file);
@@ -369,6 +464,7 @@ export function StudioTranscribe({
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
+      if (native) useDesktopStore.setState({ importingAudio: false });
       setBusy(false);
       await onSaved();
       if (input.current) input.current.value = "";
@@ -451,7 +547,7 @@ export function StudioTranscribe({
         <button
           className="studio-button secondary"
           onClick={() => input.current?.click()}
-          disabled={busy}
+          disabled={busy || (capturing && isTauriRuntime())}
         >
           <Upload size={16} />
           {t("studio.transcribe.import")}
@@ -580,6 +676,14 @@ export function StudioTranscribe({
               </button>
             )}
           </div>
+          {state.liveTranscript &&
+            (state.recordingState === "recording" ||
+              state.recordingState === "uploading") && (
+              <div className="studio-live-text">
+                <span>{t("studio.transcribe.liveLabel")}</span>
+                <p>{state.liveTranscript}</p>
+              </div>
+            )}
           {(message || player.error || state.voiceError) && (
             <StatusNotice
               text={
@@ -1217,6 +1321,43 @@ function PrivacyControls() {
       setMessage(error instanceof Error ? error.message : String(error));
     }
   };
+  const [format, setFormat] = useState<CaptureFormat>(() =>
+    loadCaptureFormat(),
+  );
+  const [compressing, setCompressing] = useState(false);
+  const compressNow = async () => {
+    setCompressing(true);
+    setMessage("");
+    try {
+      const done = await compressCaptures(nativeProviderCall);
+      const parts = [
+        done.recordings
+          ? t.count("studio.storage.compressed", done.recordings, {
+              size: formatSize(done.bytesFreed, t.locale),
+            })
+          : done.failed
+            ? ""
+            : t("studio.storage.nothingToCompress"),
+        done.failed ? t.count("studio.storage.failed", done.failed) : "",
+      ];
+      setMessage(parts.filter(Boolean).join(" "));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCompressing(false);
+    }
+  };
+  const changeFormat = (next: CaptureFormat) => {
+    setFormat(next);
+    saveCaptureFormat(next);
+    setMessage(
+      !native
+        ? t("studio.privacy.savedPreview")
+        : next === "opus"
+          ? t("studio.storage.savedOpus")
+          : t("studio.storage.savedWav"),
+    );
+  };
   const deleteEverything = async () => {
     if (!window.confirm(t("studio.privacy.confirmDeleteAll"))) return;
     setBusy(true);
@@ -1269,6 +1410,33 @@ function PrivacyControls() {
             ))}
           </select>
         </label>
+        <label>
+          {t("studio.storage.format")}
+          <select
+            value={format}
+            onChange={(event) =>
+              changeFormat(event.target.value as CaptureFormat)
+            }
+          >
+            {CAPTURE_FORMATS.map((choice) => (
+              <option key={choice} value={choice}>
+                {t(`studio.storage.${choice}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+        {native && format === "opus" && (
+          <button
+            className="studio-button secondary"
+            disabled={compressing || busy || capturing}
+            onClick={() => void compressNow()}
+          >
+            <Archive size={15} />
+            {compressing
+              ? t("studio.storage.compressing")
+              : t("studio.storage.compressNow")}
+          </button>
+        )}
         <button
           className="studio-button danger"
           disabled={busy || capturing}
@@ -1475,6 +1643,7 @@ export function StudioSettings() {
           </select>
         </label>
       </section>
+      <MicrophoneSettings />
       <PrivacyControls />
       <section className="studio-card">
         <h3>{t("studio.settings.shortcutsTitle")}</h3>

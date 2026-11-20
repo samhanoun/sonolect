@@ -438,6 +438,11 @@ body,
     transform 300ms var(--n-ease),
     background-color 300ms var(--n-ease);
 }
+.studio-signal.live .studio-signal-bars {
+  /* Set from the microphone level while recording; 1 without a meter. */
+  transform: scaleY(var(--signal-level, 1));
+  transition: transform 90ms linear;
+}
 .studio-signal.live .studio-signal-bars i {
   background: var(--n-accent);
   animation: studio-signal 900ms var(--n-ease) infinite alternate;
@@ -529,6 +534,18 @@ body,
 }
 .studio-recording-dock small {
   color: var(--n-text-2);
+}
+.studio-recording-dock .studio-dock-live {
+  color: var(--n-text);
+}
+.studio-live-text {
+  border-color: var(--n-line-strong);
+}
+.studio-live-text span {
+  color: var(--n-text-3);
+}
+.studio-live-text p {
+  color: var(--n-text);
 }
 .studio-recording-dock button {
   background: var(--n-accent);
@@ -774,4 +791,12 @@ button.studio-segment-time:hover {
     grid-column: 2;
     grid-row: 2;
   }
+}
+
+/* Microphone test */
+.studio-mic-meter {
+  background: var(--n-line-strong);
+}
+.studio-mic-meter > i {
+  background: var(--n-accent);
 }

@@ -26,9 +26,10 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 
 ### Voice Capture
 
-- System and microphone audio capture with device selection
-- Real-time waveform visualisation
-- Configurable sample rate and format (WAV / Opus)
+- System and microphone audio capture with device selection. On desktop, Settings › Microphone picks the input and tests its level without recording.
+- Real-time waveform visualisation, driven by the microphone level
+- Recordings of up to four hours on desktop. The audio is written to disk while you speak, so nothing is lost if the app stops, and it is transcribed at each pause.
+- Recordings are stored at 16 kHz mono, the format the speech engine works with, as WAV or as Ogg Opus at about a tenth of the size (Settings › Privacy & retention). Compressed recordings still play back and can be transcribed again.
 
 ### Dictate Anywhere
 
@@ -40,7 +41,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 
 - Embedded Whisper-based STT engine — runs entirely on-device
 - Automatic language detection with manual override
-- Streaming partial results during recording
+- Streaming partial results during recording: on desktop the text heard so far appears while you are still speaking, and long audio files are imported the same way, piece by piece
 
 ### Transcript Editing
 

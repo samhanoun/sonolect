@@ -13,6 +13,9 @@ hound = "3.5"
 sha2 = "0.11"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
 base64 = "0.23"
+# Saved recordings as Ogg Opus. libopus is bundled and built with cmake, which whisper-rs already needs.
+opus = "0.4"
+ogg = "0.9"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3.6", features = ["windows-native"] }

@@ -21,7 +21,7 @@ pub struct Capture {
     #[serde(default)]
     pub segments: Vec<super::WhisperSegment>,
 }
-fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(super) fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let directory = app
         .path()
         .app_local_data_dir()
@@ -36,7 +36,7 @@ fn valid_id(id: &str) -> Result<(), String> {
     }
     Ok(())
 }
-fn write_record(app: &tauri::AppHandle, capture: &Capture) -> Result<(), String> {
+pub(super) fn write_record(app: &tauri::AppHandle, capture: &Capture) -> Result<(), String> {
     let directory = directory(app)?;
     let path = directory.join(format!("{}.json", capture.id));
     let temp = directory.join(format!("{}.json.tmp", capture.id));
@@ -47,6 +47,11 @@ fn write_record(app: &tauri::AppHandle, capture: &Capture) -> Result<(), String>
     .map_err(|e| e.to_string())?;
     // Rename replaces atomically on supported desktop filesystems.
     fs::rename(temp, path).map_err(|e| e.to_string())
+}
+/// The saved record of one recording, when it exists and can be read.
+pub(super) fn read_record(directory: &std::path::Path, id: &str) -> Option<Capture> {
+    let data = fs::read(directory.join(format!("{id}.json"))).ok()?;
+    serde_json::from_slice(&data).ok()
 }
 pub fn process(
     app: &tauri::AppHandle,
@@ -71,6 +76,7 @@ pub fn process_with(
         .map_err(|e| e.to_string())?;
     let id = id.unwrap_or_else(|| format!("{}-{}", now.as_nanos(), std::process::id()));
     valid_id(&id)?;
+    let _hold = super::compact_audio::hold(&id);
     let wav = directory(app)?.join(format!("{id}.wav"));
     fs::write(wav, &payload.audio_bytes).map_err(|e| format!("Cannot save recording: {e}"))?;
     let mut record = Capture {
@@ -100,6 +106,8 @@ pub fn process_with(
 #[tauri::command]
 pub fn list_local_captures(app: tauri::AppHandle) -> Result<Vec<Capture>, String> {
     let mut captures = vec![];
+    // The recording in progress joins the library once it is finished.
+    let live = super::streaming::live_id();
     for entry in fs::read_dir(directory(&app)?).map_err(|e| e.to_string())? {
         let path = entry.map_err(|e| e.to_string())?.path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
@@ -107,7 +115,9 @@ pub fn list_local_captures(app: tauri::AppHandle) -> Result<Vec<Capture>, String
         }
         if let Ok(data) = fs::read(&path) {
             if let Ok(capture) = serde_json::from_slice::<Capture>(&data) {
-                captures.push(capture);
+                if live.as_deref() != Some(capture.id.as_str()) {
+                    captures.push(capture);
+                }
             }
         }
     }
@@ -123,9 +133,7 @@ pub async fn read_local_capture_audio(
 ) -> Result<tauri::ipc::Response, String> {
     valid_id(&id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        fs::read(directory(&app)?.join(format!("{id}.wav")))
-            .map(tauri::ipc::Response::new)
-            .map_err(|_| "The audio of this recording is no longer on this device.".to_string())
+        super::compact_audio::read_as_wav(&directory(&app)?, &id).map(tauri::ipc::Response::new)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -202,7 +210,7 @@ pub fn update_local_capture(
 #[tauri::command]
 pub fn delete_local_capture(app: tauri::AppHandle, id: String) -> Result<(), String> {
     valid_id(&id)?;
-    for extension in ["wav", "json", "json.tmp"] {
+    for extension in ["wav", "opus", "opus.tmp", "json", "json.tmp"] {
         let path = directory(&app)?.join(format!("{id}.{extension}"));
         if path.exists() {
             fs::remove_file(path).map_err(|e| e.to_string())?;
@@ -253,7 +261,7 @@ fn purge_directory(
                         .map(|capture| capture.created_at_ms);
                     match created {
                         Some(created) if created < cutoff_ms => {
-                            for extension in ["wav", "json.tmp"] {
+                            for extension in ["wav", "opus", "opus.tmp", "json.tmp"] {
                                 let _ =
                                     fs::remove_file(directory.join(format!("{id}.{extension}")));
                             }
@@ -289,6 +297,22 @@ fn purge_directory(
     }
     Ok(removed)
 }
+/// Compresses every finished recording that is still a WAV to Ogg Opus,
+/// about a tenth of the size. The studio calls it after each recording when
+/// the user chose compressed storage, and from "Compress recordings now".
+#[tauri::command]
+pub async fn compress_local_captures(
+    app: tauri::AppHandle,
+) -> Result<super::compact_audio::Compressed, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        super::compact_audio::compress_all(&directory(&app)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+/// Transcribes a saved recording again with the local engine. Recordings of
+/// any length are handled chunk by chunk, with the same live text events as a
+/// recording in progress.
 #[tauri::command]
 pub async fn retry_local_capture(
     app: tauri::AppHandle,
@@ -298,20 +322,7 @@ pub async fn retry_local_capture(
 ) -> Result<super::WhisperResult, String> {
     valid_id(&id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let bytes =
-            fs::read(directory(&app)?.join(format!("{id}.wav"))).map_err(|e| e.to_string())?;
-        let duration_ms = bytes.len().saturating_sub(44) as u64 * 1000 / 32000;
-        process(
-            &app,
-            super::WhisperPayload {
-                audio_bytes: bytes,
-                mime_type: "audio/wav".into(),
-                duration_ms,
-                language,
-                model_path,
-            },
-            Some(id),
-        )
+        super::streaming::retranscribe(&app, &id, model_path, language)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -360,6 +371,30 @@ mod tests {
         assert_eq!(purge_directory(&directory, None, now).unwrap(), 1);
         assert_eq!(fs::read_dir(&directory).unwrap().count(), 0);
         fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn retention_deletes_compressed_recordings_too() {
+        let folder = tempfile::tempdir().unwrap();
+        let directory = folder.path();
+        let day = 86_400_000;
+        let now = 100 * day;
+        for (id, age) in [("1-1", 40), ("2-1", 2)] {
+            record(directory, id, now - age * day);
+            fs::rename(
+                directory.join(format!("{id}.wav")),
+                directory.join(format!("{id}.opus")),
+            )
+            .unwrap();
+        }
+        fs::write(directory.join("1-1.opus.tmp"), b"half").unwrap();
+
+        assert_eq!(purge_directory(directory, Some(30), now).unwrap(), 1);
+        assert!(!directory.join("1-1.json").exists());
+        assert!(!directory.join("1-1.opus").exists());
+        assert!(!directory.join("1-1.opus.tmp").exists());
+        assert!(directory.join("2-1.json").exists());
+        assert!(directory.join("2-1.opus").exists());
     }
 
     fn segment(start_ms: u64, end_ms: u64, text: &str, speaker: Option<&str>) -> WhisperSegment {
