@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tauri::Manager;
 mod audio_feed;
 mod bubble;
 mod compact_audio;
@@ -140,6 +141,7 @@ fn open_accessibility_settings() -> Result<(), String> {
 /// every other online request, and returns the MP3 as a raw binary response.
 #[tauri::command]
 fn edge_tts_synthesize(
+    app: tauri::AppHandle,
     text: String,
     voice: String,
     rate: f64,
@@ -165,12 +167,17 @@ fn edge_tts_synthesize(
     if !rate.is_finite() || !(0.25..=4.0).contains(&rate) {
         return Err("Choose a speaking rate between 0.25x and 4x.".to_owned());
     }
+    // The app's cache folder belongs to this user. In the shared temp folder,
+    // another account could plant a file or link at this predictable name
+    // before edge-tts writes to it.
+    let directory = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("tts");
+    fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
     let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let out_path = std::env::temp_dir().join(format!(
-        "sonolect-tts-{}-{}.mp3",
-        std::process::id(),
-        counter
-    ));
+    let out_path = directory.join(format!("speech-{}-{counter}.mp3", std::process::id()));
     let rate_str = if (rate - 1.0).abs() < 0.01 {
         "+0%".to_owned()
     } else if rate > 1.0 {

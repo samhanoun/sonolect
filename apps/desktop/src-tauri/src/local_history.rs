@@ -353,24 +353,23 @@ mod tests {
 
     #[test]
     fn retention_deletes_only_expired_recordings() {
-        let directory = std::env::temp_dir().join(format!("sonolect-purge-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&directory);
-        fs::create_dir_all(&directory).unwrap();
+        // A fresh, randomly named folder that is removed when the test ends.
+        let folder = tempfile::tempdir().unwrap();
+        let directory = folder.path();
         let day = 86_400_000;
         let now = 100 * day;
-        record(&directory, "1-1", now - 40 * day);
-        record(&directory, "2-1", now - 2 * day);
+        record(directory, "1-1", now - 40 * day);
+        record(directory, "2-1", now - 2 * day);
         fs::write(directory.join("notes.txt"), b"keep").unwrap();
 
-        assert_eq!(purge_directory(&directory, Some(30), now).unwrap(), 1);
+        assert_eq!(purge_directory(directory, Some(30), now).unwrap(), 1);
         assert!(!directory.join("1-1.json").exists());
         assert!(!directory.join("1-1.wav").exists());
         assert!(directory.join("2-1.json").exists());
         assert!(directory.join("2-1.wav").exists());
 
-        assert_eq!(purge_directory(&directory, None, now).unwrap(), 1);
-        assert_eq!(fs::read_dir(&directory).unwrap().count(), 0);
-        fs::remove_dir_all(&directory).unwrap();
+        assert_eq!(purge_directory(directory, None, now).unwrap(), 1);
+        assert_eq!(fs::read_dir(directory).unwrap().count(), 0);
     }
 
     #[test]
