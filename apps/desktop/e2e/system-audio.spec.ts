@@ -33,8 +33,10 @@ test.describe("recording this computer's sound", () => {
     await page.getByRole("button", { name: "Record to add text" }).click();
     const dock = page.locator(".studio-recording-dock");
     await expect(dock).toContainText("Recording computer sound…");
+    // Two sentences of live text before stopping: stopping at exactly three
+    // seconds of audio would leave only the first.
     const live = page.locator(".studio-live-text");
-    await expect(live).toContainText("Part 1.");
+    await expect(live).toContainText("Part 2.");
 
     await page.getByRole("button", { name: "Stop recording" }).click();
     await expect(dock).toContainText("Your words are ready");
