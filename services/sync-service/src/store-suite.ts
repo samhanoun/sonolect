@@ -149,6 +149,34 @@ export function defineStoreTests(factory: StoreFactory): void {
       assert.equal(meta?.bytes, 400 + 500 + 300);
     });
 
+    it("gives concurrent batches unique, gapless seqs", async () => {
+      const store = await open();
+      const vaultId = await vault(store);
+      const batches = Array.from({ length: 5 }, () =>
+        Array.from({ length: 8 }, () => put(newRid(), 0, 80)),
+      );
+      const results = await Promise.all(
+        batches.map((writes) => store.write(vaultId, writes, QUOTAS, T0)),
+      );
+      const seqs = results.flat().map((result) => ok(result).seq);
+      assert.deepEqual(
+        [...seqs].sort((a, b) => a - b),
+        Array.from({ length: 40 }, (_, i) => i + 1),
+      );
+      // Within a batch, in request order.
+      for (const batch of results) {
+        const own = batch.map((result) => ok(result).seq);
+        assert.deepEqual(
+          own,
+          [...own].sort((a, b) => a - b),
+        );
+      }
+      const meta = await store.getVault(vaultId);
+      assert.equal(meta?.head, 40);
+      assert.equal(meta?.records, 40);
+      assert.equal(meta?.bytes, 40 * 80);
+    });
+
     it("returns changes in seq order, after the cursor, within the caps", async () => {
       const store = await open();
       const vaultId = await vault(store);

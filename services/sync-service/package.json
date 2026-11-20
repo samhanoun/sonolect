@@ -13,7 +13,8 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test \"src/**/*.test.ts\"",
-    "test:firestore": "tsx --test src/firestore.test.ts"
+    "test:firestore": "tsx --test src/firestore.test.ts",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.4.3",
