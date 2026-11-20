@@ -5,7 +5,10 @@ import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { strings } from "../src/i18n";
+import { actionLabel, noticeText, type NoticeAction } from "../src/notices";
 import { useCompanionStore } from "../src/store";
+import { openAppSettings } from "../src/ui/actions";
 import { Button, MicOrb, Waveform } from "../src/ui/components";
 import { Backdrop, glassStyles } from "../src/ui/glass";
 import { useReducedMotion, useReducedTransparency } from "../src/ui/motion";
@@ -22,10 +25,19 @@ export default function QuickDictateScreen() {
   const capture = useCompanionStore((st) => st.capture);
   const level = useCompanionStore((st) => st.level);
   const latest = useCompanionStore((st) => st.latest);
+  const notice = useCompanionStore((st) => st.notice);
+  const downloading = useCompanionStore((st) => st.downloading);
   const haptics = useCompanionStore((st) => st.settings.hapticsEnabled);
+  const uiLanguage = useCompanionStore((st) => st.settings.uiLanguage);
   const startCapture = useCompanionStore((st) => st.startCapture);
   const stopCapture = useCompanionStore((st) => st.stopCapture);
   const cancelCapture = useCompanionStore((st) => st.cancelCapture);
+  const downloadModel = useCompanionStore((st) => st.downloadModel);
+  const allowSystemServiceAlways = useCompanionStore(
+    (st) => st.allowSystemServiceAlways,
+  );
+  const dismissNotice = useCompanionStore((st) => st.dismissNotice);
+  const t = strings(uiLanguage);
 
   const startLatestId = useRef(latest?.id);
   const [copiedText, setCopiedText] = useState<string | null>(null);
@@ -36,6 +48,9 @@ export default function QuickDictateScreen() {
 
   const listening = capture.status === "listening";
   const processing = capture.status === "processing";
+  // Why dictation couldn't start or stopped, such as a missing language
+  // pack or the speech service needing consent, with what to do about it.
+  const showNotice = notice !== null && !listening && !processing;
 
   useEffect(() => {
     const animation = Animated.timing(glow, {
@@ -80,23 +95,46 @@ export default function QuickDictateScreen() {
     void startCapture();
   };
 
+  const onNoticeAction = (action: NoticeAction) => {
+    switch (action) {
+      case "downloadModel":
+        void downloadModel();
+        break;
+      case "useServiceOnce":
+        setCopiedText(null);
+        void startCapture({ allowSystemServiceOnce: true });
+        break;
+      case "alwaysAllow":
+        setCopiedText(null);
+        void allowSystemServiceAlways();
+        break;
+      case "openSettings":
+        openAppSettings();
+        break;
+      case "typeInstead":
+        // Typing lives on Capture, which shows this notice too.
+        router.replace("/");
+        break;
+      case "dismiss":
+        dismissNotice();
+        break;
+    }
+  };
+
   const title = listening
-    ? "Listening…"
+    ? t.dictate.listening
     : processing
-      ? "Polishing…"
+      ? t.dictate.polishing
       : copiedText
-        ? "Copied"
+        ? t.dictate.copied
         : capture.status === "error"
-          ? "Couldn't dictate"
-          : "Quick dictation";
+          ? t.dictate.failed
+          : t.dictate.title;
 
   const body =
     listening || processing
-      ? capture.partialTranscript ||
-        "Speak naturally. Tap the orb when you're done."
-      : copiedText
-        ? copiedText
-        : "Tap the orb to start.";
+      ? capture.partialTranscript || t.dictate.speakHint
+      : (copiedText ?? t.dictate.tapToStart);
 
   return (
     <View style={s.screen}>
@@ -113,31 +151,58 @@ export default function QuickDictateScreen() {
           <Text style={s.title} accessibilityRole="header">
             {title}
           </Text>
-          <Text style={s.body} numberOfLines={6}>
-            {body}
-          </Text>
+          {showNotice ? (
+            // The root layout announces each notice once: no live region.
+            <View
+              style={[
+                glassStyles.panel,
+                s.notice,
+                opaque && glassStyles.panelOpaque,
+              ]}
+            >
+              <Text style={s.noticeText}>{noticeText(t, notice)}</Text>
+              <View style={s.noticeActions}>
+                {notice.actions.map((action) => {
+                  const busy = action === "downloadModel" && downloading;
+                  return (
+                    <Button
+                      key={action}
+                      compact
+                      label={
+                        busy ? t.capture.downloading : actionLabel(t, action)
+                      }
+                      disabled={busy}
+                      onPress={() => onNoticeAction(action)}
+                    />
+                  );
+                })}
+              </View>
+            </View>
+          ) : (
+            <Text style={s.body} numberOfLines={6}>
+              {body}
+            </Text>
+          )}
           <View style={s.wave}>
             <Waveform level={level} active={listening} />
           </View>
           <MicOrb
             listening={listening}
             busy={processing}
-            label={listening ? "Tap to finish" : "Tap to speak"}
+            label={listening ? t.dictate.tapToFinish : t.capture.tapToSpeak}
             onPress={() => (listening ? stopCapture() : again())}
             accessibilityLabel={
-              listening ? "Finish dictation" : "Start dictation"
+              listening ? t.dictate.a11yFinish : t.dictate.a11yStart
             }
             level={level}
           />
-          {copiedText ? (
+          {copiedText && !showNotice ? (
             <Text style={s.hint}>
-              {Platform.OS === "ios"
-                ? "Go back to your app (top-left corner) and paste."
-                : "Switch back to your app and paste."}
+              {Platform.OS === "ios" ? t.dictate.pasteIos : t.dictate.paste}
             </Text>
           ) : null}
           <View style={s.actions}>
-            <Button label="Close" variant="ghost" onPress={close} />
+            <Button label={t.dictate.close} variant="ghost" onPress={close} />
           </View>
         </View>
       </SafeAreaView>
@@ -161,6 +226,7 @@ const s = StyleSheet.create({
     color: colors.lime,
     fontFamily: fonts.display,
     fontSize: 28,
+    textAlign: "center",
   },
   body: {
     color: colors.text,
@@ -170,6 +236,19 @@ const s = StyleSheet.create({
     textAlign: "center",
     minHeight: 48,
   },
+  notice: {
+    alignSelf: "stretch",
+    gap: space.sm,
+    borderRadius: radius.lg,
+    padding: space.md,
+  },
+  noticeText: {
+    color: colors.text,
+    fontFamily: fonts.body,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  noticeActions: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
   wave: { alignSelf: "stretch", alignItems: "center" },
   hint: {
     color: colors.muted,

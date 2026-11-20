@@ -24,6 +24,7 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { syncVoiceKeyboardPreferences } from "../modules/sonolect-voice-keyboard";
 import { strings, type Strings } from "../src/i18n";
 import { noticeText } from "../src/notices";
+import { systemServiceAllowedWithoutAsking } from "../src/speechPolicy";
 import { useCompanionStore } from "../src/store";
 import { MIN_TOUCH_SIZE } from "../src/ui/components";
 import { confirm } from "../src/ui/confirm";
@@ -89,6 +90,9 @@ export default function RootLayout() {
   const hydrated = useCompanionStore((s) => s.hydrated);
   const uiLanguage = useCompanionStore((s) => s.settings.uiLanguage);
   const privacyLevel = useCompanionStore((s) => s.settings.privacyLevel);
+  const allowSystemService = useCompanionStore(
+    (s) => s.settings.allowSystemService,
+  );
   const dictationLanguage = useCompanionStore((s) => s.settings.language);
   const t = strings(uiLanguage);
   const reducedMotion = useReducedMotion();
@@ -99,15 +103,20 @@ export default function RootLayout() {
     void hydrate();
   }, [hydrate]);
 
-  // The Android voice keyboard follows the app's privacy and language settings.
+  // The Android voice keyboard follows the app's privacy and language
+  // settings: it may use the system speech service only where the app may
+  // without asking, since a keyboard can't ask.
   useEffect(() => {
     if (hydrated) {
       syncVoiceKeyboardPreferences({
-        privacyLevel,
+        allowSystemService: systemServiceAllowedWithoutAsking({
+          privacyLevel,
+          allowSystemService,
+        }),
         language: dictationLanguage,
       });
     }
-  }, [hydrated, privacyLevel, dictationLanguage]);
+  }, [hydrated, privacyLevel, allowSystemService, dictationLanguage]);
 
   const ready = (fontsLoaded || Boolean(fontError)) && hydrated;
   useEffect(() => {
@@ -149,7 +158,7 @@ export default function RootLayout() {
             // `href: null` would make expo-router redirect away from it.
             tabBarButton: () => null,
             tabBarItemStyle: { display: "none" },
-            title: "Quick dictation",
+            title: t.dictate.title,
             tabBarStyle: { display: "none" },
           }}
         />

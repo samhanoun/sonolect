@@ -1,5 +1,5 @@
 import * as Clipboard from "expo-clipboard";
-import { Alert, Platform, Share } from "react-native";
+import { Alert, Linking, Platform, Share } from "react-native";
 
 import type { Strings } from "../i18n";
 
@@ -8,6 +8,12 @@ import type { Strings } from "../i18n";
  * out loud instead of swallowed (data-14); dismissing the share sheet is
  * not a failure.
  */
+
+/** Settings > Sonolect; react-native-web has no app settings to open. */
+export function openAppSettings(): void {
+  if (typeof Linking.openSettings !== "function") return;
+  void Linking.openSettings().catch(() => undefined);
+}
 
 /** Tells the user an action failed: an alert, or the browser's on web. */
 export function showFailure(message: string): void {

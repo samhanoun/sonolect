@@ -8,6 +8,9 @@ import {
   showVoiceKeyboardPicker,
   type VoiceKeyboardStatus,
 } from "../../modules/sonolect-voice-keyboard";
+import { strings } from "../i18n";
+import { systemServiceAllowedWithoutAsking } from "../speechPolicy";
+import { useCompanionStore } from "../store";
 import { Button, Card, Label } from "./components";
 import { colors, fonts, space } from "./theme";
 
@@ -20,6 +23,11 @@ import { colors, fonts, space } from "./theme";
  */
 export function VoiceKeyboardCard({ enterIndex }: { enterIndex: number }) {
   const router = useRouter();
+  const uiLanguage = useCompanionStore((st) => st.settings.uiLanguage);
+  const serviceAllowed = useCompanionStore((st) =>
+    systemServiceAllowedWithoutAsking(st.settings),
+  );
+  const t = strings(uiLanguage).settings.voiceKeyboard;
   const [status, setStatus] = useState<VoiceKeyboardStatus>(() =>
     getVoiceKeyboardStatus(),
   );
@@ -34,30 +42,32 @@ export function VoiceKeyboardCard({ enterIndex }: { enterIndex: number }) {
 
   if (Platform.OS === "android" && status.supported) {
     const step = !status.enabled
-      ? "Turn on “Sonolect voice” in your keyboard settings, then come back."
+      ? t.enable
       : !status.selected
-        ? "Switch to the Sonolect voice keyboard in any text field, or here."
-        : "Sonolect voice is your keyboard. Tap its mic in any app and speak.";
+        ? t.select
+        : t.ready;
     return (
       <Card enterIndex={enterIndex}>
-        <Label>Dictate in any app</Label>
+        <Label>{t.title}</Label>
         <Text style={s.body}>{step}</Text>
         <Text style={s.note}>
           {status.onDeviceRecognition
-            ? "Speech is recognised on this phone."
-            : "This phone has no on-device recogniser. With Standard privacy the keyboard uses the system speech service."}
+            ? t.onDevice
+            : serviceAllowed
+              ? t.systemService
+              : t.needsService}
         </Text>
         <View style={s.row}>
           {!status.enabled ? (
             <Button
-              label="Open keyboard settings"
+              label={t.openKeyboardSettings}
               icon="keyboard"
               variant="primary"
               onPress={() => openVoiceKeyboardSettings()}
             />
           ) : (
             <Button
-              label={status.selected ? "Change keyboard" : "Switch keyboard"}
+              label={status.selected ? t.changeKeyboard : t.switchKeyboard}
               icon="keyboard"
               variant={status.selected ? "outline" : "primary"}
               onPress={() => {
@@ -74,21 +84,12 @@ export function VoiceKeyboardCard({ enterIndex }: { enterIndex: number }) {
 
   return (
     <Card enterIndex={enterIndex}>
-      <Label>Dictate in any app</Label>
-      <Text style={s.body}>
-        {Platform.OS === "ios"
-          ? "iPhone keyboards can't use the microphone, so Sonolect uses Quick dictation: it opens straight into listening, then copies your words so you can paste them where you were."
-          : "Quick dictation opens straight into listening, then copies your words so you can paste them anywhere."}
-      </Text>
-      {Platform.OS === "ios" && (
-        <Text style={s.note}>
-          Tip: in Shortcuts, add “Open URL” with sonolect://dictate and assign
-          it to the Action button or Back Tap.
-        </Text>
-      )}
+      <Label>{t.title}</Label>
+      <Text style={s.body}>{Platform.OS === "ios" ? t.quickIos : t.quick}</Text>
+      {Platform.OS === "ios" && <Text style={s.note}>{t.shortcutTip}</Text>}
       <View style={s.row}>
         <Button
-          label="Try Quick dictation"
+          label={t.tryQuick}
           icon="mic"
           variant="primary"
           onPress={() => router.push("/dictate")}

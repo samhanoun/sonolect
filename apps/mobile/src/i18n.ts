@@ -111,6 +111,22 @@ const en = {
       dismiss: "Dismiss",
     },
   },
+  /** Quick dictation (sonolect://dictate): listen, then copy for pasting. */
+  dictate: {
+    title: "Quick dictation",
+    listening: "Listening…",
+    polishing: "Polishing…",
+    copied: "Copied",
+    failed: "Couldn't dictate",
+    speakHint: "Speak naturally. Tap the orb when you're done.",
+    tapToStart: "Tap the orb to start.",
+    tapToFinish: "Tap to finish",
+    a11yFinish: "Finish dictation",
+    a11yStart: "Start dictation",
+    pasteIos: "Go back to your app (top-left corner) and paste.",
+    paste: "Switch back to your app and paste.",
+    close: "Close",
+  },
   modes: {
     dictate: "Clean up",
     rewrite: "Rewrite",
@@ -236,6 +252,31 @@ const en = {
     eraseButton: "Erase",
     about: "Sonolect mobile · your notes stay on this phone",
     privacyPolicy: "Privacy policy",
+    /** The "Dictate in any app" card. */
+    voiceKeyboard: {
+      title: "Dictate in any app",
+      enable:
+        "Turn on “Sonolect voice” in your keyboard settings, then come back.",
+      select:
+        "Switch to the Sonolect voice keyboard in any text field, or here.",
+      ready:
+        "Sonolect voice is your keyboard. Tap its mic in any app and speak.",
+      onDevice: "Speech is recognized on this phone.",
+      systemService:
+        "This phone has no on-device recognizer, so the keyboard uses the system speech service, which may send audio online.",
+      needsService:
+        "This phone has no on-device recognizer. To dictate with the keyboard, allow the system speech service under Privacy.",
+      openKeyboardSettings: "Open keyboard settings",
+      changeKeyboard: "Change keyboard",
+      switchKeyboard: "Switch keyboard",
+      quickIos:
+        "iPhone keyboards can't use the microphone, so Sonolect uses Quick dictation: it opens straight into listening, then copies your words so you can paste them where you were.",
+      quick:
+        "Quick dictation opens straight into listening, then copies your words so you can paste them anywhere.",
+      shortcutTip:
+        "Tip: in Shortcuts, add “Open URL” with sonolect://dictate and assign it to the Action button or Back Tap.",
+      tryQuick: "Try Quick dictation",
+    },
   },
   onboarding: {
     title: "Speak. Refine. Act.",
@@ -378,6 +419,21 @@ const fr: Strings = {
       dismiss: "Fermer",
     },
   },
+  dictate: {
+    title: "Dictée rapide",
+    listening: "Écoute…",
+    polishing: "Mise en forme…",
+    copied: "Copié",
+    failed: "Dictée impossible",
+    speakHint: "Parlez naturellement. Touchez l'orbe quand vous avez terminé.",
+    tapToStart: "Touchez l'orbe pour commencer.",
+    tapToFinish: "Touchez pour terminer",
+    a11yFinish: "Terminer la dictée",
+    a11yStart: "Démarrer la dictée",
+    pasteIos: "Revenez à votre app (en haut à gauche) et collez.",
+    paste: "Revenez à votre app et collez.",
+    close: "Fermer",
+  },
   modes: {
     dictate: "Nettoyer",
     rewrite: "Réécrire",
@@ -503,6 +559,30 @@ const fr: Strings = {
     eraseButton: "Effacer",
     about: "Sonolect mobile · vos notes restent sur ce téléphone",
     privacyPolicy: "Politique de confidentialité",
+    voiceKeyboard: {
+      title: "Dicter dans toutes les apps",
+      enable:
+        "Activez « Sonolect voice » dans les réglages du clavier, puis revenez.",
+      select:
+        "Choisissez le clavier Sonolect voice dans n'importe quel champ de texte, ou ici.",
+      ready:
+        "Sonolect voice est votre clavier. Touchez son micro dans n'importe quelle app et parlez.",
+      onDevice: "La parole est reconnue sur ce téléphone.",
+      systemService:
+        "Ce téléphone n'a pas de reconnaissance vocale sur l'appareil : le clavier utilise donc le service vocal du système, qui peut envoyer l'audio en ligne.",
+      needsService:
+        "Ce téléphone n'a pas de reconnaissance vocale sur l'appareil. Pour dicter avec le clavier, autorisez le service vocal du système dans Confidentialité.",
+      openKeyboardSettings: "Ouvrir les réglages du clavier",
+      changeKeyboard: "Changer de clavier",
+      switchKeyboard: "Choisir le clavier",
+      quickIos:
+        "Les claviers de l'iPhone ne peuvent pas utiliser le micro : Sonolect propose donc la dictée rapide. Elle écoute dès l'ouverture, puis copie vos mots pour que vous les colliez là où vous étiez.",
+      quick:
+        "La dictée rapide écoute dès l'ouverture, puis copie vos mots pour que vous les colliez où vous voulez.",
+      shortcutTip:
+        "Astuce : dans Raccourcis, ajoutez « Ouvrir les URL » avec sonolect://dictate et associez-le au bouton Action ou à Toucher le dos.",
+      tryQuick: "Essayer la dictée rapide",
+    },
   },
   onboarding: {
     title: "Parlez. Raffinez. Agissez.",

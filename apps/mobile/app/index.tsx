@@ -4,7 +4,6 @@ import {
   Animated,
   BackHandler,
   KeyboardAvoidingView,
-  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -23,7 +22,7 @@ import { formatDuration } from "../src/library";
 import { actionLabel, noticeText, type NoticeAction } from "../src/notices";
 import { requestDictationPermission } from "../src/speech";
 import { useCompanionStore } from "../src/store";
-import { copyText, shareText } from "../src/ui/actions";
+import { copyText, openAppSettings, shareText } from "../src/ui/actions";
 import {
   Button,
   CHROME_MAX_FONT_SCALE,
@@ -42,12 +41,6 @@ import { useTabBarClearance } from "../src/ui/GlassTabBar";
 import { useReducedMotion, useReducedTransparency } from "../src/ui/motion";
 import { colors, fonts, modeColor, radius, space } from "../src/ui/theme";
 import { useRecognitionPlan } from "../src/useRecognitionPlan";
-
-/** Settings > Sonolect; react-native-web has no app settings to open. */
-function openAppSettings() {
-  if (typeof Linking.openSettings !== "function") return;
-  void Linking.openSettings().catch(() => undefined);
-}
 
 /** Fixed for the build (app.config.js); null hides the link. */
 const POLICY_URL = privacyPolicyUrl();

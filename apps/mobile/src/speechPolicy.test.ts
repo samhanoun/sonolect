@@ -25,6 +25,7 @@ import {
   planRecognition,
   restartsOnEnd,
   shouldRetryWithSystemService,
+  systemServiceAllowedWithoutAsking,
   systemServicePlan,
 } from "./speechPolicy";
 
@@ -671,5 +672,26 @@ describe("consent setting", () => {
       normalizeSettings({ allowSystemService: true }).allowSystemService,
       true,
     );
+  });
+});
+
+describe("systemServiceAllowedWithoutAsking", () => {
+  it("allows the service in Standard, and elsewhere only once allowed", () => {
+    const levels: PrivacyLevel[] = ["standard", "local_first", "ephemeral"];
+    const allowed = levels.map((privacyLevel) => [
+      systemServiceAllowedWithoutAsking({
+        privacyLevel,
+        allowSystemService: false,
+      }),
+      systemServiceAllowedWithoutAsking({
+        privacyLevel,
+        allowSystemService: true,
+      }),
+    ]);
+    assert.deepEqual(allowed, [
+      [true, true],
+      [false, true],
+      [false, true],
+    ]);
   });
 });

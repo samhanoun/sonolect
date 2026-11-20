@@ -354,6 +354,19 @@ const BLOCKED_NOTICES: Record<BlockedReason, NoticeKind> = {
   "needs-consent": "needsConsent",
 };
 
+/**
+ * Whether dictation may use the system speech service without asking:
+ * always with Standard privacy, otherwise once the user allowed it in
+ * Settings, as planRecognition does. The Android voice keyboard can't ask,
+ * so this is its whole rule.
+ */
+export function systemServiceAllowedWithoutAsking(settings: {
+  privacyLevel: PrivacyLevel;
+  allowSystemService: boolean;
+}): boolean {
+  return settings.privacyLevel === "standard" || settings.allowSystemService;
+}
+
 export function blockedNoticeKind(reason: BlockedReason): NoticeKind {
   return BLOCKED_NOTICES[reason];
 }

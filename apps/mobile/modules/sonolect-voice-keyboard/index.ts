@@ -80,18 +80,19 @@ export async function showVoiceKeyboardPicker(): Promise<boolean> {
 }
 
 /**
- * Mirror the app's privacy and language settings into the keyboard.
- * Only "standard" privacy lets the keyboard fall back to the system speech
- * service; otherwise it stays on the on-device recogniser.
+ * Mirror the app's privacy and language settings into the keyboard. The
+ * keyboard falls back to the system speech service only when
+ * `allowSystemService` is true (see systemServiceAllowedWithoutAsking);
+ * otherwise it stays on the on-device recognizer.
  */
 export function syncVoiceKeyboardPreferences(settings: {
-  privacyLevel: string;
+  allowSystemService: boolean;
   language: string;
 }): void {
   const mod = native();
   if (!mod) return;
   try {
-    mod.setPreferences(settings.privacyLevel === "standard", settings.language);
+    mod.setPreferences(settings.allowSystemService, settings.language);
   } catch {
     // Older build without the module: nothing to sync.
   }

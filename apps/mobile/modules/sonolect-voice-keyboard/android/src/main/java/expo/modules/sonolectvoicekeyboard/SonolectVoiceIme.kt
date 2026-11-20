@@ -27,7 +27,7 @@ import androidx.core.content.ContextCompat
 /**
  * Sonolect voice keyboard: an input method with one big mic. It types what
  * you say into whatever text field has focus, in any app. Speech recognition
- * runs on the device when Android has an on-device recogniser; the system
+ * runs on the device when Android has an on-device recognizer; the system
  * speech service is only used when the app's privacy setting allows it.
  */
 class SonolectVoiceIme : InputMethodService(), RecognitionListener {
@@ -160,7 +160,7 @@ class SonolectVoiceIme : InputMethodService(), RecognitionListener {
     val rec = createRecognizer(preferOnDevice)
     if (rec == null) {
       showMessage(
-        "No on-device speech recogniser. In Sonolect, set Privacy to Standard to use the system speech service.",
+        "No on-device speech recognizer. To use the system speech service here, allow it in Sonolect's privacy settings.",
         offerOpen = true,
       )
       return
@@ -264,7 +264,7 @@ class SonolectVoiceIme : InputMethodService(), RecognitionListener {
           "Open Sonolect once and allow the microphone."
         SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
           "The speech service is offline. Try again."
-        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "The recogniser is busy. Try again."
+        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "The recognizer is busy. Try again."
         SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED, SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ->
           "Download this language for offline speech in Android settings."
         else -> "Couldn't dictate (error $error). Tap to try again."

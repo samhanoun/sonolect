@@ -11,7 +11,7 @@ internal class VoiceKeyboardPrefs(context: Context) {
   private val prefs =
     context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
-  /** Standard privacy: the system speech service may be used when no on-device recogniser exists. */
+  /** Standard privacy, or the user allowed it in Settings: the system speech service may be used when no on-device recognizer exists. */
   var allowSystemService: Boolean
     get() = prefs.getBoolean(KEY_ALLOW_SYSTEM, false)
     set(value) = prefs.edit().putBoolean(KEY_ALLOW_SYSTEM, value).apply()
