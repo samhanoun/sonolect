@@ -151,7 +151,8 @@ pnpm --filter @sonolect/mobile exec expo prebuild
 pnpm --filter @sonolect/mobile exec expo run:android   # or run:ios on macOS
 ```
 
-Browser preview (uses the Web Speech API where the browser has it):
+Browser preview (uses the Web Speech API where the browser has it; Export
+downloads the file, since most desktop browsers have no share sheet):
 
 ```bash
 pnpm --filter @sonolect/mobile web
