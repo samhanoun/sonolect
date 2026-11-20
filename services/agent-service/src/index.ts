@@ -19,10 +19,27 @@ import {
   agentCommandExecutionRequestSchema,
   type AgentCommandExecutionInput,
 } from "@sonolect/validation";
+import {
+  BoundedMap,
+  ServiceHttpError,
+  getServiceUserId,
+  registerServiceSecurity,
+  resolveListenOptions,
+  type ServiceEnv,
+} from "@sonolect/service-kit";
 
 const serviceName = "sonolect-agent-service";
-const localUserId = "local-user";
 const localNow = new Date().toISOString();
+
+// In-memory stores are capped so a long-running instance cannot be filled up.
+const MAX_AGENTS = 2_000;
+const MAX_CUSTOM_AGENTS_PER_USER = 50;
+const MAX_COMMANDS = 10_000;
+const MAX_RATE_LIMIT_ENTRIES = 50_000;
+const MAX_LLM_INPUT_CHARS = 50_000;
+const LLM_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5";
 
 interface RateLimitEntry {
   count: number;
@@ -38,11 +55,12 @@ interface InMemoryStores {
 export interface CreateAppOptions {
   stores?: InMemoryStores;
   logger?: boolean;
+  env?: ServiceEnv;
 }
 
 const createStores = (): InMemoryStores => ({
-  rateLimits: new Map<string, RateLimitEntry>(),
-  agents: new Map<string, AgentDefinition>([
+  rateLimits: new BoundedMap<string, RateLimitEntry>(MAX_RATE_LIMIT_ENTRIES),
+  agents: new BoundedMap<string, AgentDefinition>(MAX_AGENTS, [
     [
       "dictation",
       {
@@ -66,17 +84,12 @@ const createStores = (): InMemoryStores => ({
       },
     ],
   ]),
-  commands: new Map<string, AgentCommandExecutionResult>(),
+  commands: new BoundedMap<string, AgentCommandExecutionResult>(MAX_COMMANDS),
 });
 
-const getRouteContext = (request: FastifyRequest): { userId: string } => {
-  const header = request.headers["x-user-id"];
-  return {
-    userId: Array.isArray(header)
-      ? (header[0] ?? localUserId)
-      : (header ?? localUserId),
-  };
-};
+const getRouteContext = (request: FastifyRequest): { userId: string } => ({
+  userId: getServiceUserId(request),
+});
 
 const parseBody = <T>(
   schema: { parse: (value: unknown) => T },
@@ -164,15 +177,16 @@ const executeCommand = (
     userId,
     command: input.command,
     type,
-    status: blockedReason ? "blocked" : dryRun ? "queued" : "completed",
+    // No executor integration exists yet, so nothing is ever reported as
+    // completed: a non-dry-run command stays queued with its plan.
+    status: blockedReason ? "blocked" : "queued",
     dryRun,
     createdAt: now,
-    completedAt: blockedReason || dryRun ? undefined : now,
     output: blockedReason
       ? undefined
       : dryRun
         ? "Dry run only; no external action was executed."
-        : `Executed placeholder command: ${input.command}`,
+        : "Planned only; no executor is connected, so no external action was executed.",
     plannedActions,
     ...optionalProps({ transcriptId: input.transcriptId, blockedReason }),
   } as AgentCommandExecutionResult;
@@ -182,10 +196,12 @@ export async function createApp(
   options: CreateAppOptions = {},
 ): Promise<FastifyInstance> {
   const stores = options.stores ?? createStores();
+  const env = options.env ?? process.env;
   const app = Fastify({ logger: options.logger ?? true });
 
   await app.register(helmet);
   await app.register(cors, { origin: false });
+  registerServiceSecurity(app, { serviceName, env });
 
   app.get("/health", async () => ({
     status: "ok",
@@ -217,6 +233,14 @@ export async function createApp(
           enabled: z.boolean().default(true),
         });
         const input = parseBody<z.infer<typeof schema>>(schema, request);
+        const ownedAgents = [...stores.agents.values()].filter(
+          (existing) => existing.userId === userId,
+        ).length;
+        if (ownedAgents >= MAX_CUSTOM_AGENTS_PER_USER)
+          return reply.status(409).send({
+            error: "agent_limit_reached",
+            message: `A user can define at most ${MAX_CUSTOM_AGENTS_PER_USER} agents`,
+          });
         const agent = {
           id: randomUUID(),
           userId,
@@ -273,6 +297,8 @@ export async function createApp(
     const now = Date.now();
     const entry = stores.rateLimits.get(userId);
     if (!entry || now >= entry.resetAt) {
+      // Re-insert so the entry counts as the newest one for eviction.
+      stores.rateLimits.delete(userId);
       stores.rateLimits.set(userId, { count: 1, resetAt: now + 60_000 });
       return true;
     }
@@ -314,55 +340,97 @@ export async function createApp(
   /*  LLM fetch helpers                                                 */
   /* ------------------------------------------------------------------ */
 
+  const upstreamError = (
+    provider: string,
+    detail: string,
+  ): ServiceHttpError => {
+    // Log the provider detail for operators; callers only get a generic error.
+    app.log.error({ provider, detail }, "language model request failed");
+    return new ServiceHttpError(
+      502,
+      "upstream_error",
+      "The language model provider request failed",
+    );
+  };
+
+  const postJson = async (
+    provider: string,
+    url: string,
+    headers: Record<string, string>,
+    body: unknown,
+  ): Promise<unknown> => {
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS),
+      });
+    } catch (error) {
+      throw upstreamError(
+        provider,
+        error instanceof Error ? error.name : "request failed",
+      );
+    }
+    if (!res.ok) throw upstreamError(provider, `HTTP ${res.status}`);
+    try {
+      return await res.json();
+    } catch {
+      throw upstreamError(provider, "invalid JSON response");
+    }
+  };
+
   const callOpenAI = async (
     systemPrompt: string,
     userPrompt: string,
   ): Promise<string> => {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
+    const data = (await postJson(
+      "openai",
+      "https://api.openai.com/v1/chat/completions",
+      { Authorization: `Bearer ${env.OPENAI_API_KEY ?? ""}` },
+      {
+        model: env.SONOLECT_OPENAI_MODEL?.trim() || DEFAULT_OPENAI_MODEL,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
         max_tokens: 2048,
-      }),
-    });
-    if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
-    const data = (await res.json()) as {
-      choices: { message: { content: string } }[];
-    };
-    return data.choices[0]?.message.content ?? "";
+      },
+    )) as { choices?: { message?: { content?: unknown } }[] };
+    const content = data.choices?.[0]?.message?.content;
+    if (typeof content !== "string" || content.trim() === "")
+      throw upstreamError("openai", "empty completion");
+    return content;
   };
 
   const callAnthropic = async (
     systemPrompt: string,
     userPrompt: string,
   ): Promise<string> => {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
+    const data = (await postJson(
+      "anthropic",
+      "https://api.anthropic.com/v1/messages",
+      {
+        "x-api-key": env.ANTHROPIC_API_KEY ?? "",
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+      {
+        model: env.SONOLECT_ANTHROPIC_MODEL?.trim() || DEFAULT_ANTHROPIC_MODEL,
         max_tokens: 2048,
         system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }],
-      }),
-    });
-    if (!res.ok) throw new Error(`Anthropic API error: ${res.status}`);
-    const data = (await res.json()) as {
-      content: { text: string }[];
-    };
-    return data.content[0]?.text ?? "";
+      },
+    )) as { content?: { type?: string; text?: unknown }[] };
+    const text = (data.content ?? [])
+      .filter(
+        (block) => block.type === "text" && typeof block.text === "string",
+      )
+      .map((block) => block.text as string)
+      .join("");
+    if (text.trim() === "")
+      throw upstreamError("anthropic", "empty completion");
+    return text;
   };
 
   const callLLM = async (
@@ -379,17 +447,15 @@ export async function createApp(
   const resolveProvider = (
     preferred?: "openai" | "anthropic",
   ): { provider: "openai" | "anthropic"; hasKey: boolean } => {
-    if (preferred === "anthropic" && process.env.ANTHROPIC_API_KEY) {
+    if (preferred === "anthropic" && env.ANTHROPIC_API_KEY) {
       return { provider: "anthropic", hasKey: true };
     }
-    if (preferred === "openai" && process.env.OPENAI_API_KEY) {
+    if (preferred === "openai" && env.OPENAI_API_KEY) {
       return { provider: "openai", hasKey: true };
     }
     if (!preferred) {
-      if (process.env.OPENAI_API_KEY)
-        return { provider: "openai", hasKey: true };
-      if (process.env.ANTHROPIC_API_KEY)
-        return { provider: "anthropic", hasKey: true };
+      if (env.OPENAI_API_KEY) return { provider: "openai", hasKey: true };
+      if (env.ANTHROPIC_API_KEY) return { provider: "anthropic", hasKey: true };
     }
     return { provider: preferred ?? "openai", hasKey: false };
   };
@@ -399,7 +465,7 @@ export async function createApp(
   /* ------------------------------------------------------------------ */
 
   const rewriteBodySchema = z.object({
-    text: z.string().min(1),
+    text: z.string().min(1).max(MAX_LLM_INPUT_CHARS),
     style: z.enum(["formal", "casual", "concise", "expand"]),
     provider: z.enum(["openai", "anthropic"]).optional(),
   });
@@ -450,7 +516,7 @@ export async function createApp(
   /* ------------------------------------------------------------------ */
 
   const summarizeBodySchema = z.object({
-    text: z.string().min(1),
+    text: z.string().min(1).max(MAX_LLM_INPUT_CHARS),
     style: z.enum(["brief", "detailed", "bullets", "action-items"]),
     provider: z.enum(["openai", "anthropic"]).optional(),
   });
@@ -503,6 +569,5 @@ const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isDirectRun) {
   const app = await createApp();
-  const port = Number(process.env.PORT ?? 8080);
-  await app.listen({ host: "0.0.0.0", port });
+  await app.listen(resolveListenOptions());
 }

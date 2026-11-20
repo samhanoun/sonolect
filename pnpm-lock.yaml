@@ -233,6 +233,21 @@ importers:
         specifier: workspace:*
         version: link:../validation
 
+  packages/service-kit:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.19.17
+      fastify:
+        specifier: ^5.12.8
+        version: 5.12.8
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
   packages/types: {}
 
   packages/ui:
@@ -271,6 +286,9 @@ importers:
       '@sonolect/prompts':
         specifier: workspace:*
         version: link:../../packages/prompts
+      '@sonolect/service-kit':
+        specifier: workspace:*
+        version: link:../../packages/service-kit
       '@sonolect/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -284,6 +302,9 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
     devDependencies:
+      '@sonolect/service-build':
+        specifier: workspace:*
+        version: link:../../tooling/service-build
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -324,6 +345,9 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
     devDependencies:
+      '@sonolect/service-build':
+        specifier: workspace:*
+        version: link:../../tooling/service-build
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -345,6 +369,9 @@ importers:
       '@sonolect/prompts':
         specifier: workspace:*
         version: link:../../packages/prompts
+      '@sonolect/service-kit':
+        specifier: workspace:*
+        version: link:../../packages/service-kit
       '@sonolect/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -358,6 +385,9 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
     devDependencies:
+      '@sonolect/service-build':
+        specifier: workspace:*
+        version: link:../../tooling/service-build
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -376,6 +406,9 @@ importers:
       '@sonolect/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@sonolect/service-kit':
+        specifier: workspace:*
+        version: link:../../packages/service-kit
       '@sonolect/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -389,6 +422,9 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
     devDependencies:
+      '@sonolect/service-build':
+        specifier: workspace:*
+        version: link:../../tooling/service-build
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -407,6 +443,9 @@ importers:
       '@sonolect/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@sonolect/service-kit':
+        specifier: workspace:*
+        version: link:../../packages/service-kit
       '@sonolect/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -420,6 +459,9 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
     devDependencies:
+      '@sonolect/service-build':
+        specifier: workspace:*
+        version: link:../../tooling/service-build
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -438,6 +480,9 @@ importers:
       '@sonolect/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@sonolect/service-kit':
+        specifier: workspace:*
+        version: link:../../packages/service-kit
       '@sonolect/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -451,6 +496,9 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
     devDependencies:
+      '@sonolect/service-build':
+        specifier: workspace:*
+        version: link:../../tooling/service-build
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -463,6 +511,12 @@ importers:
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
+
+  tooling/service-build:
+    dependencies:
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
 
 packages:
 

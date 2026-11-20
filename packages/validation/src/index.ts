@@ -46,20 +46,54 @@ export const audioUploadSourceSchema = z.enum([
   "api",
 ]);
 
+// Shared limits. Every free-text field is capped so a single request cannot
+// make a service hold or forward an unbounded payload.
+const MAX_TRANSCRIPT_TEXT_LENGTH = 2_000_000;
+const MAX_PROMPT_TEXT_LENGTH = 50_000;
+const MAX_ID_LENGTH = 128;
+
+/**
+ * A BCP-47 style language tag such as "en", "fr-CA" or "zh-Hant-TW" (and the
+ * "auto" sentinel). It always starts with a letter, so it can never be read as
+ * a command-line option when a worker passes it to a local speech engine.
+ */
+export const languageTagSchema = z
+  .string()
+  .min(2)
+  .max(35)
+  .regex(
+    /^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/,
+    "language must be a language tag such as en, fr-CA or zh-Hant",
+  );
+
+export const audioMimeTypeSchema = z
+  .string()
+  .max(100)
+  .regex(/^audio\/[a-z0-9.+-]+$/i, "mimeType must be an audio MIME type");
+
+/** IDs for users, devices and records: no whitespace, slashes or control characters. */
+export const userIdSchema = z
+  .string()
+  .regex(
+    /^[A-Za-z0-9._:@-]{1,128}$/,
+    "userId must be 1 to 128 letters, digits or . _ : @ -",
+  );
+const recordIdSchema = z.string().min(1).max(MAX_ID_LENGTH);
+
 // Field rules shared by create and update. Defaults are applied only on create:
 // zod 4 applies defaults inside optional/partial fields, so an update schema
 // built with createTranscriptSchema.partial() would reset unspecified fields.
 const transcriptFields = {
   title: z.string().min(1).max(200),
-  rawText: z.string(),
-  finalText: z.string(),
-  language: z.string().min(2),
+  rawText: z.string().max(MAX_TRANSCRIPT_TEXT_LENGTH),
+  finalText: z.string().max(MAX_TRANSCRIPT_TEXT_LENGTH),
+  language: languageTagSchema,
   mode: sonolectModeSchema,
-  workspaceId: z.string().min(1),
-  agentUsed: z.string().min(1),
+  workspaceId: recordIdSchema,
+  agentUsed: z.string().min(1).max(120),
   privacyMode: z.boolean(),
   durationMs: z.number().int().nonnegative(),
-  tags: z.array(z.string().min(1).max(64)),
+  tags: z.array(z.string().min(1).max(64)).max(50),
   status: transcriptStatusSchema,
 };
 
@@ -86,24 +120,24 @@ export const updateTranscriptSchema = z
   );
 
 export const listTranscriptsQuerySchema = z.object({
-  cursor: z.string().optional(),
+  cursor: z.string().max(512).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(25),
   includeDeleted: z.coerce.boolean().default(false),
 });
 
 export const commandExecutionRequestSchema = z.object({
-  transcriptId: z.string().min(1).optional(),
+  transcriptId: recordIdSchema.optional(),
   command: z.string().min(1).max(200),
-  selectedText: z.string().optional(),
-  context: z.string().optional(),
+  selectedText: z.string().max(MAX_PROMPT_TEXT_LENGTH).optional(),
+  context: z.string().max(MAX_PROMPT_TEXT_LENGTH).optional(),
   dryRun: z.boolean().default(false),
 });
 
 export const audioSourceSchema = z
   .object({
-    uri: z.string().min(1).optional(),
+    uri: z.string().min(1).max(2_048).optional(),
     base64: z.string().min(1).optional(),
-    mimeType: z.string().min(1).default("audio/webm"),
+    mimeType: audioMimeTypeSchema.default("audio/webm"),
     sampleRateHertz: z.number().int().positive().optional(),
     channels: z.number().int().positive().max(8).optional(),
     durationMs: z.number().int().nonnegative().optional(),
@@ -115,9 +149,7 @@ export const audioSourceSchema = z
 
 export const createAudioUploadJobSchema = z.object({
   fileName: z.string().min(1).max(255).optional(),
-  mimeType: z
-    .string()
-    .regex(/^audio\/[a-z0-9.+-]+$/i, "mimeType must be an audio MIME type"),
+  mimeType: audioMimeTypeSchema,
   sizeBytes: z.number().int().positive(),
   durationMs: z.number().int().positive(),
   source: audioUploadSourceSchema.default("desktop"),
@@ -126,21 +158,38 @@ export const createAudioUploadJobSchema = z.object({
 
 export const transcriptionJobRequestSchema = z.object({
   audio: audioSourceSchema,
-  language: z.string().min(2).default("en-US"),
+  language: languageTagSchema.default("en-US"),
   provider: sttProviderSchema.optional(),
-  model: z.string().min(1).optional(),
+  model: z
+    .string()
+    .regex(/^[A-Za-z0-9._-]{1,120}$/, "model must be a model identifier")
+    .optional(),
   enableAutomaticPunctuation: z.boolean().default(true),
   enableSpeakerDiarization: z.boolean().default(false),
-  callbackUrl: z.string().url().optional(),
-  metadata: z.record(z.string(), z.string()).default({}),
+  callbackUrl: z
+    .string()
+    .url()
+    .max(2_048)
+    .refine(
+      (value) => value.startsWith("https://"),
+      "callbackUrl must use https",
+    )
+    .optional(),
+  metadata: z
+    .record(z.string().max(64), z.string().max(1_000))
+    .refine(
+      (value) => Object.keys(value).length <= 50,
+      "metadata accepts at most 50 entries",
+    )
+    .default({}),
 });
 
 export const refinementRequestSchema = z
   .object({
     action: refinementActionSchema,
     text: z.string().min(1).max(50_000),
-    language: z.string().min(2).optional(),
-    targetLanguage: z.string().min(2).optional(),
+    language: languageTagSchema.optional(),
+    targetLanguage: languageTagSchema.optional(),
     tone: z
       .enum(["neutral", "professional", "friendly", "concise"])
       .default("neutral"),
@@ -152,12 +201,18 @@ export const refinementRequestSchema = z
   );
 
 export const agentCommandExecutionRequestSchema = z.object({
-  transcriptId: z.string().min(1).optional(),
+  transcriptId: recordIdSchema.optional(),
   command: z.string().min(1).max(500),
   type: agentCommandTypeSchema.default("custom"),
-  selectedText: z.string().optional(),
-  context: z.string().optional(),
-  arguments: z.record(z.string(), z.unknown()).default({}),
+  selectedText: z.string().max(MAX_PROMPT_TEXT_LENGTH).optional(),
+  context: z.string().max(MAX_PROMPT_TEXT_LENGTH).optional(),
+  arguments: z
+    .record(z.string().max(64), z.unknown())
+    .refine(
+      (value) => Object.keys(value).length <= 50,
+      "arguments accepts at most 50 entries",
+    )
+    .default({}),
   dryRun: z.boolean().default(true),
 });
 
@@ -183,34 +238,41 @@ export const usageSourceSchema = z.enum([
 ]);
 
 export const trackUsageSchema = z.object({
-  userId: z.string().min(1),
+  userId: userIdSchema,
   metric: usageMetricSchema,
-  quantity: z.number().positive(),
+  quantity: z.number().positive().max(1_000_000_000),
   source: usageSourceSchema,
   occurredAt: z.string().datetime().optional(),
   metadata: z
-    .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+    .record(
+      z.string().max(64),
+      z.union([z.string().max(1_000), z.number(), z.boolean()]),
+    )
+    .refine(
+      (value) => Object.keys(value).length <= 50,
+      "metadata accepts at most 50 entries",
+    )
     .optional(),
 });
 
 export const syncPullSchema = z.object({
-  userId: z.string().min(1),
+  userId: userIdSchema,
   since: z.string().datetime().optional(),
   limit: z.number().int().min(1).max(500).default(100),
 });
 
 export const syncPushChangeSchema = z.object({
-  clientChangeId: z.string().min(1),
+  clientChangeId: recordIdSchema,
   entity: z.enum(["user", "transcript", "command", "usage"]),
-  id: z.string().min(1),
+  id: recordIdSchema,
   updatedAt: z.string().datetime(),
   deleted: z.boolean().optional(),
   data: z.unknown().optional(),
 });
 
 export const syncPushSchema = z.object({
-  userId: z.string().min(1),
-  deviceId: z.string().min(1),
+  userId: userIdSchema,
+  deviceId: recordIdSchema,
   changes: z.array(syncPushChangeSchema).max(500),
 });
 
