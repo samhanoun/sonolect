@@ -579,3 +579,199 @@ body,
     display: none;
   }
 }
+
+/* Segment editor */
+.studio-editor .studio-section-heading h3 {
+  margin-right: auto;
+}
+.studio-view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--n-line-strong);
+  border-radius: 8px;
+  padding: 2px;
+  background: var(--n-bg);
+}
+.studio-view-toggle button {
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 11px;
+  font-size: 11px;
+  color: var(--n-text-3);
+}
+.studio-view-toggle button:hover {
+  color: var(--n-text);
+}
+.studio-view-toggle button.active {
+  background: var(--n-raised);
+  color: var(--n-text);
+}
+.studio-segments,
+.studio-segments-empty {
+  min-height: 320px;
+}
+.studio-segments-empty {
+  padding: 12px 0;
+}
+.studio-segments-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.studio-segments-toolbar .studio-button {
+  padding: 7px 11px;
+  font-size: 12px;
+}
+.studio-segments-label {
+  display: flex;
+  flex: 1 1 220px;
+  gap: 8px;
+  min-width: 0;
+}
+.studio-shell .studio-segments-label input {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+.studio-segments-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 6px;
+  font-size: 11px;
+  min-height: 18px;
+}
+.studio-segment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 520px;
+  overflow-y: auto;
+}
+.studio-segment {
+  --speaker: transparent;
+  display: grid;
+  grid-template-columns: auto 116px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 8px 8px 8px 10px;
+  border-left: 3px solid var(--speaker);
+  border-bottom: 1px solid var(--n-line);
+}
+.studio-segment.selected {
+  background: var(--n-accent-soft);
+}
+.studio-segment.active {
+  background: var(--n-raised);
+}
+.studio-segment.speaker-0 {
+  --speaker: #d4f27a;
+}
+.studio-segment.speaker-1 {
+  --speaker: #7ac8f2;
+}
+.studio-segment.speaker-2 {
+  --speaker: #f2a67a;
+}
+.studio-segment.speaker-3 {
+  --speaker: #c79bf2;
+}
+.studio-segment.speaker-4 {
+  --speaker: #f27aa5;
+}
+.studio-segment.speaker-5 {
+  --speaker: #7af2c4;
+}
+.studio-shell .studio-segment input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 7px 0 0;
+  accent-color: var(--n-accent);
+}
+.studio-segment-meta {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.studio-segment-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  color: var(--n-text-3);
+  font: 400 11px var(--n-mono);
+  font-variant-numeric: tabular-nums;
+}
+button.studio-segment-time {
+  color: var(--n-accent);
+  cursor: pointer;
+}
+button.studio-segment-time:hover {
+  text-decoration: underline;
+}
+.studio-shell input.studio-segment-speaker {
+  width: 100%;
+  margin: 0 0 0 -6px;
+  padding: 3px 6px;
+  font-size: 11px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--n-text-2);
+}
+.studio-shell [class*="speaker-"] > div > input.studio-segment-speaker {
+  color: var(--speaker);
+  font-weight: 500;
+}
+.studio-shell input.studio-segment-speaker:hover,
+.studio-shell input.studio-segment-speaker:focus {
+  border-color: var(--n-line-strong);
+  background: var(--n-bg);
+}
+.studio-editor textarea.studio-segment-text {
+  height: auto;
+  min-height: 0;
+  field-sizing: content;
+  resize: none;
+  padding: 3px 0 !important;
+  font-size: 14px !important;
+  line-height: 1.6 !important;
+}
+.studio-segment-move {
+  display: flex;
+  gap: 4px;
+  opacity: 0.55;
+}
+.studio-segment:hover .studio-segment-move,
+.studio-segment:focus-within .studio-segment-move {
+  opacity: 1;
+}
+.studio-segment-move .studio-icon-button {
+  padding: 5px;
+}
+.studio-playhead {
+  margin-left: 6px;
+  color: var(--n-text-3);
+  font: 400 11px var(--n-mono);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 760px) {
+  .studio-segment {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .studio-segment-meta {
+    grid-column: 2;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+  }
+  .studio-segment-text {
+    grid-column: 2;
+    grid-row: 2;
+  }
+}

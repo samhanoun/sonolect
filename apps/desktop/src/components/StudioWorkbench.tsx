@@ -25,6 +25,12 @@ import {
   transcribeUsingProvider,
 } from "../providerSettings";
 import { StudioModelSelector } from "./StudioModels";
+import { SegmentEditor, useCapturePlayer } from "./StudioSegments";
+import {
+  formatTimestamp,
+  singleCaptureId,
+  type SavedCaptureSegment,
+} from "../segmentEditor";
 import { submitCapturedAudioCloud } from "../voiceApi";
 import { prepareLocalAudio } from "../localAudio";
 import { STT_LANGUAGES } from "../sttLanguages";
@@ -119,6 +125,8 @@ export type SavedCapture = {
   transcript: string | null;
   error: string | null;
   language: string | null;
+  /** Timed segments; recordings saved by older versions have none. */
+  segments?: SavedCaptureSegment[];
 };
 export function useSavedCaptures() {
   const recordingState = useDesktopStore((state) => state.recordingState);
@@ -342,7 +350,14 @@ export function StudioTranscribe({
       );
       if (result.status !== "completed")
         throw new Error(result.message || t("studio.transcribe.notReady"));
-      state.setTranscript(result.transcript || "");
+      if (result.captureId)
+        state.openCapture({
+          id: result.captureId,
+          durationMs: (wav.length - 44) / 32,
+          transcript: result.transcript || "",
+          segments: result.segments ?? [],
+        });
+      else state.setTranscript(result.transcript || "");
       setMessage(
         result.transcript
           ? t("studio.transcribe.saved")
@@ -376,6 +391,36 @@ export function StudioTranscribe({
   };
   const [exportFormat, setExportFormat] =
     useState<TranscriptExportFormat>("txt");
+  const [view, setView] = useState<"text" | "segments">("text");
+  const player = useCapturePlayer();
+  // An edited transcript can go back to the one recording it came from.
+  const libraryCaptureId = isTauriRuntime()
+    ? singleCaptureId(state.transcriptSegments)
+    : undefined;
+  const saveToLibrary = async () => {
+    if (!libraryCaptureId) return;
+    setBusy(true);
+    try {
+      await nativeProviderCall("update_local_capture", {
+        id: libraryCaptureId,
+        transcript: state.transcript,
+        segments: state.transcriptSegments
+          .filter((segment) => segment.text.trim())
+          .map((segment) => ({
+            startMs: Math.round(segment.startMs),
+            endMs: Math.round(Math.max(segment.startMs, segment.endMs)),
+            text: segment.text.trim(),
+            ...(segment.speaker ? { speaker: segment.speaker } : {}),
+          })),
+      });
+      setMessage(t("studio.segments.saved"));
+      await onSaved();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
   const download = () => {
     const file = exportTranscript({
       format: exportFormat,
@@ -420,18 +465,40 @@ export function StudioTranscribe({
         <section className="studio-card studio-editor">
           <div className="studio-section-heading">
             <h3>{t("studio.transcribe.yourTranscript")}</h3>
+            <div
+              className="studio-view-toggle"
+              role="group"
+              aria-label={t("studio.segments.viewLabel")}
+            >
+              {(["text", "segments"] as const).map((value) => (
+                <button
+                  key={value}
+                  aria-pressed={view === value}
+                  className={view === value ? "active" : ""}
+                  onClick={() => setView(value)}
+                >
+                  {value === "text"
+                    ? t("studio.segments.viewText")
+                    : t("studio.segments.viewSegments")}
+                </button>
+              ))}
+            </div>
             <span className="studio-tag">
               {state.privacyLevel === "local"
                 ? t("studio.mode.local")
                 : t("studio.mode.cloud")}
             </span>
           </div>
-          <textarea
-            aria-label={t("studio.transcribe.editorLabel")}
-            placeholder={t("studio.transcribe.placeholder")}
-            value={state.transcript}
-            onChange={(event) => state.setTranscript(event.target.value)}
-          />
+          {view === "text" ? (
+            <textarea
+              aria-label={t("studio.transcribe.editorLabel")}
+              placeholder={t("studio.transcribe.placeholder")}
+              value={state.transcript}
+              onChange={(event) => state.setTranscript(event.target.value)}
+            />
+          ) : (
+            <SegmentEditor player={player} />
+          )}
           <div className="studio-editor-footer">
             <span>
               {t.count("studio.transcribe.words", countWords(state.transcript))}
@@ -500,9 +567,23 @@ export function StudioTranscribe({
             >
               <Download size={17} />
             </button>
+            {libraryCaptureId && (
+              <button
+                className="studio-button secondary"
+                disabled={busy || !state.transcript.trim()}
+                onClick={() => void saveToLibrary()}
+              >
+                <Check size={16} />
+                {t("studio.segments.saveToLibrary")}
+              </button>
+            )}
           </div>
-          {(message || state.voiceError) && (
-            <StatusNotice text={message || t.message(state.voiceError || "")} />
+          {(message || player.error || state.voiceError) && (
+            <StatusNotice
+              text={
+                message || player.error || t.message(state.voiceError || "")
+              }
+            />
           )}
         </section>
         <aside className="studio-editor-tools">
@@ -784,6 +865,7 @@ export function StudioLibrary({
     [message, setMessage] = useState("");
   const state = useDesktopStore();
   const t = useT();
+  const player = useCapturePlayer();
   const retry = async (id: string) => {
     setBusy(id);
     try {
@@ -838,9 +920,9 @@ export function StudioLibrary({
         value={query}
         onChange={(event) => setQuery(event.target.value)}
       />
-      {(message || error) && (
+      {(message || player.error || error) && (
         <p className="studio-notice" role="status">
-          {message || error}
+          {message || player.error || error}
         </p>
       )}
       {!visible.length ? (
@@ -889,9 +971,38 @@ export function StudioLibrary({
               <div className="studio-card-actions">
                 <button
                   className="studio-link"
+                  onClick={() =>
+                    player.captureId === item.id && player.playing
+                      ? player.pause()
+                      : void player.play(
+                          item.id,
+                          // Carry on where this recording was paused.
+                          player.captureId === item.id &&
+                            player.positionMs < item.durationMs - 250
+                            ? player.positionMs
+                            : 0,
+                        )
+                  }
+                >
+                  {player.captureId === item.id && player.playing ? (
+                    <Pause size={14} />
+                  ) : (
+                    <Play size={14} />
+                  )}
+                  {player.captureId === item.id && player.playing
+                    ? t("studio.library.pause")
+                    : t("studio.library.listen")}
+                  {player.captureId === item.id && (
+                    <span className="studio-playhead">
+                      {formatTimestamp(player.positionMs)}
+                    </span>
+                  )}
+                </button>
+                <button
+                  className="studio-link"
                   disabled={!item.transcript}
                   onClick={() => {
-                    state.setTranscript(item.transcript || "");
+                    state.openCapture(item);
                     state.setActiveView("transcribe");
                   }}
                 >

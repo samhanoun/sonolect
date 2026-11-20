@@ -24,6 +24,8 @@ export type DesktopWhisperResult = {
   text: string;
   segments: TranscriptSegment[];
   language?: string;
+  /** The saved recording behind this transcript, for playback in the editor. */
+  captureId?: string;
 };
 
 export function createDesktopWhisperRequest(
@@ -88,11 +90,13 @@ export async function transcribeWithDesktopWhisper(
     text: string;
     segments?: DesktopWhisperSegmentPayload[];
     language?: string;
+    captureId?: string;
   }>("transcribe_audio", request.body, { headers: request.headers });
 
   return {
     text: result.text.trim(),
     segments: normalizeWhisperSegments(result.segments ?? []),
     ...(result.language ? { language: result.language } : {}),
+    ...(result.captureId ? { captureId: result.captureId } : {}),
   };
 }

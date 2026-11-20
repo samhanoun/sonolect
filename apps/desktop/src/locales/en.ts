@@ -674,6 +674,42 @@ export const en = {
     "The model or voice is unavailable, or does not support these options. Refresh the catalog and check the selection.",
   "native.requestFailed":
     "The provider request failed. Check the connection and try again.",
+  "studio.segments.viewLabel": "Editor view",
+  "studio.segments.viewText": "Text",
+  "studio.segments.viewSegments": "Segments",
+  "studio.segments.listLabel": "Transcript segments",
+  "studio.segments.empty": "Record or type something to see it as segments.",
+  "studio.segments.hint": "Tick segments to merge, split or label them.",
+  "studio.segments.hintPlay":
+    "Tick segments to merge, split or label them. Click a time to listen from there.",
+  "studio.segments.merge": "Merge",
+  "studio.segments.split": "Split",
+  "studio.segments.splitTitle":
+    "Splits where the cursor is, or in the middle. Ctrl + Enter also splits while you type.",
+  "studio.segments.selected.one": "{count} segment selected",
+  "studio.segments.selected.other": "{count} segments selected",
+  "studio.segments.clearSelection": "Clear selection",
+  "studio.segments.speakerForSelection": "Speaker for the selection",
+  "studio.segments.applySpeaker": "Apply",
+  "studio.segments.speakerPlaceholder": "Speaker",
+  "studio.segments.select": "Select segment {number}",
+  "studio.segments.speakerOf": "Speaker of segment {number}",
+  "studio.segments.textOf": "Text of segment {number}",
+  "studio.segments.moveUp": "Move segment {number} up",
+  "studio.segments.moveDown": "Move segment {number} down",
+  "studio.segments.playFrom": "Play from {time}",
+  "studio.segments.pauseAt": "Pause at {time}",
+  "studio.segments.approx": "Estimated time",
+  "studio.segments.saveToLibrary": "Save to library",
+  "studio.segments.saved": "Saved to your library.",
+  "studio.library.listen": "Listen",
+  "studio.library.pause": "Pause",
+  "native.audioGone":
+    "The audio of this recording is no longer on this device.",
+  "native.recordingGone": "This recording is no longer in your library.",
+  "native.editTooLarge": "The edited transcript is too large to save.",
+  "native.segmentOrder": "A segment ends before it starts.",
+  "native.speakerTooLong": "Speaker names can have up to 80 characters.",
 } as const;
 
 export type LocaleKeys = keyof typeof en;

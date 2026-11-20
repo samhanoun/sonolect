@@ -26,10 +26,14 @@ import {
 } from "../persistence";
 import {
   assignSpeakerLabel,
-  mergeTranscriptSegments,
+  mergeSegmentRun,
+  moveTranscriptSegment,
+  resyncSegments,
+  segmentsFromCapture,
   segmentsToText,
   splitTranscriptSegment,
   textToSegments,
+  type SavedCaptureSegment,
   type TranscriptSegment,
 } from "../segmentEditor";
 import {
@@ -150,6 +154,19 @@ export type DesktopState = {
   updateSegmentSpeaker: (segmentId: string, speaker: string) => void;
   mergeSelectedSegments: () => void;
   splitSelectedSegment: () => void;
+  /** Splits a segment at `splitIndex`, or at a readable midpoint. */
+  splitSegment: (segmentId: string, splitIndex?: number) => void;
+  moveSegment: (segmentId: string, direction: "up" | "down") => void;
+  /** Labels every selected segment with one speaker; empty clears the label. */
+  setSpeakerForSelection: (speaker: string) => void;
+  clearSegmentSelection: () => void;
+  /** Opens one saved recording in the editor, with its timings and audio. */
+  openCapture: (capture: {
+    id: string;
+    durationMs: number;
+    transcript: string | null;
+    segments?: SavedCaptureSegment[] | null;
+  }) => void;
   addToast: (message: string) => void;
   transformTranscript: () => void;
 };
@@ -191,10 +208,19 @@ function splitAtReadableMidpoint(text: string) {
   return midpoint;
 }
 
-function syncTranscriptText(transcript: string) {
+/**
+ * The segments for a transcript edited as text. With `previous`, timings,
+ * speakers and audio links survive for every paragraph that did not change.
+ */
+function syncTranscriptText(
+  transcript: string,
+  previous?: TranscriptSegment[],
+) {
   return {
     transcript,
-    transcriptSegments: textToSegments(transcript),
+    transcriptSegments: previous
+      ? resyncSegments(previous, transcript)
+      : textToSegments(transcript),
     selectedSegmentIds: [],
   };
 }
@@ -528,11 +554,21 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
                 voiceCapture: capture,
                 voiceError: api.status === "offline" ? api.message : undefined,
               };
-              if (api.segments?.length) {
-                const captureSegments = api.segments.map((segment, index) => ({
-                  ...segment,
-                  id: `capture-${completedAt}-${index + 1}-${segment.id}`,
-                }));
+              const savedSegments = api.captureId
+                ? segmentsFromCapture({
+                    id: api.captureId,
+                    durationMs: metadata.durationMs,
+                    transcript: api.transcript ?? "",
+                    segments: api.segments ?? [],
+                  })
+                : [];
+              if (savedSegments.length || api.segments?.length) {
+                const captureSegments = savedSegments.length
+                  ? savedSegments
+                  : (api.segments ?? []).map((segment, index) => ({
+                      ...segment,
+                      id: `capture-${completedAt}-${index + 1}-${segment.id}`,
+                    }));
                 const next = syncSegments(
                   [...state.transcriptSegments, ...captureSegments],
                   [],
@@ -548,6 +584,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
               }
               const next = syncTranscriptText(
                 `${state.transcript}${api.transcript ? `\n\n${api.transcript}` : ""}`,
+                state.transcriptSegments,
               );
               return {
                 ...nextBaseState,
@@ -731,7 +768,10 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
   },
   setTranscript: (value) =>
     set((state) => ({
-      ...withUndoSnapshot(state, syncTranscriptText(value)),
+      ...withUndoSnapshot(
+        state,
+        syncTranscriptText(value, state.transcriptSegments),
+      ),
       polishedPreview: polishDictation(value, {
         dictionary: state.dictionaryEntries,
         snippets: state.snippets,
@@ -741,7 +781,10 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     const { polishedPreview } = get();
     if (!polishedPreview.trim()) return;
     set((state) => {
-      const next = syncTranscriptText(polishedPreview);
+      const next = syncTranscriptText(
+        polishedPreview,
+        state.transcriptSegments,
+      );
       return {
         ...withUndoSnapshot(state, next),
         polishedPreview: polishedForState({
@@ -923,12 +966,8 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     }),
   mergeSelectedSegments: () => {
     const { transcriptSegments, selectedSegmentIds } = get();
-    if (selectedSegmentIds.length !== 2) return;
-    const merged = mergeTranscriptSegments(
-      transcriptSegments,
-      selectedSegmentIds[0]!,
-      selectedSegmentIds[1]!,
-    );
+    const merged = mergeSegmentRun(transcriptSegments, selectedSegmentIds);
+    if (merged === transcriptSegments) return;
     set((state) => {
       const next = syncSegments(merged, []);
       return {
@@ -941,17 +980,23 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     });
   },
   splitSelectedSegment: () => {
-    const { transcriptSegments, selectedSegmentIds } = get();
-    if (selectedSegmentIds.length !== 1) return;
-    const segment = transcriptSegments.find(
-      (item) => item.id === selectedSegmentIds[0],
-    );
+    const { selectedSegmentIds, splitSegment } = get();
+    if (selectedSegmentIds.length === 1) splitSegment(selectedSegmentIds[0]!);
+  },
+  splitSegment: (segmentId, splitIndex) => {
+    const { transcriptSegments } = get();
+    const segment = transcriptSegments.find((item) => item.id === segmentId);
     if (!segment) return;
+    const usable =
+      splitIndex !== undefined &&
+      segment.text.slice(0, splitIndex).trim() &&
+      segment.text.slice(splitIndex).trim();
     const split = splitTranscriptSegment(
       transcriptSegments,
       segment.id,
-      splitAtReadableMidpoint(segment.text),
+      usable ? splitIndex : splitAtReadableMidpoint(segment.text),
     );
+    if (split === transcriptSegments) return;
     set((state) => {
       const next = syncSegments(split, []);
       return {
@@ -963,6 +1008,50 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       };
     });
   },
+  moveSegment: (segmentId, direction) => {
+    const moved = moveTranscriptSegment(
+      get().transcriptSegments,
+      segmentId,
+      direction,
+    );
+    if (moved === get().transcriptSegments) return;
+    set((state) => {
+      const next = syncSegments(moved, state.selectedSegmentIds);
+      return {
+        ...withUndoSnapshot(state, next),
+        polishedPreview: polishedForState({
+          ...state,
+          transcript: next.transcript,
+        }),
+      };
+    });
+  },
+  setSpeakerForSelection: (speaker) =>
+    set((state) => {
+      if (!state.selectedSegmentIds.length) return state;
+      const next = syncSegments(
+        state.transcriptSegments.map((segment) =>
+          state.selectedSegmentIds.includes(segment.id)
+            ? assignSpeakerLabel(segment, speaker)
+            : segment,
+        ),
+        state.selectedSegmentIds,
+      );
+      return withUndoSnapshot(state, next);
+    }),
+  clearSegmentSelection: () => set({ selectedSegmentIds: [] }),
+  openCapture: (capture) =>
+    set((state) => {
+      const next = syncSegments(segmentsFromCapture(capture), []);
+      return {
+        ...withUndoSnapshot(state, next),
+        activeSessionId: null,
+        polishedPreview: polishedForState({
+          ...state,
+          transcript: next.transcript,
+        }),
+      };
+    }),
   addToast: (message) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     set((state) => ({ toasts: [...state.toasts, { id, message }] }));
@@ -989,7 +1078,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     const title = `# ${firstWords}${firstWords.length < cleaned.length ? "…" : ""}`;
     const transformed = `${title}\n\n${paragraphs.join("\n\n")}`;
     set((state) => {
-      const next = syncTranscriptText(transformed);
+      const next = syncTranscriptText(transformed, state.transcriptSegments);
       return {
         ...withUndoSnapshot(state, next),
         polishedPreview: polishedForState({

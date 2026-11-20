@@ -708,4 +708,45 @@ export const fr: Record<LocaleKeys, string> = {
     "Le modèle ou la voix est indisponible, ou ne prend pas en charge ces options. Actualisez le catalogue et vérifiez la sélection.",
   "native.requestFailed":
     "La requête au fournisseur a échoué. Vérifiez la connexion et réessayez.",
+  "studio.segments.viewLabel": "Vue de l'éditeur",
+  "studio.segments.viewText": "Texte",
+  "studio.segments.viewSegments": "Segments",
+  "studio.segments.listLabel": "Segments de la transcription",
+  "studio.segments.empty":
+    "Enregistrez ou saisissez du texte pour le voir en segments.",
+  "studio.segments.hint":
+    "Cochez des segments pour les fusionner, les scinder ou leur attribuer un intervenant.",
+  "studio.segments.hintPlay":
+    "Cochez des segments pour les fusionner, les scinder ou leur attribuer un intervenant. Cliquez sur un horodatage pour écouter à partir de là.",
+  "studio.segments.merge": "Fusionner",
+  "studio.segments.split": "Scinder",
+  "studio.segments.splitTitle":
+    "Scinde à l'emplacement du curseur, ou au milieu. Ctrl + Entrée scinde aussi pendant la saisie.",
+  "studio.segments.selected.one": "{count} segment sélectionné",
+  "studio.segments.selected.other": "{count} segments sélectionnés",
+  "studio.segments.clearSelection": "Tout désélectionner",
+  "studio.segments.speakerForSelection": "Intervenant de la sélection",
+  "studio.segments.applySpeaker": "Appliquer",
+  "studio.segments.speakerPlaceholder": "Intervenant",
+  "studio.segments.select": "Sélectionner le segment {number}",
+  "studio.segments.speakerOf": "Intervenant du segment {number}",
+  "studio.segments.textOf": "Texte du segment {number}",
+  "studio.segments.moveUp": "Monter le segment {number}",
+  "studio.segments.moveDown": "Descendre le segment {number}",
+  "studio.segments.playFrom": "Écouter à partir de {time}",
+  "studio.segments.pauseAt": "Mettre en pause à {time}",
+  "studio.segments.approx": "Horodatage estimé",
+  "studio.segments.saveToLibrary": "Enregistrer dans la bibliothèque",
+  "studio.segments.saved": "Enregistré dans votre bibliothèque.",
+  "studio.library.listen": "Écouter",
+  "studio.library.pause": "Pause",
+  "native.audioGone":
+    "L'audio de cet enregistrement n'est plus sur cet appareil.",
+  "native.recordingGone":
+    "Cet enregistrement n'est plus dans votre bibliothèque.",
+  "native.editTooLarge":
+    "La transcription modifiée est trop volumineuse pour être enregistrée.",
+  "native.segmentOrder": "Un segment se termine avant de commencer.",
+  "native.speakerTooLong":
+    "Les noms d'intervenants peuvent contenir jusqu'à 80 caractères.",
 };

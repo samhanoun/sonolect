@@ -19,7 +19,7 @@ describe("desktop segment editor UI wiring", () => {
     for (const requiredSource of [
       "textToSegments",
       "segmentsToText",
-      "mergeTranscriptSegments",
+      "mergeSegmentRun",
       "splitTranscriptSegment",
       "assignSpeakerLabel",
       "syncTranscriptText",
