@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  AccessibilityInfo,
+  Animated,
   BackHandler,
   KeyboardAvoidingView,
-  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -14,7 +13,6 @@ import {
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useFocusEffect } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import { openPrivacyPolicy, privacyPolicyUrl } from "../src/appInfo";
 import { apiConfig, availableRefinementModes } from "../src/features";
@@ -23,7 +21,7 @@ import { formatDuration } from "../src/library";
 import { actionLabel, noticeText, type NoticeAction } from "../src/notices";
 import { requestDictationPermission } from "../src/speech";
 import { useCompanionStore } from "../src/store";
-import { copyText, shareText } from "../src/ui/actions";
+import { copyText, openAppSettings, shareText } from "../src/ui/actions";
 import {
   Button,
   CHROME_MAX_FONT_SCALE,
@@ -37,14 +35,11 @@ import {
   inputColors,
 } from "../src/ui/components";
 import { confirm } from "../src/ui/confirm";
+import { FadeIn, GlassScreen, glassStyles } from "../src/ui/glass";
+import { useTabBarClearance } from "../src/ui/GlassTabBar";
+import { useReducedMotion, useReducedTransparency } from "../src/ui/motion";
 import { colors, fonts, modeColor, radius, space } from "../src/ui/theme";
 import { useRecognitionPlan } from "../src/useRecognitionPlan";
-
-/** Settings > Sonolect; react-native-web has no app settings to open. */
-function openAppSettings() {
-  if (typeof Linking.openSettings !== "function") return;
-  void Linking.openSettings().catch(() => undefined);
-}
 
 /** Fixed for the build (app.config.js); null hides the link. */
 const POLICY_URL = privacyPolicyUrl();
@@ -78,6 +73,11 @@ export default function CaptureScreen() {
   const dismissNotice = useCompanionStore((s) => s.dismissNotice);
   const t = strings(settings.uiLanguage);
 
+  const clearance = useTabBarClearance();
+  const reduced = useReducedMotion();
+  const opaque = useReducedTransparency();
+  /** The backdrop's lime light rises while the microphone listens. */
+  const glow = useRef(new Animated.Value(0)).current;
   const [typing, setTyping] = useState(false);
   const [draft, setDraft] = useState("");
   const [copied, setCopied] = useState(false);
@@ -89,7 +89,6 @@ export default function CaptureScreen() {
   const typingY = useRef<number | null>(null);
   /** The typing card scrolls into view once it is laid out. */
   const scrollToTyping = useRef(false);
-  const announcedStatus = useRef(capture.status);
 
   const listening = capture.status === "listening";
   const processing = capture.status === "processing";
@@ -100,6 +99,16 @@ export default function CaptureScreen() {
   const idlePlan = useRecognitionPlan(settings, capturing);
   const plan = capturing ? (storePlan ?? idlePlan) : idlePlan;
   const apiConnected = Boolean(apiConfig(settings, apiToken).apiUrl);
+
+  useEffect(() => {
+    const animation = Animated.timing(glow, {
+      toValue: listening ? 1 : 0,
+      duration: reduced ? 0 : 700,
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [listening, reduced, glow]);
 
   useEffect(() => {
     if (!listening || !capture.startedAt) {
@@ -138,22 +147,6 @@ export default function CaptureScreen() {
   useEffect(() => {
     if (listening) setTyping(false);
   }, [listening]);
-
-  // Screen readers hear each change once instead of every partial result.
-  useEffect(() => {
-    const previous = announcedStatus.current;
-    announcedStatus.current = capture.status;
-    if (previous === capture.status) return;
-    if (capture.status === "listening") {
-      AccessibilityInfo.announceForAccessibility(t.capture.a11yStarted);
-    } else if (capture.status === "processing") {
-      AccessibilityInfo.announceForAccessibility(t.capture.a11yStopped);
-    } else if (capture.status === "ready" && latest) {
-      AccessibilityInfo.announceForAccessibility(
-        `${t.capture.a11yResult} ${latest.refinedText.slice(0, 300)}`,
-      );
-    }
-  }, [capture.status, latest, t]);
 
   // Android Back while dictating stops it and keeps the text, instead of
   // leaving the screen with the microphone on.
@@ -306,17 +299,20 @@ export default function CaptureScreen() {
   const showOnboarding = !settings.onboarded;
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]}>
+    <GlassScreen glow={glow}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
           ref={scrollRef}
-          contentContainerStyle={styles.container}
+          contentContainerStyle={[
+            styles.container,
+            { paddingBottom: clearance + space.lg },
+          ]}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.header}>
+          <FadeIn style={styles.header}>
             <View style={styles.shrink}>
               <Text style={styles.brand}>
                 sono<Text style={{ color: colors.lime }}>lect</Text>
@@ -325,7 +321,12 @@ export default function CaptureScreen() {
             </View>
             {modeBadge ? (
               <View
-                style={[styles.modePill, styles.shrink]}
+                style={[
+                  glassStyles.panel,
+                  styles.modePill,
+                  styles.shrink,
+                  opaque && glassStyles.panelOpaque,
+                ]}
                 accessibilityLabel={modeBadge.label}
               >
                 <Icon name={modeBadge.icon} size={14} color={colors.lime} />
@@ -337,10 +338,10 @@ export default function CaptureScreen() {
                 </Text>
               </View>
             ) : null}
-          </View>
+          </FadeIn>
 
           {showOnboarding ? (
-            <Card style={styles.onboarding}>
+            <Card strong style={styles.onboarding} enterIndex={1}>
               <Text style={styles.onboardingTitle}>{t.onboarding.title}</Text>
               <Text style={styles.muted}>{t.onboarding.body}</Text>
               {POLICY_URL ? (
@@ -373,7 +374,7 @@ export default function CaptureScreen() {
             </Card>
           ) : null}
 
-          <View style={styles.stage}>
+          <FadeIn index={1} style={styles.stage}>
             <Label
               color={listening ? colors.lime : colors.muted}
               style={styles.status}
@@ -381,7 +382,15 @@ export default function CaptureScreen() {
               {statusLabel}
             </Label>
             {notice ? (
-              <View style={styles.notice} accessibilityRole="alert">
+              <View
+                style={[
+                  glassStyles.panel,
+                  glassStyles.panelStrong,
+                  styles.notice,
+                  opaque && glassStyles.panelOpaque,
+                ]}
+                accessibilityRole="alert"
+              >
                 <Text style={styles.noticeText}>{noticeText(t, notice)}</Text>
                 <View style={styles.noticeActions}>
                   {notice.actions.map((action) => {
@@ -409,6 +418,7 @@ export default function CaptureScreen() {
               accessibilityLabel={
                 listening ? t.capture.done : t.capture.tapToSpeak
               }
+              level={level}
             />
             <Waveform level={level} active={listening} />
             <ScrollView
@@ -455,7 +465,7 @@ export default function CaptureScreen() {
             {settings.privacyLevel === "ephemeral" ? (
               <Text style={styles.noteSmall}>{t.capture.ephemeralNote}</Text>
             ) : null}
-          </View>
+          </FadeIn>
 
           {typing && !listening ? (
             <View
@@ -494,7 +504,7 @@ export default function CaptureScreen() {
             </View>
           ) : null}
 
-          <View style={styles.section}>
+          <FadeIn index={2} style={styles.section}>
             <Label heading>{t.capture.afterCapture}</Label>
             {latest ? (
               <Card>
@@ -542,17 +552,16 @@ export default function CaptureScreen() {
             ) : (
               <Text style={styles.muted}>{t.capture.noCaptureYet}</Text>
             )}
-          </View>
+          </FadeIn>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </GlassScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
-  container: { padding: space.xl, paddingBottom: 40, gap: space.xl },
+  container: { padding: space.xl, gap: space.xl },
   // At large font sizes the mode pill wraps under the brand instead of
   // running off the screen (ux-19).
   header: {
@@ -576,9 +585,6 @@ const styles = StyleSheet.create({
     minHeight: 40,
     paddingHorizontal: 14,
     borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.surface,
   },
   modePillText: {
     flexShrink: 1,
@@ -617,10 +623,7 @@ const styles = StyleSheet.create({
   notice: {
     alignSelf: "stretch",
     gap: space.sm,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.lineStrong,
-    backgroundColor: colors.surfaceStrong,
+    borderRadius: radius.lg,
     padding: space.md,
   },
   noticeText: {
@@ -630,8 +633,12 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   noticeActions: { flexDirection: "row", flexWrap: "wrap", gap: space.sm },
-  // The card is the typing field's outline (ux-26).
-  typingCard: { borderColor: colors.lineInteractive },
+  // The card is the typing field's outline (ux-26), on every edge.
+  typingCard: {
+    borderColor: colors.lineInteractive,
+    borderTopColor: colors.lineInteractive,
+    borderBottomColor: colors.lineInteractive,
+  },
   input: {
     minHeight: 110,
     color: colors.text,

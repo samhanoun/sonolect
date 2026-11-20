@@ -2,19 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, StyleSheet, Text, TextInput, View } from "react-native";
 import { useLocales } from "expo-localization";
 import { useFocusEffect } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import { keepsHistory, type TranscriptTurn } from "../src/domain";
 import { exportNotes } from "../src/exportNotes";
 import { API_FEATURES_ENABLED } from "../src/features";
 import { strings } from "../src/i18n";
 import {
-  exportAsMarkdown,
+  EXPORT_FORMATS,
+  exportLibrary,
   filterHistory,
   formatDuration,
   formatNoteDate,
   formattingLocale,
   sortHistory,
+  type ExportFormat,
   type LibraryFilter,
 } from "../src/library";
 import { noticeText, storageBanner } from "../src/notices";
@@ -32,6 +33,14 @@ import {
   inputColors,
 } from "../src/ui/components";
 import { confirm } from "../src/ui/confirm";
+import {
+  FadeIn,
+  GlassScreen,
+  animateNextLayout,
+  glassStyles,
+} from "../src/ui/glass";
+import { useTabBarClearance } from "../src/ui/GlassTabBar";
+import { useReducedMotion, useReducedTransparency } from "../src/ui/motion";
 import { colors, fonts, modeColor, radius, space } from "../src/ui/theme";
 
 const FILTERS: LibraryFilter[] = ["all", "pinned", "summaries", "tasks"];
@@ -62,7 +71,12 @@ export default function LibraryScreen() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exporting = useRef(false);
+  // Export first asks for the file format, in a row under the filters.
+  const [choosingFormat, setChoosingFormat] = useState(false);
   const tts = useTts();
+  const clearance = useTabBarClearance();
+  const reduced = useReducedMotion();
+  const opaque = useReducedTransparency();
   // The microphone would hear it (speech-4).
   const captureBusy =
     captureStatus === "listening" || captureStatus === "processing";
@@ -105,26 +119,40 @@ export default function LibraryScreen() {
     copiedTimer.current = setTimeout(() => setCopiedId(null), 1500);
   };
 
-  const exportAll = async () => {
+  const exportAll = async (format: ExportFormat) => {
     if (exporting.current) return;
     exporting.current = true;
+    setChoosingFormat(false);
     try {
       await exportNotes(
-        exportAsMarkdown(sortHistory(history), {
+        exportLibrary(sortHistory(history), format, {
           formatDate: (iso) => formatNoteDate(iso, locale),
           modeLabel: (mode) => t.modeTag[mode] ?? mode,
         }),
         t,
+        format,
       );
     } finally {
       exporting.current = false;
     }
   };
 
-  const renderItem = ({ item }: { item: TranscriptTurn }) => {
+  /** A note opens and closes smoothly instead of jumping (Reduce Motion: no). */
+  const toggleExpanded = (id: string) => {
+    animateNextLayout(reduced);
+    setExpanded((current) => (current === id ? null : id));
+  };
+
+  const renderItem = ({
+    item,
+    index,
+  }: {
+    item: TranscriptTurn;
+    index: number;
+  }) => {
     const open = expanded === item.id;
     return (
-      <Card style={styles.item}>
+      <Card style={styles.item} enterIndex={index}>
         <View style={styles.metaRow}>
           <Label color={modeColor(item.mode)}>
             {item.pinned ? "◆ " : ""}
@@ -144,7 +172,7 @@ export default function LibraryScreen() {
           selectable
           style={styles.itemText}
           numberOfLines={open ? undefined : 4}
-          onPress={() => setExpanded(open ? null : item.id)}
+          onPress={() => toggleExpanded(item.id)}
           accessibilityRole="button"
           accessibilityState={{ expanded: open }}
           accessibilityHint={
@@ -229,16 +257,19 @@ export default function LibraryScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]}>
+    <GlassScreen>
       <FlatList
         data={items}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         extraData={listState}
-        contentContainerStyle={styles.container}
+        contentContainerStyle={[
+          styles.container,
+          { paddingBottom: clearance + space.lg },
+        ]}
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
-          <View style={styles.header}>
+          <FadeIn style={styles.header}>
             <View style={styles.titleRow}>
               <Title style={styles.shrink}>{t.library.title}</Title>
               <Label>{t.library.items(history.length)}</Label>
@@ -254,7 +285,13 @@ export default function LibraryScreen() {
                   : {})}
               />
             ) : null}
-            <View style={styles.search}>
+            <View
+              style={[
+                glassStyles.panel,
+                styles.search,
+                opaque && glassStyles.panelOpaque,
+              ]}
+            >
               <Icon name="search" size={16} color={colors.muted} />
               <TextInput
                 accessibilityLabel={t.library.search}
@@ -282,11 +319,24 @@ export default function LibraryScreen() {
                   icon="share"
                   label={t.library.exportAll}
                   variant="ghost"
-                  onPress={() => void exportAll()}
+                  selected={choosingFormat}
+                  onPress={() => setChoosingFormat((open) => !open)}
                 />
               ) : null}
             </View>
-          </View>
+            {choosingFormat && history.length > 0 ? (
+              <View style={styles.filters} accessibilityRole="toolbar">
+                <Label>{t.library.exportAs}</Label>
+                {EXPORT_FORMATS.map((format) => (
+                  <Chip
+                    key={format}
+                    label={t.library.exportFormats[format]}
+                    onPress={() => void exportAll(format)}
+                  />
+                ))}
+              </View>
+            ) : null}
+          </FadeIn>
         }
         ListEmptyComponent={
           <Text style={styles.empty}>
@@ -298,13 +348,12 @@ export default function LibraryScreen() {
           </Text>
         }
       />
-    </SafeAreaView>
+    </GlassScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  container: { padding: space.xl, gap: space.md, paddingBottom: 40 },
+  container: { padding: space.xl, gap: space.md },
   header: { gap: space.md, marginBottom: space.xs },
   // At large font sizes the count wraps under the title (ux-19).
   titleRow: {
@@ -315,16 +364,17 @@ const styles = StyleSheet.create({
     columnGap: space.sm,
   },
   shrink: { flexShrink: 1, minWidth: 0 },
+  // A text field: its outline reaches 3:1 on every edge (ux-26).
   search: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    minHeight: 46,
-    paddingHorizontal: 14,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
+    minHeight: 48,
+    paddingHorizontal: 16,
+    borderRadius: radius.pill,
     borderColor: colors.lineInteractive,
+    borderTopColor: colors.lineInteractive,
+    borderBottomColor: colors.lineInteractive,
   },
   searchInput: {
     flex: 1,

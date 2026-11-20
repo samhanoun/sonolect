@@ -301,25 +301,62 @@ pub async fn provider_transcribe(
     let payload = super::ipc_audio::whisper_payload(&request)?;
     tauri::async_runtime::spawn_blocking(move || {
         super::local_history::process_with(&app, payload, None, |payload| {
-            let body =
-                transcription_body(&model, &payload.audio_bytes, payload.language.as_deref());
-            let bytes = response_bytes(post_json(&provider, endpoint, &body)?)?;
-            let response: Value =
-                serde_json::from_slice(&bytes).map_err(|_| "Invalid transcription response.")?;
-            let text = response
-                .get("text")
-                .and_then(Value::as_str)
-                .ok_or("The provider returned no transcript field.")?
-                .to_owned();
-            Ok(super::WhisperResult {
-                text,
-                segments: vec![],
-                language: payload.language,
-            })
+            transcribe_wav(
+                &provider,
+                endpoint,
+                &model,
+                &payload.audio_bytes,
+                payload.language,
+            )
         })
     })
     .await
     .map_err(|_| "Online transcription was interrupted.".to_string())?
+}
+/// Sends one WAV to the provider. The provider returns text without timings.
+fn transcribe_wav(
+    provider: &str,
+    endpoint: &str,
+    model: &str,
+    wav: &[u8],
+    language: Option<String>,
+) -> Result<super::WhisperResult, String> {
+    let body = transcription_body(model, wav, language.as_deref());
+    let bytes = response_bytes(post_json(provider, endpoint, &body)?)?;
+    let response: Value =
+        serde_json::from_slice(&bytes).map_err(|_| "Invalid transcription response.")?;
+    let text = response
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or("The provider returned no transcript field.")?
+        .to_owned();
+    Ok(super::WhisperResult {
+        text,
+        segments: vec![],
+        language,
+        capture_id: None,
+    })
+}
+/// Checks an online speech model before a live recording starts, and returns
+/// what transcribes each piece of it. Every piece is checked against Local
+/// only again when it is sent.
+pub fn chunk_transcriber(
+    provider: String,
+    model: String,
+    language: Option<String>,
+) -> Result<impl FnMut(&[i16]) -> Result<super::WhisperResult, String> + Send, String> {
+    let endpoint = speech_endpoint(&provider, "stt")?;
+    model_ok(&model)?;
+    guard_cloud(CLOUD_ENABLED.load(Ordering::SeqCst))?;
+    Ok(move |samples: &[i16]| {
+        transcribe_wav(
+            &provider,
+            endpoint,
+            &model,
+            &super::streaming::wav_bytes(samples),
+            language.clone(),
+        )
+    })
 }
 #[tauri::command]
 pub async fn provider_speak(

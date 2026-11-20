@@ -220,8 +220,14 @@ pub fn transcribe_with_model(
     if samples.is_empty() {
         return Err("No audio was recorded.".into());
     }
-    let model_path = payload
-        .model_path
+    let model_path = usable_model(default_path, payload.model_path)?;
+    transcribe_samples(&model_path, &samples, payload.language)
+}
+
+/// The chosen model file, or the installed one, checked before whisper.cpp
+/// opens it.
+fn usable_model(default_path: PathBuf, chosen: Option<String>) -> Result<PathBuf, String> {
+    let model_path = chosen
         .filter(|p| !p.trim().is_empty())
         .map(PathBuf::from)
         .unwrap_or(default_path);
@@ -231,17 +237,39 @@ pub fn transcribe_with_model(
     if !is_ggml_model(&model_path) {
         return Err("The selected file is not a Whisper model (.bin in GGML format).".into());
     }
+    Ok(model_path)
+}
+
+/// The model a live recording will use, checked before recording starts.
+pub fn resolve_model(app: &tauri::AppHandle, chosen: Option<String>) -> Result<PathBuf, String> {
+    usable_model(default_model(app)?, chosen)
+}
+
+/// whisper.cpp returns nothing for less than a second of audio.
+const SHORTEST_INPUT: usize = 17_600;
+
+/// Transcribes 16 kHz mono samples with an already checked model.
+pub fn transcribe_samples(
+    model_path: &Path,
+    samples: &[f32],
+    language: Option<String>,
+) -> Result<super::WhisperResult, String> {
     // Exact/near-digital silence should never manufacture a transcript.
     if samples.iter().all(|s| s.abs() < 0.0001) {
         return Ok(super::WhisperResult {
             text: String::new(),
             segments: vec![],
-            language: payload.language,
+            language,
+            capture_id: None,
         });
     }
-    with_engine(&model_path, |context| {
-        run(context, &samples, payload.language)
-    })
+    if samples.len() < SHORTEST_INPUT {
+        // A single short word: pad it with silence so it is not dropped.
+        let mut padded = samples.to_vec();
+        padded.resize(SHORTEST_INPUT, 0.0);
+        return with_engine(model_path, |context| run(context, &padded, language));
+    }
+    with_engine(model_path, |context| run(context, samples, language))
 }
 
 fn run(
@@ -299,5 +327,6 @@ fn run(
         text,
         segments,
         language,
+        capture_id: None,
     })
 }

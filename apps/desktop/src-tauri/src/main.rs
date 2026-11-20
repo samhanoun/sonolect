@@ -1,15 +1,21 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::Manager;
+mod audio_feed;
+mod bubble;
+mod compact_audio;
 mod insertion;
 mod ipc_audio;
 mod local_engine;
 mod local_history;
 mod online;
+mod streaming;
 mod system_audio;
+#[cfg(target_os = "windows")]
+mod system_loopback;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -23,13 +29,13 @@ struct WhisperPayload {
     model_path: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WhisperSegment {
     start_ms: u64,
     end_ms: u64,
     text: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     speaker: Option<String>,
 }
 
@@ -40,6 +46,10 @@ struct WhisperResult {
     segments: Vec<WhisperSegment>,
     #[serde(skip_serializing_if = "Option::is_none")]
     language: Option<String>,
+    /// The saved recording this transcript belongs to, so the editor can play
+    /// its audio. Set by `local_history` once the recording is on disk.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    capture_id: Option<String>,
 }
 
 /// The recording is the raw IPC body; settings come in `x-sonolect-*` headers.
@@ -243,11 +253,16 @@ fn main() {
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(bubble::init())
         .setup(|app| {
             local_engine::prewarm(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            bubble::bubble_show,
+            bubble::bubble_hide,
+            bubble::bubble_open_main,
+            bubble::bubble_restore_target,
             transcribe_audio,
             online::save_provider_key,
             online::provider_key_status,
@@ -263,6 +278,13 @@ fn main() {
             local_history::delete_local_capture,
             local_history::retry_local_capture,
             local_history::purge_local_captures,
+            local_history::read_local_capture_audio,
+            local_history::update_local_capture,
+            local_history::compress_local_captures,
+            streaming::capture_begin,
+            streaming::capture_append,
+            streaming::capture_finish,
+            streaming::capture_cancel,
             insertion::insert_text_into_active_app,
             check_accessibility_permission,
             open_accessibility_settings,

@@ -1,6 +1,6 @@
 # Sonolect Product Specification
 
-Last updated: 2026-05-03
+Last updated: 2026-11-20
 
 ---
 
@@ -26,15 +26,23 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 
 ### Voice Capture
 
-- System and microphone audio capture with device selection
-- Real-time waveform visualisation
-- Configurable sample rate and format (WAV / Opus)
+- System and microphone audio capture with device selection. On desktop, Settings › Microphone picks the input and tests its level without recording.
+- This computer's sound as the source of a recording on desktop (a meeting, a video): Settings › Microphone › Record from. On Windows it needs nothing else, since the app records the default playback device through WASAPI loopback. On Linux it needs PulseAudio or PipeWire with `pactl` and `parec`; on macOS it needs the BlackHole audio driver and `ffmpeg`. The choice is only offered where it can work. Dictation with the hotkeys or the bubble always uses the microphone.
+- Real-time waveform visualisation, driven by the microphone level
+- Recordings of up to four hours on desktop. The audio is written to disk while you speak, so nothing is lost if the app stops, and it is transcribed at each pause.
+- Recordings are stored at 16 kHz mono, the format the speech engine works with, as WAV or as Ogg Opus at about a tenth of the size (Settings › Privacy & retention). Compressed recordings still play back and can be transcribed again.
+
+### Dictate Anywhere
+
+- **Desktop:** a floating dictation bubble, a small always-on-top glass pill that never takes focus. The global hotkeys (Ctrl+Shift+M to toggle, Ctrl+Shift+V to hold) dictate into whatever app is in front, and the polished text is pasted there when it's done. Esc cancels. Settings › Dictation bubble shows it always, only while dictating, or never.
+- **Android:** the Sonolect voice keyboard, an input method with one big mic that types into any app. It recognizes speech on the phone, and uses the system speech service only where the app's privacy settings allow it without asking.
+- **iOS:** Quick dictation (`sonolect://dictate`) opens straight into listening and copies the polished text for pasting. iOS keyboards can't use the microphone, so this is the closest equivalent. It can be bound to the Action button or Back Tap through Shortcuts.
 
 ### Local Speech-to-Text
 
 - Embedded Whisper-based STT engine — runs entirely on-device
 - Automatic language detection with manual override
-- Streaming partial results during recording
+- Streaming partial results during recording: on desktop the text heard so far appears while you are still speaking, and long audio files are imported the same way, piece by piece
 
 ### Transcript Editing
 

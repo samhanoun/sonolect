@@ -75,4 +75,67 @@ try {
   await app.close();
 }
 
+// Production: service token required, and no fabricated output of any kind.
+const serviceToken = "s".repeat(40);
+const production = await createApp({
+  logger: false,
+  env: { NODE_ENV: "production", SONOLECT_SERVICE_TOKENS: serviceToken },
+});
+try {
+  const headers = {
+    authorization: `Bearer ${serviceToken}`,
+    "x-user-id": "user-1",
+  };
+  const audio = {
+    uri: "gs://sonolect-prod-audio/example.webm",
+    mimeType: "audio/webm",
+  };
+
+  const anonymous = await production.inject({
+    method: "POST",
+    url: "/transcriptions",
+    headers: { "x-user-id": "user-1" },
+    payload: { audio },
+  });
+  assert.equal(anonymous.statusCode, 401, anonymous.body);
+
+  const mockInProduction = await production.inject({
+    method: "POST",
+    url: "/transcriptions",
+    headers,
+    payload: { audio },
+  });
+  assert.equal(mockInProduction.statusCode, 202, mockInProduction.body);
+  const mockJob = mockInProduction.json<TranscriptionJob>();
+  assert.equal(mockJob.status, "failed");
+  assert.equal(mockJob.transcriptText, undefined);
+  assert.ok(mockJob.error?.includes("provider_unavailable"));
+
+  const otherUser = await production.inject({
+    method: "GET",
+    url: `/transcriptions/${mockJob.id}`,
+    headers: { ...headers, "x-user-id": "user-2" },
+  });
+  assert.equal(otherUser.statusCode, 404);
+
+  const translate = await production.inject({
+    method: "POST",
+    url: "/refinements",
+    headers,
+    payload: { action: "translate", text: "Hello.", targetLanguage: "fr" },
+  });
+  assert.equal(translate.statusCode, 501, translate.body);
+
+  const clean = await production.inject({
+    method: "POST",
+    url: "/refinements",
+    headers,
+    payload: { action: "clean", text: "um hello  there ." },
+  });
+  assert.equal(clean.statusCode, 200, clean.body);
+  assert.equal(clean.json<RefinementResult>().outputText, "hello there.");
+} finally {
+  await production.close();
+}
+
 console.log("Audio service smoke test passed");

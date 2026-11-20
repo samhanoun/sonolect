@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Archive,
   Check,
   Copy,
   Cpu,
@@ -15,19 +16,40 @@ import {
   Upload,
   WandSparkles,
 } from "lucide-react";
-import { useDesktopStore } from "../store/appStore";
+import { subscribeMicLevel, useDesktopStore } from "../store/appStore";
 import { isTauriRuntime } from "../desktopNative";
 import {
   nativeProviderCall,
+  setProviderMode,
   useProviderStore,
   speakUsingProvider,
   rewriteUsingProvider,
   transcribeUsingProvider,
 } from "../providerSettings";
+import { MicrophoneSettings } from "./StudioMicrophone";
 import { StudioModelSelector } from "./StudioModels";
+import { SegmentEditor, useCapturePlayer } from "./StudioSegments";
+import {
+  formatTimestamp,
+  singleCaptureId,
+  type SavedCaptureSegment,
+} from "../segmentEditor";
 import { submitCapturedAudioCloud } from "../voiceApi";
 import { prepareLocalAudio } from "../localAudio";
+import { copyTranscript } from "../richClipboard";
+import {
+  CAPTURE_FORMATS,
+  applyCaptureFormat,
+  compressCaptures,
+  formatSize,
+  loadCaptureFormat,
+  saveCaptureFormat,
+  type CaptureFormat,
+} from "../captureStorage";
+import { transcribeAudioFile } from "../liveCaptureNative";
 import { STT_LANGUAGES } from "../sttLanguages";
+import { loadBubbleVisibility, saveBubbleVisibility } from "../bubbleBridge";
+import type { BubbleVisibility } from "../dictationBubble";
 import {
   exportTranscript,
   type TranscriptExportFormat,
@@ -41,14 +63,26 @@ import {
   saveCaptureRetentionDays,
   type RetentionDays,
 } from "../privacyControls";
+import {
+  LAUNCH_LOCALES,
+  LOCALE_NAMES,
+  languageName,
+  useT,
+  type LaunchLocale,
+  type LocaleKeys,
+  type SupportedLocale,
+} from "../i18n";
 
-const EXPORT_FORMATS: { id: TranscriptExportFormat; label: string }[] = [
-  { id: "txt", label: "Plain text (.txt)" },
-  { id: "md", label: "Markdown (.md)" },
-  { id: "srt", label: "Subtitles (.srt)" },
-  { id: "vtt", label: "Web subtitles (.vtt)" },
-  { id: "json", label: "JSON with timings (.json)" },
+const EXPORT_FORMATS: { id: TranscriptExportFormat; label: LocaleKeys }[] = [
+  { id: "txt", label: "studio.export.txt" },
+  { id: "md", label: "studio.export.md" },
+  { id: "srt", label: "studio.export.srt" },
+  { id: "vtt", label: "studio.export.vtt" },
+  { id: "json", label: "studio.export.json" },
 ];
+
+const countWords = (text: string) =>
+  text.trim() ? text.trim().split(/\s+/).length : 0;
 
 const SIGNAL_BARS = [
   18, 30, 44, 26, 58, 72, 40, 64, 86, 52, 70, 94, 62, 80, 48, 90, 66, 76, 42,
@@ -57,14 +91,36 @@ const SIGNAL_BARS = [
 
 /** The hero centerpiece: a signal meter that comes alive while dictating. */
 function SignalMeter({ live }: { live: boolean }) {
+  const t = useT();
+  const bars = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // The bars follow the microphone: they rise at once and fall slowly, so
+    // a pause between words does not flatten them. Without levels (no meter
+    // in this webview) they keep their own movement.
+    let shown = 0;
+    const unsubscribe = subscribeMicLevel((level) => {
+      shown = Math.max(level, shown * 0.85);
+      bars.current?.style.setProperty(
+        "--signal-level",
+        (0.2 + 0.8 * shown).toFixed(2),
+      );
+    });
+    const element = bars.current;
+    return () => {
+      unsubscribe();
+      element?.style.removeProperty("--signal-level");
+    };
+  }, []);
   return (
     <div className={`studio-signal ${live ? "live" : ""}`} aria-hidden="true">
       <div className="studio-signal-head">
         <span className="studio-signal-dot" />
-        <span>{live ? "Listening" : "Ready"}</span>
-        <span className="studio-signal-meta">16 kHz · mono · on device</span>
+        <span>
+          {live ? t("studio.signal.listening") : t("studio.signal.ready")}
+        </span>
+        <span className="studio-signal-meta">{t("studio.signal.meta")}</span>
       </div>
-      <div className="studio-signal-bars">
+      <div className="studio-signal-bars" ref={bars}>
         {SIGNAL_BARS.map((height, index) => (
           <i
             key={index}
@@ -104,6 +160,8 @@ export type SavedCapture = {
   transcript: string | null;
   error: string | null;
   language: string | null;
+  /** Timed segments; recordings saved by older versions have none. */
+  segments?: SavedCaptureSegment[];
 };
 export function useSavedCaptures() {
   const recordingState = useDesktopStore((state) => state.recordingState);
@@ -123,6 +181,11 @@ export function useSavedCaptures() {
   useEffect(() => {
     let cancelled = false;
     if (isTauriRuntime()) {
+      // With compressed storage, a recording that just finished is turned
+      // into Opus in the background; the list does not wait for it.
+      // A recording in progress is skipped by the recorder itself.
+      if (["idle", "completed", "error"].includes(recordingState))
+        void applyCaptureFormat(nativeProviderCall).catch(() => undefined);
       // Enforce the retention setting whenever the list is refreshed.
       void applyCaptureRetention(nativeProviderCall)
         .catch(() => 0)
@@ -146,6 +209,7 @@ export function useSavedCaptures() {
 }
 export function StudioOverview({ captures }: { captures: SavedCapture[] }) {
   const { setActiveView, recordingState, toggleRecording } = useDesktopStore();
+  const t = useT();
   const words = captures.reduce(
     (count, item) =>
       count +
@@ -156,24 +220,23 @@ export function StudioOverview({ captures }: { captures: SavedCapture[] }) {
     <div className="studio-page">
       <div className="studio-page-heading">
         <div>
-          <p className="studio-eyebrow">A little less typing</p>
-          <h1>Make room for your thoughts</h1>
-          <p>Speak naturally. Turn your voice into something useful.</p>
+          <p className="studio-eyebrow">{t("studio.overview.eyebrow")}</p>
+          <h1>{t("studio.overview.title")}</h1>
+          <p>{t("studio.overview.subtitle")}</p>
         </div>
-        <span className="studio-chip">Your personal workspace</span>
+        <span className="studio-chip">{t("studio.overview.chip")}</span>
       </div>
       <div className="studio-hero">
         <div>
-          <span className="studio-eyebrow">Start with your voice</span>
+          <span className="studio-eyebrow">
+            {t("studio.overview.heroEyebrow")}
+          </span>
           <h2>
-            Say it.
+            {t("studio.overview.heroTitle1")}
             <br />
-            Let your ideas flow.
+            {t("studio.overview.heroTitle2")}
           </h2>
-          <p>
-            Capture a thought, write a message, or get a first draft down. Local
-            recognition is ready when you are.
-          </p>
+          <p>{t("studio.overview.heroBody")}</p>
           <button
             className="studio-button lime"
             onClick={() => {
@@ -183,8 +246,8 @@ export function StudioOverview({ captures }: { captures: SavedCapture[] }) {
           >
             <Mic size={17} />
             {recordingState === "recording"
-              ? "Stop dictation"
-              : "Start dictating"}
+              ? t("studio.dictation.stop")
+              : t("studio.dictation.start")}
             <kbd>Ctrl ⇧ M</kbd>
           </button>
         </div>
@@ -192,19 +255,19 @@ export function StudioOverview({ captures }: { captures: SavedCapture[] }) {
       </div>
       <div className="studio-stat-grid">
         <div>
-          <span>Recordings</span>
-          <strong>{captures.length}</strong>
-          <small>Saved on this device</small>
+          <span>{t("studio.overview.statRecordings")}</span>
+          <strong>{captures.length.toLocaleString(t.locale)}</strong>
+          <small>{t("studio.overview.statRecordingsHint")}</small>
         </div>
         <div>
-          <span>Words captured</span>
-          <strong>{words.toLocaleString()}</strong>
-          <small>From your saved transcripts</small>
+          <span>{t("studio.overview.statWords")}</span>
+          <strong>{words.toLocaleString(t.locale)}</strong>
+          <small>{t("studio.overview.statWordsHint")}</small>
         </div>
         <div>
-          <span>Ready for another pass</span>
+          <span>{t("studio.overview.statRetry")}</span>
           <strong>{captures.filter((item) => item.error).length}</strong>
-          <small>Recordings you can retry</small>
+          <small>{t("studio.overview.statRetryHint")}</small>
         </div>
       </div>
       <div className="studio-grid two">
@@ -215,9 +278,9 @@ export function StudioOverview({ captures }: { captures: SavedCapture[] }) {
           <div className="studio-icon">
             <Play size={22} />
           </div>
-          <h3>Give your text a voice</h3>
-          <p>Choose a speech model and listen to your writing.</p>
-          <span>Open text to speech →</span>
+          <h3>{t("studio.overview.ttsTitle")}</h3>
+          <p>{t("studio.overview.ttsBody")}</p>
+          <span>{t("studio.overview.ttsLink")}</span>
         </button>
         <button
           className="studio-action-card"
@@ -226,27 +289,24 @@ export function StudioOverview({ captures }: { captures: SavedCapture[] }) {
           <div className="studio-icon">
             <Cpu size={22} />
           </div>
-          <h3>A model for every task</h3>
-          <p>
-            Connect OpenRouter or OpenCode Zen. Keep local speech one click
-            away.
-          </p>
-          <span>Explore models & voices →</span>
+          <h3>{t("studio.overview.modelsTitle")}</h3>
+          <p>{t("studio.overview.modelsBody")}</p>
+          <span>{t("studio.overview.modelsLink")}</span>
         </button>
       </div>
       <div className="studio-section-heading">
-        <h2>Recent recordings</h2>
+        <h2>{t("studio.overview.recent")}</h2>
         <button
           className="studio-link"
           onClick={() => setActiveView("library")}
         >
-          View library →
+          {t("studio.overview.viewLibrary")}
         </button>
       </div>
       {!captures.length ? (
         <div className="studio-empty compact">
           <FileAudio size={25} />
-          <p>Your first recording will appear here.</p>
+          <p>{t("studio.overview.empty")}</p>
         </div>
       ) : (
         <div className="studio-card">
@@ -258,14 +318,23 @@ export function StudioOverview({ captures }: { captures: SavedCapture[] }) {
             >
               <FileAudio size={18} />
               <span>
-                {item.transcript?.slice(0, 90) || "Recording needs attention"}
+                {item.transcript?.slice(0, 90) || t("studio.dock.error")}
               </span>
-              <small>{new Date(item.createdAtMs).toLocaleDateString()}</small>
+              <small>
+                {new Date(item.createdAtMs).toLocaleDateString(t.locale)}
+              </small>
             </button>
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+/** Whether a recording is being made or finished right now. */
+function isCapturing(recordingState: string) {
+  return ["requesting-permission", "recording", "uploading"].includes(
+    recordingState,
   );
 }
 
@@ -276,21 +345,74 @@ export function StudioTranscribe({
 }) {
   const state = useDesktopStore();
   const preferences = useProviderStore((s) => s.preferences);
+  const t = useT();
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
     [proposed, setProposed] = useState(""),
-    [instruction, setInstruction] = useState(
-      "Make this clear and concise without changing its meaning.",
-    );
+    // Until it is edited, the instruction follows the interface language.
+    [customInstruction, setInstruction] = useState<string | null>(null);
+  const instruction =
+    customInstruction ?? t("studio.transcribe.defaultInstruction");
   const allowCloud = () => useDesktopStore.getState().privacyLevel === "cloud";
+  // The app's recorder holds one recording at a time: a file is not imported
+  // while it records, and nothing is recorded while it takes a file.
+  const capturing = isCapturing(state.recordingState);
   const importAudio = async (file?: File) => {
     if (!file) return;
+    const native = isTauriRuntime();
+    if (native && isCapturing(useDesktopStore.getState().recordingState))
+      return;
+    if (native) useDesktopStore.setState({ importingAudio: true });
     setBusy(true);
     setMessage("");
     try {
+      if (isTauriRuntime()) {
+        // The app records files of any length through its chunked recorder.
+        if (file.size > 100 * 1024 * 1024)
+          throw new Error(t("studio.transcribe.fileTooLargeApp"));
+        setMessage(t("studio.transcribe.reading"));
+        const online = preferences.stt.provider !== "local" && allowCloud();
+        if (online) await setProviderMode(true);
+        const long = await transcribeAudioFile(
+          file,
+          {
+            language: state.sttLanguage,
+            modelPath: state.whisperConfig.modelPath,
+            ...(online
+              ? {
+                  provider: preferences.stt.provider,
+                  model: preferences.stt.model,
+                }
+              : {}),
+          },
+          ({ transcribedMs, durationMs }) =>
+            setMessage(
+              t("studio.transcribe.progress", {
+                done: formatTimestamp(transcribedMs),
+                total: formatTimestamp(durationMs),
+              }),
+            ),
+        );
+        if (long) {
+          void applyCaptureFormat(nativeProviderCall).catch(() => undefined);
+          state.openCapture({
+            id: long.captureId!,
+            durationMs: long.durationMs,
+            transcript: long.text,
+            segments: long.segments,
+          });
+          setMessage(
+            long.text
+              ? t("studio.transcribe.saved")
+              : t("studio.transcribe.noSpeech"),
+          );
+          return;
+        }
+        setMessage("");
+      }
       if (file.size > 25 * 1024 * 1024)
-        throw new Error("Choose an audio file under 25 MB and three minutes.");
+        throw new Error(t("studio.transcribe.fileTooLarge"));
       const wav = await prepareLocalAudio(file);
       const blob = new Blob([wav as Uint8Array<ArrayBuffer>], {
         type: "audio/wav",
@@ -325,16 +447,24 @@ export function StudioTranscribe({
         },
       );
       if (result.status !== "completed")
-        throw new Error(result.message || "Transcription is not ready.");
-      state.setTranscript(result.transcript || "");
+        throw new Error(result.message || t("studio.transcribe.notReady"));
+      if (result.captureId)
+        state.openCapture({
+          id: result.captureId,
+          durationMs: (wav.length - 44) / 32,
+          transcript: result.transcript || "",
+          segments: result.segments ?? [],
+        });
+      else state.setTranscript(result.transcript || "");
       setMessage(
         result.transcript
-          ? "Audio transcribed and saved."
-          : "No speech was detected.",
+          ? t("studio.transcribe.saved")
+          : t("studio.transcribe.noSpeech"),
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
+      if (native) useDesktopStore.setState({ importingAudio: false });
       setBusy(false);
       await onSaved();
       if (input.current) input.current.value = "";
@@ -360,12 +490,42 @@ export function StudioTranscribe({
   };
   const [exportFormat, setExportFormat] =
     useState<TranscriptExportFormat>("txt");
+  const [view, setView] = useState<"text" | "segments">("text");
+  const player = useCapturePlayer();
+  // An edited transcript can go back to the one recording it came from.
+  const libraryCaptureId = isTauriRuntime()
+    ? singleCaptureId(state.transcriptSegments)
+    : undefined;
+  const saveToLibrary = async () => {
+    if (!libraryCaptureId) return;
+    setBusy(true);
+    try {
+      await nativeProviderCall("update_local_capture", {
+        id: libraryCaptureId,
+        transcript: state.transcript,
+        segments: state.transcriptSegments
+          .filter((segment) => segment.text.trim())
+          .map((segment) => ({
+            startMs: Math.round(segment.startMs),
+            endMs: Math.round(Math.max(segment.startMs, segment.endMs)),
+            text: segment.text.trim(),
+            ...(segment.speaker ? { speaker: segment.speaker } : {}),
+          })),
+      });
+      setMessage(t("studio.segments.saved"));
+      await onSaved();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
   const download = () => {
     const file = exportTranscript({
       format: exportFormat,
       transcript: state.transcript,
       segments: state.transcriptSegments,
-      title: "Sonolect transcript",
+      title: t("studio.transcribe.exportTitle"),
     });
     const url = URL.createObjectURL(
       new Blob([file.content], { type: file.mimeType }),
@@ -380,17 +540,17 @@ export function StudioTranscribe({
     <div className="studio-page">
       <div className="studio-page-heading">
         <div>
-          <p className="studio-eyebrow">From thought to text</p>
-          <h1>Find your flow</h1>
-          <p>Record your voice, import audio, or work on your next draft.</p>
+          <p className="studio-eyebrow">{t("studio.transcribe.eyebrow")}</p>
+          <h1>{t("studio.transcribe.title")}</h1>
+          <p>{t("studio.transcribe.subtitle")}</p>
         </div>
         <button
           className="studio-button secondary"
           onClick={() => input.current?.click()}
-          disabled={busy}
+          disabled={busy || (capturing && isTauriRuntime())}
         >
           <Upload size={16} />
-          Import audio
+          {t("studio.transcribe.import")}
         </button>
         <input
           ref={input}
@@ -403,23 +563,44 @@ export function StudioTranscribe({
       <div className="studio-editor-layout">
         <section className="studio-card studio-editor">
           <div className="studio-section-heading">
-            <h3>Your transcript</h3>
+            <h3>{t("studio.transcribe.yourTranscript")}</h3>
+            <div
+              className="studio-view-toggle"
+              role="group"
+              aria-label={t("studio.segments.viewLabel")}
+            >
+              {(["text", "segments"] as const).map((value) => (
+                <button
+                  key={value}
+                  aria-pressed={view === value}
+                  className={view === value ? "active" : ""}
+                  onClick={() => setView(value)}
+                >
+                  {value === "text"
+                    ? t("studio.segments.viewText")
+                    : t("studio.segments.viewSegments")}
+                </button>
+              ))}
+            </div>
             <span className="studio-tag">
-              {state.privacyLevel === "local" ? "Local only" : "Cloud enabled"}
+              {state.privacyLevel === "local"
+                ? t("studio.mode.local")
+                : t("studio.mode.cloud")}
             </span>
           </div>
-          <textarea
-            aria-label="Transcript editor"
-            placeholder="Your words will appear here. You can also start typing…"
-            value={state.transcript}
-            onChange={(event) => state.setTranscript(event.target.value)}
-          />
+          {view === "text" ? (
+            <textarea
+              aria-label={t("studio.transcribe.editorLabel")}
+              placeholder={t("studio.transcribe.placeholder")}
+              value={state.transcript}
+              onChange={(event) => state.setTranscript(event.target.value)}
+            />
+          ) : (
+            <SegmentEditor player={player} />
+          )}
           <div className="studio-editor-footer">
             <span>
-              {state.transcript.trim()
-                ? state.transcript.trim().split(/\s+/).length
-                : 0}{" "}
-              words
+              {t.count("studio.transcribe.words", countWords(state.transcript))}
             </span>
             <div>
               <button
@@ -427,48 +608,43 @@ export function StudioTranscribe({
                 disabled={!state.canUndoTranscript}
                 onClick={state.undoTranscriptEdit}
               >
-                Undo
+                {t("studio.common.undo")}
               </button>
               <button
                 className="studio-link"
                 disabled={!state.canRedoTranscript}
                 onClick={state.redoTranscriptEdit}
               >
-                Redo
+                {t("studio.common.redo")}
               </button>
             </div>
           </div>
           <div className="studio-editor-actions">
             <button
               className="studio-button"
-              onClick={state.toggleRecording}
+              onClick={() => state.toggleRecording()}
               disabled={busy || state.recordingState === "uploading"}
             >
               <Mic size={17} />
               {state.recordingState === "recording"
-                ? "Stop recording"
-                : "Record to add text"}
+                ? t("studio.transcribe.stopRecording")
+                : t("studio.transcribe.record")}
             </button>
             <button
               className="studio-button secondary"
               disabled={!state.transcript}
               onClick={() =>
-                void navigator.clipboard
-                  .writeText(state.transcript)
-                  .then(() => setMessage("Transcript copied."))
-                  .catch(() =>
-                    setMessage(
-                      "Copy was blocked. Select the text to copy it manually.",
-                    ),
-                  )
+                void copyTranscript(state.transcript, state.transcriptSegments)
+                  .then(() => setMessage(t("studio.transcribe.copied")))
+                  .catch(() => setMessage(t("studio.transcribe.copyBlocked")))
               }
             >
               <Copy size={16} />
-              Copy
+              {t("studio.common.copy")}
             </button>
             <select
               className="studio-export-format"
-              aria-label="Export format"
+              aria-label={t("studio.transcribe.exportFormat")}
               value={exportFormat}
               onChange={(event) =>
                 setExportFormat(event.target.value as TranscriptExportFormat)
@@ -476,37 +652,61 @@ export function StudioTranscribe({
             >
               {EXPORT_FORMATS.map((format) => (
                 <option key={format.id} value={format.id}>
-                  {format.label}
+                  {t(format.label)}
                 </option>
               ))}
             </select>
             <button
               className="studio-icon-button"
-              aria-label="Export transcript"
-              title="Export transcript"
+              aria-label={t("studio.transcribe.export")}
+              title={t("studio.transcribe.export")}
               disabled={!state.transcript}
               onClick={download}
             >
               <Download size={17} />
             </button>
+            {libraryCaptureId && (
+              <button
+                className="studio-button secondary"
+                disabled={busy || !state.transcript.trim()}
+                onClick={() => void saveToLibrary()}
+              >
+                <Check size={16} />
+                {t("studio.segments.saveToLibrary")}
+              </button>
+            )}
           </div>
-          {(message || state.voiceError) && (
-            <StatusNotice text={message || state.voiceError || ""} />
+          {state.liveTranscript &&
+            (state.recordingState === "recording" ||
+              state.recordingState === "uploading") && (
+              <div className="studio-live-text">
+                <span>{t("studio.transcribe.liveLabel")}</span>
+                <p>{state.liveTranscript}</p>
+              </div>
+            )}
+          {(message || player.error || state.voiceError) && (
+            <StatusNotice
+              text={
+                message || player.error || t.message(state.voiceError || "")
+              }
+            />
           )}
         </section>
         <aside className="studio-editor-tools">
           <section className="studio-card">
-            <h3>Recognition</h3>
+            <h3>{t("studio.transcribe.recognition")}</h3>
             <StudioModelSelector task="stt" inlineStatus />
             <label>
-              Language
+              {t("studio.common.language")}
               <select
                 value={state.sttLanguage}
                 onChange={(event) => state.setSttLanguage(event.target.value)}
               >
                 {STT_LANGUAGES.map((language) => (
                   <option key={language.code} value={language.code}>
-                    {language.nativeName}
+                    {language.code === "auto"
+                      ? t("studio.settings.languageAuto")
+                      : language.nativeName}
                   </option>
                 ))}
               </select>
@@ -514,22 +714,20 @@ export function StudioTranscribe({
           </section>
           <section className="studio-card">
             <h3>
-              <Sparkles size={16} /> A little polish
+              <Sparkles size={16} /> {t("studio.transcribe.polishTitle")}
             </h3>
-            <p className="studio-muted">
-              Apply your dictionary and conservative local formatting.
-            </p>
+            <p className="studio-muted">{t("studio.transcribe.polishBody")}</p>
             <button
               className="studio-button secondary full"
               disabled={!state.transcript}
               onClick={state.applyPolishedPreview}
             >
-              Clean up locally
+              {t("studio.transcribe.cleanLocal")}
             </button>
             <details className="studio-details">
-              <summary>Refine with an online model</summary>
+              <summary>{t("studio.transcribe.refineOnline")}</summary>
               <label>
-                Editing instruction
+                {t("studio.transcribe.instruction")}
                 <input
                   value={instruction}
                   onChange={(event) => setInstruction(event.target.value)}
@@ -541,13 +739,15 @@ export function StudioTranscribe({
                 onClick={() => void refine()}
               >
                 <WandSparkles size={15} />
-                {busy ? "Working…" : "Preview online edit"}
+                {busy
+                  ? t("studio.common.working")
+                  : t("studio.transcribe.previewEdit")}
               </button>
               <button
                 className="studio-link"
                 onClick={() => state.setActiveView("models")}
               >
-                Choose editing model →
+                {t("studio.transcribe.chooseModel")}
               </button>
             </details>
           </section>
@@ -555,7 +755,7 @@ export function StudioTranscribe({
       </div>
       {proposed && (
         <section className="studio-card">
-          <h3>Review the suggested edit</h3>
+          <h3>{t("studio.transcribe.reviewTitle")}</h3>
           <p className="studio-transcript-preview">{proposed}</p>
           <button
             className="studio-button"
@@ -564,13 +764,13 @@ export function StudioTranscribe({
               setProposed("");
             }}
           >
-            Apply edit
+            {t("studio.transcribe.apply")}
           </button>
           <button
             className="studio-button ghost"
             onClick={() => setProposed("")}
           >
-            Keep original
+            {t("studio.transcribe.keep")}
           </button>
         </section>
       )}
@@ -588,6 +788,7 @@ export function StudioSpeech() {
     [busy, setBusy] = useState(false);
   const { preferences, models, setVoice } = useProviderStore();
   const mode = useDesktopStore((s) => s.privacyLevel);
+  const t = useT();
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -631,26 +832,31 @@ export function StudioSpeech() {
     <div className="studio-page">
       <div className="studio-page-heading">
         <div>
-          <p className="studio-eyebrow">Words worth hearing</p>
-          <h1>Give your writing a voice</h1>
-          <p>Pick a model, find a voice, and listen before you share.</p>
+          <p className="studio-eyebrow">{t("studio.speech.eyebrow")}</p>
+          <h1>{t("studio.speech.title")}</h1>
+          <p>{t("studio.speech.subtitle")}</p>
         </div>
       </div>
       <div className="studio-editor-layout">
         <section className="studio-card studio-editor">
           <div className="studio-section-heading">
-            <h3>What would you like to hear?</h3>
-            <span className="studio-tag">Text to speech</span>
+            <h3>{t("studio.speech.question")}</h3>
+            <span className="studio-tag">{t("studio.task.tts")}</span>
           </div>
           <textarea
-            aria-label="Text to speak"
+            aria-label={t("studio.speech.inputLabel")}
             maxLength={12000}
-            placeholder="Paste a script, a message, or a passage you want to listen to…"
+            placeholder={t("studio.speech.placeholder")}
             value={text}
             onChange={(event) => setText(event.target.value)}
           />
           <div className="studio-editor-footer">
-            <span>{text.length.toLocaleString()} / 12,000 characters</span>
+            <span>
+              {t("studio.speech.characters", {
+                count: text.length.toLocaleString(t.locale),
+                max: (12000).toLocaleString(t.locale),
+              })}
+            </span>
           </div>
           <div className="studio-editor-actions">
             <button
@@ -659,7 +865,9 @@ export function StudioSpeech() {
               onClick={() => void generate()}
             >
               <Play size={16} />
-              {busy ? "Generating speech…" : "Generate speech"}
+              {busy
+                ? t("studio.speech.generating")
+                : t("studio.speech.generate")}
             </button>
             {url && (
               <a
@@ -668,25 +876,24 @@ export function StudioSpeech() {
                 download={`sonolect-speech.${extension}`}
               >
                 <Download size={16} />
-                Download {extension.toUpperCase()}
+                {t("studio.speech.download", {
+                  format: extension.toUpperCase(),
+                })}
               </a>
             )}
           </div>
           {url && <audio className="studio-audio" controls src={url} />}
           {mode === "local" && (
-            <p className="studio-notice">
-              Local only is selected. Switch the processing control to Cloud
-              enabled before generating online speech.
-            </p>
+            <p className="studio-notice">{t("studio.speech.localNotice")}</p>
           )}
           {message && <StatusNotice text={message} />}
         </section>
         <aside className="studio-editor-tools">
           <section className="studio-card">
-            <h3>Model & voice</h3>
+            <h3>{t("studio.speech.modelVoice")}</h3>
             <StudioModelSelector task="tts" inlineStatus />
             <label>
-              Audio format
+              {t("studio.speech.format")}
               <select
                 value={format}
                 onChange={(event) =>
@@ -694,12 +901,12 @@ export function StudioSpeech() {
                 }
               >
                 <option value="mp3">MP3</option>
-                <option value="pcm">PCM → playable WAV</option>
+                <option value="pcm">{t("studio.speech.pcmOption")}</option>
               </select>
             </label>
             {format === "pcm" && (
               <label>
-                PCM sample rate
+                {t("studio.speech.sampleRate")}
                 <select
                   value={sampleRate}
                   onChange={(event) =>
@@ -708,27 +915,22 @@ export function StudioSpeech() {
                 >
                   {[16000, 22050, 24000, 44100, 48000].map((rate) => (
                     <option value={rate} key={rate}>
-                      {rate.toLocaleString()} Hz
+                      {rate.toLocaleString(t.locale)} Hz
                     </option>
                   ))}
                 </select>
-                <small>
-                  16-bit mono. Match the selected model's output rate.
-                </small>
+                <small>{t("studio.speech.sampleRateHint")}</small>
               </label>
             )}
-            <p className="studio-muted">
-              Gemini and HeyGen speech models require PCM. Other models may
-              require MP3.
-            </p>
+            <p className="studio-muted">{t("studio.speech.formatHint")}</p>
             <label>
-              Voice
+              {t("studio.speech.voice")}
               {selected?.voices.length ? (
                 <select
                   value={preferences.voice}
                   onChange={(event) => setVoice(event.target.value)}
                 >
-                  <option value="">Provider default, if supported</option>
+                  <option value="">{t("studio.speech.voiceDefault")}</option>
                   {selected.voices.map((voice) => (
                     <option key={voice} value={voice}>
                       {voice}
@@ -737,23 +939,17 @@ export function StudioSpeech() {
                 </select>
               ) : (
                 <input
-                  placeholder="Voice ID, or leave blank for a provider default"
+                  placeholder={t("studio.speech.voicePlaceholder")}
                   value={preferences.voice}
                   onChange={(event) => setVoice(event.target.value)}
                 />
               )}
             </label>
-            <p className="studio-muted">
-              Available voices depend on the model. If a model has no default,
-              enter one of its supported voice IDs.
-            </p>
+            <p className="studio-muted">{t("studio.speech.voiceHint")}</p>
           </section>
           <section className="studio-local-callout small">
             <Cpu size={22} />
-            <p>
-              Local speech recognition remains available. Online speech
-              generation uses your OpenRouter account.
-            </p>
+            <p>{t("studio.speech.localCallout")}</p>
           </section>
         </aside>
       </div>
@@ -774,6 +970,8 @@ export function StudioLibrary({
     [busy, setBusy] = useState(""),
     [message, setMessage] = useState("");
   const state = useDesktopStore();
+  const t = useT();
+  const player = useCapturePlayer();
   const retry = async (id: string) => {
     setBusy(id);
     try {
@@ -782,7 +980,7 @@ export function StudioLibrary({
         modelPath: state.whisperConfig.modelPath || null,
         language: state.sttLanguage,
       });
-      setMessage("Recording transcribed locally.");
+      setMessage(t("studio.library.retried"));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -791,12 +989,7 @@ export function StudioLibrary({
     }
   };
   const remove = async (id: string) => {
-    if (
-      !window.confirm(
-        "Delete this recording and its transcript from this device?",
-      )
-    )
-      return;
+    if (!window.confirm(t("studio.library.confirmDelete"))) return;
     try {
       await nativeProviderCall("delete_local_capture", { id });
       await refresh();
@@ -804,56 +997,58 @@ export function StudioLibrary({
       setMessage(error instanceof Error ? error.message : String(error));
     }
   };
+  const needle = query.toLocaleLowerCase(t.locale);
   const visible = captures.filter((item) =>
     (item.transcript || item.error || "")
-      .toLowerCase()
-      .includes(query.toLowerCase()),
+      .toLocaleLowerCase(t.locale)
+      .includes(needle),
   );
   return (
     <div className="studio-page">
       <div className="studio-page-heading">
         <div>
-          <p className="studio-eyebrow">A place for every thought</p>
-          <h1>Your voice library</h1>
-          <p>
-            Saved recordings, ready to revisit. Audio stays here until you
-            delete it.
-          </p>
+          <p className="studio-eyebrow">{t("studio.library.eyebrow")}</p>
+          <h1>{t("studio.library.title")}</h1>
+          <p>{t("studio.library.subtitle")}</p>
         </div>
         <button
           className="studio-button secondary"
           onClick={() => void refresh()}
         >
           <RefreshCw size={15} />
-          Refresh
+          {t("studio.common.refresh")}
         </button>
       </div>
       <input
         className="studio-search"
-        aria-label="Search saved recordings"
-        placeholder="Search your recordings…"
+        aria-label={t("studio.library.searchLabel")}
+        placeholder={t("studio.library.searchPlaceholder")}
         value={query}
         onChange={(event) => setQuery(event.target.value)}
       />
-      {(message || error) && (
+      {(message || player.error || error) && (
         <p className="studio-notice" role="status">
-          {message || error}
+          {message || player.error || error}
         </p>
       )}
       {!visible.length ? (
         <div className="studio-empty">
           <FileAudio size={38} />
-          <h3>{query ? "No matching recordings" : "A fresh start."}</h3>
+          <h3>
+            {query
+              ? t("studio.library.noMatch")
+              : t("studio.library.emptyTitle")}
+          </h3>
           <p>
             {query
-              ? "Try a different word."
-              : "Your recordings will appear here after you dictate or import audio in the Windows app."}
+              ? t("studio.library.tryOther")
+              : t("studio.library.emptyBody")}
           </p>
           <button
             className="studio-button"
             onClick={() => state.setActiveView("transcribe")}
           >
-            Create your first recording
+            {t("studio.library.createFirst")}
           </button>
         </div>
       ) : (
@@ -862,42 +1057,74 @@ export function StudioLibrary({
             <article key={item.id} className="studio-card">
               <div className="studio-section-heading">
                 <span className="studio-muted">
-                  {new Date(item.createdAtMs).toLocaleString()} ·{" "}
-                  {Math.round(item.durationMs / 1000)}s
+                  {new Date(item.createdAtMs).toLocaleString(t.locale)} ·{" "}
+                  {t("studio.common.secondsShort", {
+                    count: Math.round(item.durationMs / 1000),
+                  })}
                 </span>
                 <span
                   className={`studio-tag ${item.error ? "amber" : "green"}`}
                 >
-                  {item.error ? "Retry needed" : "Saved on device"}
+                  {item.error
+                    ? t("studio.library.retryNeeded")
+                    : t("studio.library.savedOnDevice")}
                 </span>
               </div>
               <p className="studio-transcript-preview">
-                {item.transcript || "No transcript yet."}
+                {item.transcript || t("studio.library.noTranscript")}
               </p>
               {item.error && <p className="studio-muted">{item.error}</p>}
               <div className="studio-card-actions">
                 <button
                   className="studio-link"
+                  onClick={() =>
+                    player.captureId === item.id && player.playing
+                      ? player.pause()
+                      : void player.play(
+                          item.id,
+                          // Carry on where this recording was paused.
+                          player.captureId === item.id &&
+                            player.positionMs < item.durationMs - 250
+                            ? player.positionMs
+                            : 0,
+                        )
+                  }
+                >
+                  {player.captureId === item.id && player.playing ? (
+                    <Pause size={14} />
+                  ) : (
+                    <Play size={14} />
+                  )}
+                  {player.captureId === item.id && player.playing
+                    ? t("studio.library.pause")
+                    : t("studio.library.listen")}
+                  {player.captureId === item.id && (
+                    <span className="studio-playhead">
+                      {formatTimestamp(player.positionMs)}
+                    </span>
+                  )}
+                </button>
+                <button
+                  className="studio-link"
                   disabled={!item.transcript}
                   onClick={() => {
-                    state.setTranscript(item.transcript || "");
+                    state.openCapture(item);
                     state.setActiveView("transcribe");
                   }}
                 >
-                  Open editor →
+                  {t("studio.library.openEditor")}
                 </button>
                 <button
                   className="studio-link"
                   disabled={!item.transcript}
                   onClick={() =>
-                    void navigator.clipboard
-                      .writeText(item.transcript || "")
-                      .then(() => setMessage("Transcript copied."))
-                      .catch(() => setMessage("Copy was blocked."))
+                    void copyTranscript(item.transcript || "", item.segments)
+                      .then(() => setMessage(t("studio.transcribe.copied")))
+                      .catch(() => setMessage(t("studio.library.copyBlocked")))
                   }
                 >
                   <Copy size={14} />
-                  Copy
+                  {t("studio.common.copy")}
                 </button>
                 <button
                   className="studio-link"
@@ -905,7 +1132,9 @@ export function StudioLibrary({
                   onClick={() => void retry(item.id)}
                 >
                   <RefreshCw size={14} />
-                  {busy === item.id ? "Transcribing…" : "Retry locally"}
+                  {busy === item.id
+                    ? t("studio.library.transcribing")
+                    : t("studio.library.retryLocal")}
                 </button>
                 <button
                   className="studio-link muted"
@@ -913,7 +1142,7 @@ export function StudioLibrary({
                   onClick={() => void remove(item.id)}
                 >
                   <Trash2 size={14} />
-                  Delete
+                  {t("studio.common.delete")}
                 </button>
               </div>
             </article>
@@ -926,6 +1155,7 @@ export function StudioLibrary({
 
 export function StudioVocabulary({ snippets = false }: { snippets?: boolean }) {
   const state = useDesktopStore();
+  const t = useT();
   const [first, setFirst] = useState(""),
     [second, setSecond] = useState("");
   const items = snippets
@@ -950,36 +1180,46 @@ export function StudioVocabulary({ snippets = false }: { snippets?: boolean }) {
     <div className="studio-page">
       <div className="studio-page-heading">
         <div>
-          <p className="studio-eyebrow">Sounds like you</p>
+          <p className="studio-eyebrow">{t("studio.vocab.eyebrow")}</p>
           <h1>
-            {snippets ? "Say less, write more" : "Your words, spelled right"}
+            {snippets
+              ? t("studio.snippets.title")
+              : t("studio.dictionary.title")}
           </h1>
           <p>
             {snippets
-              ? "Save reusable text blocks for local expansion in your drafts."
-              : "Teach local formatting the names, terms, and spellings you use."}
+              ? t("studio.snippets.subtitle")
+              : t("studio.dictionary.subtitle")}
           </p>
         </div>
       </div>
       <section className="studio-card">
         <div className="studio-form-grid">
           <label>
-            {snippets ? "Shortcut" : "Spoken or recognized spelling"}
+            {snippets
+              ? t("studio.snippets.triggerLabel")
+              : t("studio.dictionary.spokenLabel")}
             <input
               value={first}
               onChange={(e) => setFirst(e.target.value)}
               placeholder={
-                snippets ? "/signature" : "A word that needs correcting"
+                snippets
+                  ? t("studio.snippets.triggerPlaceholder")
+                  : t("studio.dictionary.spokenPlaceholder")
               }
             />
           </label>
           <label>
-            {snippets ? "Text to insert" : "Preferred spelling"}
+            {snippets
+              ? t("studio.snippets.bodyLabel")
+              : t("studio.dictionary.replacementLabel")}
             <input
               value={second}
               onChange={(e) => setSecond(e.target.value)}
               placeholder={
-                snippets ? "Your reusable text" : "How it should appear"
+                snippets
+                  ? t("studio.snippets.bodyPlaceholder")
+                  : t("studio.dictionary.replacementPlaceholder")
               }
             />
           </label>
@@ -988,14 +1228,18 @@ export function StudioVocabulary({ snippets = false }: { snippets?: boolean }) {
             onClick={add}
             disabled={!first.trim() || !second.trim()}
           >
-            Add {snippets ? "snippet" : "word"}
+            {snippets ? t("studio.snippets.add") : t("studio.dictionary.add")}
           </button>
         </div>
       </section>
       <div className="studio-section-heading">
-        <h2>{snippets ? "Your snippets" : "Personal dictionary"}</h2>
+        <h2>
+          {snippets
+            ? t("studio.snippets.listTitle")
+            : t("studio.dictionary.listTitle")}
+        </h2>
         <span className="studio-muted">
-          {items.length} entries · stored locally
+          {t.count("studio.vocab.count", items.length)}
         </span>
       </div>
       {items.length ? (
@@ -1007,7 +1251,7 @@ export function StudioVocabulary({ snippets = false }: { snippets?: boolean }) {
               <p>{item.second}</p>
               <button
                 className="studio-icon-button"
-                aria-label={`Delete ${item.first}`}
+                aria-label={t("studio.vocab.deleteLabel", { name: item.first })}
                 onClick={() =>
                   snippets
                     ? state.removeSnippet(item.id)
@@ -1021,15 +1265,28 @@ export function StudioVocabulary({ snippets = false }: { snippets?: boolean }) {
         </section>
       ) : (
         <div className="studio-empty compact">
-          <p>No entries yet. Add one above to personalize your drafts.</p>
+          <p>{t("studio.vocab.empty")}</p>
         </div>
       )}
     </div>
   );
 }
 
+/** "Deutsch (German)" in English, "Deutsch (allemand)" in French. */
+function dictationLanguageLabel(
+  language: (typeof STT_LANGUAGES)[number],
+  locale: SupportedLocale,
+) {
+  const translated = languageName(language.code, locale, language.name);
+  return translated.toLocaleLowerCase(locale) ===
+    language.nativeName.toLocaleLowerCase(locale)
+    ? language.nativeName
+    : `${language.nativeName} (${translated})`;
+}
+
 function PrivacyControls() {
   const recordingState = useDesktopStore((s) => s.recordingState);
+  const t = useT();
   const [retention, setRetention] = useState<RetentionDays>(() =>
     loadCaptureRetentionDays(),
   );
@@ -1046,8 +1303,8 @@ function PrivacyControls() {
     if (!native || days === 0) {
       setMessage(
         days === 0
-          ? "Recordings are kept until you delete them."
-          : "Saved. It applies in the Windows app.",
+          ? t("studio.privacy.keptForever")
+          : t("studio.privacy.savedPreview"),
       );
       return;
     }
@@ -1055,20 +1312,54 @@ function PrivacyControls() {
       const removed = await applyCaptureRetention(nativeProviderCall, days);
       setMessage(
         removed
-          ? `Saved. Deleted ${removed} recording${removed === 1 ? "" : "s"} older than ${retentionLabel(days)}.`
-          : `Saved. Recordings older than ${retentionLabel(days)} are deleted automatically.`,
+          ? t.count("studio.privacy.savedDeleted", removed, {
+              period: retentionLabel(days),
+            })
+          : t("studio.privacy.savedAuto", { period: retentionLabel(days) }),
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     }
   };
+  const [format, setFormat] = useState<CaptureFormat>(() =>
+    loadCaptureFormat(),
+  );
+  const [compressing, setCompressing] = useState(false);
+  const compressNow = async () => {
+    setCompressing(true);
+    setMessage("");
+    try {
+      const done = await compressCaptures(nativeProviderCall);
+      const parts = [
+        done.recordings
+          ? t.count("studio.storage.compressed", done.recordings, {
+              size: formatSize(done.bytesFreed, t.locale),
+            })
+          : done.failed
+            ? ""
+            : t("studio.storage.nothingToCompress"),
+        done.failed ? t.count("studio.storage.failed", done.failed) : "",
+      ];
+      setMessage(parts.filter(Boolean).join(" "));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCompressing(false);
+    }
+  };
+  const changeFormat = (next: CaptureFormat) => {
+    setFormat(next);
+    saveCaptureFormat(next);
+    setMessage(
+      !native
+        ? t("studio.privacy.savedPreview")
+        : next === "opus"
+          ? t("studio.storage.savedOpus")
+          : t("studio.storage.savedWav"),
+    );
+  };
   const deleteEverything = async () => {
-    if (
-      !window.confirm(
-        "Delete all your recordings, transcripts, dictionary, snippets, saved API keys and settings from this device? This cannot be undone.",
-      )
-    )
-      return;
+    if (!window.confirm(t("studio.privacy.confirmDeleteAll"))) return;
     setBusy(true);
     setMessage("");
     try {
@@ -1080,7 +1371,9 @@ function PrivacyControls() {
       );
       if (result.problems.length) {
         setMessage(
-          `Some data could not be deleted: ${result.problems.join("; ")}`,
+          t("studio.privacy.partialFailure", {
+            problems: result.problems.join("; "),
+          }),
         );
         return;
       }
@@ -1097,15 +1390,13 @@ function PrivacyControls() {
           <ShieldCheck size={25} />
         </div>
         <div>
-          <h3>Privacy & retention</h3>
-          <p>
-            Recordings and transcripts never leave this device in Local only.
-          </p>
+          <h3>{t("studio.privacy.title")}</h3>
+          <p>{t("studio.privacy.subtitle")}</p>
         </div>
       </div>
       <div className="studio-privacy-actions">
         <label>
-          Keep recordings
+          {t("studio.privacy.keep")}
           <select
             value={retention}
             onChange={(event) =>
@@ -1119,19 +1410,43 @@ function PrivacyControls() {
             ))}
           </select>
         </label>
+        <label>
+          {t("studio.storage.format")}
+          <select
+            value={format}
+            onChange={(event) =>
+              changeFormat(event.target.value as CaptureFormat)
+            }
+          >
+            {CAPTURE_FORMATS.map((choice) => (
+              <option key={choice} value={choice}>
+                {t(`studio.storage.${choice}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+        {native && format === "opus" && (
+          <button
+            className="studio-button secondary"
+            disabled={compressing || busy || capturing}
+            onClick={() => void compressNow()}
+          >
+            <Archive size={15} />
+            {compressing
+              ? t("studio.storage.compressing")
+              : t("studio.storage.compressNow")}
+          </button>
+        )}
         <button
           className="studio-button danger"
           disabled={busy || capturing}
           onClick={() => void deleteEverything()}
         >
           <Trash2 size={15} />
-          {busy ? "Deleting…" : "Delete all my data"}
+          {busy ? t("studio.privacy.deleting") : t("studio.privacy.deleteAll")}
         </button>
       </div>
-      <p className="studio-muted">
-        Deletes recordings, transcripts, your dictionary and snippets, saved API
-        keys and settings. Downloaded speech models are kept.
-      </p>
+      <p className="studio-muted">{t("studio.privacy.deleteAllHint")}</p>
       {message && (
         <p role="status" className="studio-notice">
           {message}
@@ -1143,6 +1458,9 @@ function PrivacyControls() {
 
 export function StudioSettings() {
   const state = useDesktopStore();
+  const t = useT();
+  const [bubbleVisibility, setBubbleVisibility] =
+    useState<BubbleVisibility>(loadBubbleVisibility);
   const [model, setModel] = useState<{ ready: boolean; path: string }>(),
     [busy, setBusy] = useState(false),
     [progress, setProgress] = useState(0),
@@ -1185,9 +1503,7 @@ export function StudioSettings() {
         command: [],
       });
       setModel(result);
-      setMessage(
-        "Model downloaded and checksum verified. You can use it offline.",
-      );
+      setMessage(t("studio.settings.modelDownloaded"));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1199,9 +1515,9 @@ export function StudioSettings() {
     <div className="studio-page">
       <div className="studio-page-heading">
         <div>
-          <p className="studio-eyebrow">Your space, your rules</p>
-          <h1>Make yourself at home</h1>
-          <p>Local models, language, and privacy in one place.</p>
+          <p className="studio-eyebrow">{t("studio.settings.eyebrow")}</p>
+          <h1>{t("studio.settings.title")}</h1>
+          <p>{t("studio.settings.subtitle")}</p>
         </div>
       </div>
       <div className="studio-grid two">
@@ -1211,14 +1527,14 @@ export function StudioSettings() {
               <Cpu size={25} />
             </div>
             <div>
-              <h3>Local Whisper</h3>
-              <p>Multilingual Base · CPU · 148 MB</p>
+              <h3>{t("studio.settings.whisperTitle")}</h3>
+              <p>{t("studio.settings.whisperMeta")}</p>
             </div>
           </div>
           <p className="studio-muted">
             {model?.ready
-              ? "A local model is available on this computer."
-              : "Install a model once, then dictate without an internet connection."}
+              ? t("studio.settings.modelReady")
+              : t("studio.settings.modelMissing")}
           </p>
           <button
             className="studio-button"
@@ -1227,18 +1543,18 @@ export function StudioSettings() {
           >
             <Download size={15} />
             {busy
-              ? `Downloading ${progress}%`
+              ? t("studio.settings.downloading", { progress })
               : model?.ready
-                ? "Reinstall verified model"
-                : "Install local model"}
+                ? t("studio.settings.reinstall")
+                : t("studio.settings.install")}
           </button>
           {busy && (
             <progress max={100} value={progress} className="studio-progress" />
           )}
           <details className="studio-details">
-            <summary>Use an existing model</summary>
+            <summary>{t("studio.settings.existingModel")}</summary>
             <label>
-              Whisper .bin file path
+              {t("studio.settings.modelPath")}
               <input
                 value={state.whisperConfig.modelPath}
                 onChange={(e) =>
@@ -1252,59 +1568,102 @@ export function StudioSettings() {
           </details>
         </section>
         <section className="studio-card">
-          <h3>Language & processing</h3>
+          <h3>{t("studio.settings.languageTitle")}</h3>
           <label>
-            Dictation language
+            {t("studio.settings.interfaceLanguage")}
+            <select
+              value={
+                (LAUNCH_LOCALES as readonly string[]).includes(state.locale)
+                  ? state.locale
+                  : "en"
+              }
+              onChange={(e) => state.setLocale(e.target.value as LaunchLocale)}
+            >
+              {LAUNCH_LOCALES.map((locale) => (
+                <option value={locale} key={locale} lang={locale}>
+                  {LOCALE_NAMES[locale]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            {t("studio.settings.dictationLanguage")}
             <select
               value={state.sttLanguage}
               onChange={(e) => state.setSttLanguage(e.target.value)}
             >
               {STT_LANGUAGES.map((language) => (
                 <option value={language.code} key={language.code}>
-                  {language.nativeName === language.name
-                    ? language.name
-                    : `${language.nativeName} (${language.name})`}
+                  {language.code === "auto"
+                    ? t("studio.settings.languageAuto")
+                    : dictationLanguageLabel(language, t.locale)}
                 </option>
               ))}
             </select>
           </label>
           <label>
-            Processing mode
+            {t("studio.mode.label")}
             <select
               value={state.privacyLevel}
               onChange={(e) =>
                 state.setPrivacyLevel(e.target.value as "local" | "cloud")
               }
             >
-              <option value="local">Local only</option>
-              <option value="cloud">Cloud enabled</option>
+              <option value="local">{t("studio.mode.local")}</option>
+              <option value="cloud">{t("studio.mode.cloud")}</option>
             </select>
           </label>
-          <p className="studio-muted">
-            Local only blocks online audio and text processing. Model catalog
-            lookups and downloads are separate actions.
-          </p>
+          <p className="studio-muted">{t("studio.settings.modeHint")}</p>
         </section>
       </div>
+      <section className="studio-card" aria-labelledby="bubble-settings">
+        <h3 id="bubble-settings">{t("studio.settings.bubbleTitle")}</h3>
+        <p className="studio-muted">
+          {t("studio.settings.bubbleHint", {
+            toggle: `Ctrl + ${t("studio.keys.shift")} + M`,
+            hold: `Ctrl + ${t("studio.keys.shift")} + V`,
+            cancel: t("studio.keys.esc"),
+          })}
+        </p>
+        <label>
+          {t("studio.settings.bubbleShow")}
+          <select
+            value={bubbleVisibility}
+            onChange={(e) => {
+              const next = e.target.value as BubbleVisibility;
+              setBubbleVisibility(next);
+              saveBubbleVisibility(next);
+            }}
+          >
+            <option value="always">{t("studio.settings.bubbleAlways")}</option>
+            <option value="dictating">
+              {t("studio.settings.bubbleDictating")}
+            </option>
+            <option value="off">{t("studio.settings.bubbleOff")}</option>
+          </select>
+        </label>
+      </section>
+      <MicrophoneSettings />
       <PrivacyControls />
       <section className="studio-card">
-        <h3>Shortcuts & storage</h3>
+        <h3>{t("studio.settings.shortcutsTitle")}</h3>
         <div className="studio-workflow-row">
-          <span>Toggle recording</span>
-          <kbd>Ctrl + Shift + M</kbd>
+          <span>{t("studio.settings.shortcutToggle")}</span>
+          <kbd>Ctrl + {t("studio.keys.shift")} + M</kbd>
         </div>
         <div className="studio-workflow-row">
-          <span>Hold to talk</span>
-          <kbd>Ctrl + Shift + V</kbd>
+          <span>{t("studio.settings.shortcutHold")}</span>
+          <kbd>Ctrl + {t("studio.keys.shift")} + V</kbd>
         </div>
         <div className="studio-workflow-row">
-          <span>Quick navigation</span>
+          <span>{t("studio.settings.shortcutCancel")}</span>
+          <kbd>{t("studio.keys.esc")}</kbd>
+        </div>
+        <div className="studio-workflow-row">
+          <span>{t("studio.settings.shortcutNav")}</span>
           <kbd>Ctrl + K</kbd>
         </div>
-        <p className="studio-muted">
-          Recordings are limited to three minutes and saved on this device for
-          as long as you choose above. API keys use Windows Credential Manager.
-        </p>
+        <p className="studio-muted">{t("studio.settings.storageHint")}</p>
       </section>
       {message && (
         <p role="status" className="studio-notice">
@@ -1312,10 +1671,7 @@ export function StudioSettings() {
         </p>
       )}
       {!isTauriRuntime() && (
-        <p className="studio-notice">
-          This is the browser preview. Model installation and local speech run
-          in the Windows app.
-        </p>
+        <p className="studio-notice">{t("studio.settings.previewNotice")}</p>
       )}
     </div>
   );

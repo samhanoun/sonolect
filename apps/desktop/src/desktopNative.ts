@@ -135,6 +135,20 @@ export async function registerNativeDictationShortcuts({
   }
 }
 
+/**
+ * Before pasting a bubble dictation: if clicking the bubble moved focus to
+ * Sonolect, give it back to the app the user was dictating into (Windows).
+ */
+export async function restoreDictationTarget(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke<boolean>("bubble_restore_target");
+  } catch {
+    // Older shell or unsupported platform: paste into whatever has focus.
+  }
+}
+
 export async function insertTextIntoActiveApp(
   text: string,
 ): Promise<NativeInsertionResult> {

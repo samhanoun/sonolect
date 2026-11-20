@@ -5,8 +5,12 @@ import type { TranscriptTurn } from "./domain";
 import { normalizeSettings } from "./domain";
 import { STRINGS } from "./i18n";
 import {
+  EXPORT_FORMATS,
+  exportAsJson,
   exportAsMarkdown,
+  exportAsText,
   exportFileName,
+  exportLibrary,
   filterHistory,
   formatDuration,
   formatNoteDate,
@@ -133,6 +137,86 @@ describe("library", () => {
     );
   });
 
+  it("names text and JSON exports with their own extension", () => {
+    const date = new Date(2026, 10, 12, 0, 1);
+    assert.equal(exportFileName(date, "text"), "sonolect-notes-2026-11-12.txt");
+    assert.equal(
+      exportFileName(date, "json"),
+      "sonolect-notes-2026-11-12.json",
+    );
+  });
+
+  it("exports plain text with a rule between notes", () => {
+    const several = turn({
+      refinedText: "First paragraph.\n\nSecond paragraph.",
+      createdAt: "2026-11-03T10:00:00.000Z",
+    });
+    assert.equal(
+      exportAsText([several, history[1]!]),
+      "2026-11-03 10:00 · dictate\n\nFirst paragraph.\n\nSecond paragraph." +
+        "\n\n----------\n\n" +
+        "2026-11-02 10:00 · summarize\n\nProduct sync notes",
+    );
+    assert.equal(exportAsText([]), "");
+  });
+
+  it("exports JSON that keeps dates, modes and the text as dictated", () => {
+    const refined = turn({
+      id: "r",
+      rawText: "um client summary due at four",
+      refinedText: "Client summary due at four.",
+      pinned: true,
+      source: "typed",
+      durationMs: 0,
+    });
+    const same = turn({ id: "s", rawText: "As said", refinedText: "As said" });
+    const parsed = JSON.parse(
+      exportAsJson([refined, same], new Date("2026-11-20T08:00:00.000Z")),
+    ) as {
+      app: string;
+      formatVersion: number;
+      exportedAt: string;
+      notes: Record<string, unknown>[];
+    };
+    assert.equal(parsed.app, "Sonolect");
+    assert.equal(parsed.formatVersion, 1);
+    assert.equal(parsed.exportedAt, "2026-11-20T08:00:00.000Z");
+    assert.deepEqual(parsed.notes[0], {
+      id: "r",
+      createdAt: "2026-11-01T10:00:00.000Z",
+      mode: "dictate",
+      language: "en-US",
+      source: "typed",
+      durationMs: 0,
+      pinned: true,
+      text: "Client summary due at four.",
+      original: "um client summary due at four",
+    });
+    // No copy of the text when refining changed nothing.
+    assert.equal("original" in parsed.notes[1]!, false);
+    assert.equal(parsed.notes[1]!.pinned, false);
+    // Nothing about sync or privacy settings leaves the phone.
+    assert.equal("syncState" in parsed.notes[0]!, false);
+    assert.equal("privacyMode" in parsed.notes[0]!, false);
+  });
+
+  it("exports the library in every offered format", () => {
+    assert.deepEqual([...EXPORT_FORMATS], ["markdown", "text", "json"]);
+    const options = { exportedAt: new Date("2026-11-20T08:00:00.000Z") };
+    assert.equal(
+      exportLibrary(history, "markdown", options),
+      exportAsMarkdown(history),
+    );
+    assert.equal(
+      exportLibrary(history, "text", options),
+      exportAsText(history),
+    );
+    assert.equal(
+      exportLibrary(history, "json", options),
+      exportAsJson(history, options.exportedAt),
+    );
+  });
+
   it("uses the device's formats only when it speaks the UI language", () => {
     assert.equal(formattingLocale("fr", "fr-CA"), undefined);
     assert.equal(formattingLocale("en", "en-GB"), undefined);
@@ -152,6 +236,18 @@ describe("settings and safety", () => {
     assert.equal(settings.language, "en-US");
     assert.equal(settings.speechRate, 2);
     assert.equal(settings.uiLanguage, "en");
+  });
+
+  it("keeps notes forever unless a known retention was chosen", () => {
+    assert.equal(normalizeSettings({}).retentionDays, 0);
+    assert.equal(normalizeSettings({ retentionDays: 30 }).retentionDays, 30);
+    for (const bad of [-1, 2, 365, "7", null, Number.NaN]) {
+      assert.equal(
+        normalizeSettings({ retentionDays: bad as never }).retentionDays,
+        0,
+        String(bad),
+      );
+    }
   });
 
   it("only sends data to https or local-network http endpoints", () => {

@@ -7,9 +7,10 @@ import helmet from "@fastify/helmet";
 import cors from "@fastify/cors";
 import { randomUUID } from "node:crypto";
 import {
-  verifyStripeSignature,
   parseStripeEvent,
   handleSubscriptionEvent,
+  resolvePlanChange,
+  type PaidPlan,
 } from "./stripe-helpers.js";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -21,8 +22,20 @@ import type {
   UsageQuotaSummary,
 } from "@sonolect/types";
 import { trackUsageSchema, type TrackUsageInput } from "@sonolect/validation";
+import {
+  BoundedMap,
+  isValidUserId,
+  registerServiceSecurity,
+  resolveListenOptions,
+  resolveRequestUserId,
+  type ServiceEnv,
+} from "@sonolect/service-kit";
 
 const serviceName = "sonolect-billing-service";
+const MAX_USAGE_EVENTS = 100_000;
+const MAX_TRACKED_USERS = 100_000;
+const MAX_REMEMBERED_STRIPE_EVENTS = 10_000;
+const STRIPE_WEBHOOK_BODY_LIMIT_BYTES = 1_048_576;
 
 export const billingPlans: Record<SonolectPlan, BillingPlanDefinition> = {
   free: {
@@ -71,12 +84,28 @@ export const billingPlans: Record<SonolectPlan, BillingPlanDefinition> = {
 interface BillingStores {
   userPlans: Map<string, SonolectPlan>;
   usageEvents: Map<string, UsageEvent>;
+  /** Stripe customer ID to Sonolect user ID, learned at checkout. */
+  stripeCustomers?: Map<string, string>;
+  /** Stripe event IDs already applied, so a redelivery is not applied twice. */
+  processedStripeEvents?: Map<string, true>;
 }
 
-const createStores = (): BillingStores => ({
-  userPlans: new Map([["local-user", "pro"]]),
-  usageEvents: new Map(),
+const createStores = (): Required<BillingStores> => ({
+  userPlans: new BoundedMap<string, SonolectPlan>(MAX_TRACKED_USERS, [
+    ["local-user", "pro"],
+  ]),
+  usageEvents: new BoundedMap(MAX_USAGE_EVENTS),
+  stripeCustomers: new BoundedMap(MAX_TRACKED_USERS),
+  processedStripeEvents: new BoundedMap(MAX_REMEMBERED_STRIPE_EVENTS),
 });
+
+const stripeLookupKeys: Readonly<Record<string, PaidPlan>> = Object.fromEntries(
+  Object.values(billingPlans).flatMap((plan) =>
+    plan.stripePriceLookupKey && plan.id !== "free"
+      ? [[plan.stripePriceLookupKey, plan.id] as const]
+      : [],
+  ),
+);
 
 const parseBody = <T>(
   schema: { parse: (value: unknown) => T },
@@ -113,22 +142,13 @@ const currentBillingPeriod = () => {
   };
 };
 
-const usageFor = (
-  events: Iterable<UsageEvent>,
-  userId: string,
-  metric: UsageMetric,
-  periodStart: string,
-  periodEnd: string,
-) =>
-  [...events]
-    .filter(
-      (event) =>
-        event.userId === userId &&
-        event.metric === metric &&
-        event.occurredAt >= periodStart &&
-        event.occurredAt < periodEnd,
-    )
-    .reduce((sum, event) => sum + event.quantity, 0);
+const usageMetrics = [
+  "transcripts",
+  "commands",
+  "minutes",
+  "storageMb",
+  "agentRuns",
+] as const satisfies readonly UsageMetric[];
 
 const toQuotaSummary = (
   stores: BillingStores,
@@ -137,61 +157,33 @@ const toQuotaSummary = (
   const plan = stores.userPlans.get(userId) ?? "free";
   const { periodStart, periodEnd } = currentBillingPeriod();
   const quotas = billingPlans[plan].quotas;
+  // One pass over the events instead of one pass per metric.
+  const used: Record<UsageMetric, number> = {
+    transcripts: 0,
+    commands: 0,
+    minutes: 0,
+    storageMb: 0,
+    agentRuns: 0,
+  };
+  for (const event of stores.usageEvents.values()) {
+    if (
+      event.userId === userId &&
+      event.occurredAt >= periodStart &&
+      event.occurredAt < periodEnd
+    )
+      used[event.metric] += event.quantity;
+  }
   return {
     userId,
     plan,
     periodStart,
     periodEnd,
-    transcripts: {
-      used: usageFor(
-        stores.usageEvents.values(),
-        userId,
-        "transcripts",
-        periodStart,
-        periodEnd,
-      ),
-      limit: quotas.transcripts,
-    },
-    commands: {
-      used: usageFor(
-        stores.usageEvents.values(),
-        userId,
-        "commands",
-        periodStart,
-        periodEnd,
-      ),
-      limit: quotas.commands,
-    },
-    minutes: {
-      used: usageFor(
-        stores.usageEvents.values(),
-        userId,
-        "minutes",
-        periodStart,
-        periodEnd,
-      ),
-      limit: quotas.minutes,
-    },
-    storageMb: {
-      used: usageFor(
-        stores.usageEvents.values(),
-        userId,
-        "storageMb",
-        periodStart,
-        periodEnd,
-      ),
-      limit: quotas.storageMb,
-    },
-    agentRuns: {
-      used: usageFor(
-        stores.usageEvents.values(),
-        userId,
-        "agentRuns",
-        periodStart,
-        periodEnd,
-      ),
-      limit: quotas.agentRuns,
-    },
+    ...(Object.fromEntries(
+      usageMetrics.map((metric) => [
+        metric,
+        { used: used[metric], limit: quotas[metric] },
+      ]),
+    ) as Pick<UsageQuotaSummary, UsageMetric>),
   };
 };
 
@@ -201,16 +193,28 @@ export interface CreateAppOptions {
   stores?: BillingStores;
   logger?: boolean;
   stripeWebhookSecret?: string;
+  env?: ServiceEnv;
 }
 
 export async function createApp(
   options: CreateAppOptions = {},
 ): Promise<FastifyInstance> {
-  const stores = options.stores ?? createStores();
+  const stores: Required<BillingStores> = {
+    ...createStores(),
+    ...options.stores,
+  };
+  const env = options.env ?? process.env;
   const app = Fastify({ logger: options.logger ?? true });
 
   await app.register(helmet);
   await app.register(cors, { origin: false });
+  registerServiceSecurity(app, {
+    serviceName,
+    env,
+    // Stripe cannot send a service token; the webhook verifies the Stripe
+    // signature instead. The plan catalogue is public pricing information.
+    publicRoutes: ["GET /billing/plans", "POST /webhooks/stripe"],
+  });
 
   app.get("/health", async () => ({ status: "ok", service: serviceName }));
   app.get("/billing/plans", async () => ({
@@ -219,7 +223,11 @@ export async function createApp(
 
   app.get<{ Params: { userId: string } }>(
     "/billing/users/:userId/quota",
-    async (request) => toQuotaSummary(stores, request.params.userId),
+    async (request) =>
+      toQuotaSummary(
+        stores,
+        resolveRequestUserId(request, request.params.userId),
+      ),
   );
 
   app.post(
@@ -227,9 +235,10 @@ export async function createApp(
     async (request, reply): Promise<UsageEvent | FastifyReply> => {
       try {
         const input = parseBody<TrackUsageInput>(trackUsageSchema, request);
+        const userId = resolveRequestUserId(request, input.userId);
         const event: UsageEvent = {
           id: randomUUID(),
-          userId: input.userId,
+          userId,
           metric: input.metric,
           quantity: input.quantity,
           source: input.source,
@@ -244,35 +253,71 @@ export async function createApp(
     },
   );
 
-  app.post("/webhooks/stripe", async (request, reply) => {
-    const payload =
-      typeof request.body === "string"
-        ? request.body
-        : JSON.stringify(request.body ?? {});
-    const signature = request.headers["stripe-signature"];
-    const signatureHeader = Array.isArray(signature) ? signature[0] : signature;
-    const secret =
-      options.stripeWebhookSecret ?? process.env.STRIPE_WEBHOOK_SECRET;
-    if (!signatureHeader || !secret) {
-      return reply.status(400).send({
-        error: "invalid_signature",
-        message: "Stripe webhook signature verification failed",
+  // Stripe signs the exact bytes it sent, so this route must see the raw
+  // body. Re-serialising parsed JSON changes whitespace and key escaping and
+  // makes every real signature fail. The parser override is scoped to this
+  // plugin so the other routes keep Fastify's JSON parsing.
+  await app.register(async (webhooks) => {
+    webhooks.addContentTypeParser(
+      "application/json",
+      { parseAs: "string", bodyLimit: STRIPE_WEBHOOK_BODY_LIMIT_BYTES },
+      (_request, body, done) => done(null, body),
+    );
+
+    webhooks.post("/webhooks/stripe", async (request, reply) => {
+      const invalidSignature = () =>
+        reply.status(400).send({
+          error: "invalid_signature",
+          message: "Stripe webhook signature verification failed",
+        });
+      const payload = typeof request.body === "string" ? request.body : "";
+      const signature = request.headers["stripe-signature"];
+      const signatureHeader = Array.isArray(signature)
+        ? signature[0]
+        : signature;
+      const secret = options.stripeWebhookSecret ?? env.STRIPE_WEBHOOK_SECRET;
+      if (!payload || !signatureHeader || !secret) return invalidSignature();
+      const event = parseStripeEvent(payload, signatureHeader, secret);
+      if (!event) return invalidSignature();
+
+      // Stripe retries deliveries; applying an event twice must be a no-op.
+      const eventId = typeof event.id === "string" ? event.id : undefined;
+      if (eventId && stores.processedStripeEvents.has(eventId))
+        return reply.status(200).send({ received: true, duplicate: true });
+
+      const result = handleSubscriptionEvent(event);
+      const change = resolvePlanChange(event, stripeLookupKeys);
+      if (
+        change.customerId &&
+        isValidUserId(change.userId) &&
+        event.type === "checkout.session.completed"
+      )
+        stores.stripeCustomers.set(change.customerId, change.userId);
+      const candidateUserId =
+        change.userId ??
+        (change.customerId
+          ? stores.stripeCustomers.get(change.customerId)
+          : undefined);
+      const userId = isValidUserId(candidateUserId)
+        ? candidateUserId
+        : undefined;
+      const planApplied = Boolean(userId && change.plan);
+      if (userId && change.plan) stores.userPlans.set(userId, change.plan);
+      if (change.plan && !userId)
+        request.log.warn(
+          { eventId, eventType: event.type },
+          "Stripe event changes a plan but names no known Sonolect user",
+        );
+      if (eventId) stores.processedStripeEvents.set(eventId, true);
+
+      return reply.status(202).send({
+        received: true,
+        processed: result.action !== "unhandled",
+        action: result.action,
+        customerId: result.customerId,
+        status: result.status,
+        planApplied,
       });
-    }
-    const event = parseStripeEvent(payload, signatureHeader, secret);
-    if (!event) {
-      return reply.status(400).send({
-        error: "invalid_signature",
-        message: "Stripe webhook signature verification failed",
-      });
-    }
-    const result = handleSubscriptionEvent(event);
-    return reply.status(202).send({
-      received: true,
-      processed: true,
-      action: result.action,
-      customerId: result.customerId,
-      status: result.status,
     });
   });
 
@@ -283,6 +328,5 @@ const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isDirectRun) {
   const app = await createApp();
-  const port = Number(process.env.PORT ?? 8080);
-  await app.listen({ host: "0.0.0.0", port });
+  await app.listen(resolveListenOptions());
 }

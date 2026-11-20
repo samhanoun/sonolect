@@ -8,6 +8,9 @@ use tauri::ipc::{InvokeBody, Request};
 
 /// Largest accepted recording: three minutes of 16 kHz mono 16-bit WAV.
 pub const MAX_AUDIO_BYTES: usize = 5_800_044;
+/// Largest piece of a live recording: about a minute of 16 kHz mono PCM. The
+/// web layer sends half-second pieces; the room is for a stalled queue.
+pub const MAX_CHUNK_BYTES: usize = 2_000_000;
 
 fn percent_decode(value: &str) -> Option<String> {
     let bytes = value.as_bytes();
@@ -40,7 +43,7 @@ pub fn header(request: &Request<'_>, name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn body_bytes(body: &InvokeBody) -> Result<Vec<u8>, String> {
+fn body_bytes(body: &InvokeBody, limit: usize) -> Result<Vec<u8>, String> {
     let bytes = match body {
         InvokeBody::Raw(bytes) => bytes.clone(),
         // The postMessage IPC fallback delivers binary bodies as number arrays.
@@ -51,15 +54,20 @@ fn body_bytes(body: &InvokeBody) -> Result<Vec<u8>, String> {
             .ok_or("The recording was not sent as audio bytes.")?,
         InvokeBody::Json(_) => return Err("Send the recording as binary audio.".into()),
     };
-    if bytes.is_empty() || bytes.len() > MAX_AUDIO_BYTES {
+    if bytes.is_empty() || bytes.len() > limit {
         return Err("Invalid recording size.".into());
     }
     Ok(bytes)
 }
 
+/// One piece of a live recording: the raw 16-bit PCM body of the request.
+pub fn pcm_chunk(request: &Request<'_>) -> Result<Vec<u8>, String> {
+    body_bytes(request.body(), MAX_CHUNK_BYTES)
+}
+
 /// Builds the engine payload from a binary IPC request.
 pub fn whisper_payload(request: &Request<'_>) -> Result<super::WhisperPayload, String> {
-    let audio_bytes = body_bytes(request.body())?;
+    let audio_bytes = body_bytes(request.body(), MAX_AUDIO_BYTES)?;
     let duration_ms = header(request, "x-sonolect-duration-ms")
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0)
@@ -93,16 +101,38 @@ mod tests {
     #[test]
     fn accepts_raw_bodies_and_the_number_array_fallback() {
         assert_eq!(
-            body_bytes(&InvokeBody::Raw(vec![1, 2, 3])).unwrap(),
+            body_bytes(&InvokeBody::Raw(vec![1, 2, 3]), MAX_AUDIO_BYTES).unwrap(),
             vec![1, 2, 3]
         );
         assert_eq!(
-            body_bytes(&InvokeBody::Json(serde_json::json!([1, 2, 255]))).unwrap(),
+            body_bytes(
+                &InvokeBody::Json(serde_json::json!([1, 2, 255])),
+                MAX_AUDIO_BYTES
+            )
+            .unwrap(),
             vec![1, 2, 255]
         );
-        assert!(body_bytes(&InvokeBody::Json(serde_json::json!([1, 256]))).is_err());
-        assert!(body_bytes(&InvokeBody::Json(serde_json::json!({"payload": 1}))).is_err());
-        assert!(body_bytes(&InvokeBody::Raw(vec![])).is_err());
-        assert!(body_bytes(&InvokeBody::Raw(vec![0; MAX_AUDIO_BYTES + 1])).is_err());
+        assert!(body_bytes(
+            &InvokeBody::Json(serde_json::json!([1, 256])),
+            MAX_AUDIO_BYTES
+        )
+        .is_err());
+        assert!(body_bytes(
+            &InvokeBody::Json(serde_json::json!({"payload": 1})),
+            MAX_AUDIO_BYTES
+        )
+        .is_err());
+        assert!(body_bytes(&InvokeBody::Raw(vec![]), MAX_AUDIO_BYTES).is_err());
+        assert!(body_bytes(
+            &InvokeBody::Raw(vec![0; MAX_AUDIO_BYTES + 1]),
+            MAX_AUDIO_BYTES
+        )
+        .is_err());
+        assert!(body_bytes(&InvokeBody::Raw(vec![0; MAX_CHUNK_BYTES]), MAX_CHUNK_BYTES).is_ok());
+        assert!(body_bytes(
+            &InvokeBody::Raw(vec![0; MAX_CHUNK_BYTES + 1]),
+            MAX_CHUNK_BYTES
+        )
+        .is_err());
     }
 }

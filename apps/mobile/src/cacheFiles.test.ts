@@ -13,6 +13,8 @@ describe("isSweepableCacheFile", () => {
       "temp_0b9d.pcm",
       "temp_3f2c9a4e-8d1b-4c55-9a51-0f7e2d6b1c33.pcm",
       "sonolect-notes-2026-11-10.md",
+      "sonolect-notes-2026-11-10.txt",
+      "sonolect-notes-2026-11-10.json",
     ]) {
       assert.equal(isSweepableCacheFile(name), true, name);
     }
@@ -27,7 +29,8 @@ describe("isSweepableCacheFile", () => {
       "recording_1A2B.wav.bak",
       "temp_0b9d.pcm.tmp",
       "my-recording_1.wav",
-      "sonolect-notes-2026-11-10.txt",
+      "sonolect-notes-2026-11-10.pdf",
+      "sonolect-notes-2026-11-10.json.bak",
       "",
     ]) {
       assert.equal(isSweepableCacheFile(name), false, name);

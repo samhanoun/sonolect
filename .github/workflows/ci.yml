@@ -426,6 +426,51 @@ jobs:
       - name: Terraform fmt
         run: terraform fmt -check -recursive
 
+      - name: Terraform validate
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate -no-color
+
+  service-images:
+    name: Service image (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - api
+          - agent-service
+          - audio-service
+          - billing-service
+          - sync-service
+          - worker-service
+    env:
+      SERVICE: ${{ matrix.service }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build the container image
+        run: docker build -f "services/${SERVICE}/Dockerfile" -t "sonolect-${SERVICE}" .
+
+      - name: Start it in production mode and check /health
+        run: |
+          set -euo pipefail
+          docker run -d --name service -p 8080:8080 \
+            -e FIREBASE_PROJECT_ID=sonolect-ci \
+            -e SONOLECT_SERVICE_TOKENS="$(openssl rand -hex 24)" \
+            "sonolect-${SERVICE}"
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:8080/health; then
+              echo
+              echo "Healthy after ${attempt} attempt(s)"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs service
+          exit 1
+
   security:
     name: Dependency and secret scanning
     runs-on: ubuntu-latest

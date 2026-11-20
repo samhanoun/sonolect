@@ -3,7 +3,8 @@
 Expo SDK 58 app (React Native 0.88, React 19.3, New Architecture) for iOS and
 Android: capture → refine → library, plus a text-to-speech reader, dictionary,
 snippets and privacy controls. Design: the "Night" variant of the desktop
-Studio palette (forest `#1F3429`, lime `#DDF39A`).
+Studio palette (forest `#1F3429`, lime `#DDF39A`), drawn as glass (see
+[Mobile glass](../../docs/design-system.md#mobile-glass)).
 
 ## How it works
 
@@ -57,7 +58,8 @@ This build runs entirely on the phone. The switch is `API_FEATURES_ENABLED`
 in `src/features.ts`, and it is `false`.
 
 - **Works**: on-device dictation, the library on the phone, local clean-up,
-  Summary, Tasks, the Reader and export.
+  Summary, Tasks, the Reader, export (Markdown, plain text or JSON) and
+  automatic deletion of old notes (Settings, _Keep notes for_).
 - **Hidden**: sync, _Rewrite_ and _Reply_ through the API, audio upload, and
   the Settings API section (URL, token, connection test). The library shows
   no LOCAL / QUEUED / SYNCED labels.
