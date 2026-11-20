@@ -50,7 +50,7 @@ Reader and Team are disabled in local mode. Offline semantic rewriting with a lo
 
 ## Rebuild
 
-From PowerShell, run `./scripts/build-local.ps1` (or add `-Release` for an optimized build). Prerequisites: Node 22, Rust, LLVM/libclang, CMake, Microsoft C++ desktop tools, and installed workspace dependencies. The missing Microsoft C++ desktop component was added to this machine during this build.
+From PowerShell, run `./scripts/build-local.ps1` (or add `-Release` for an optimized build). Prerequisites: Node 22.12 or later, Rust, LLVM/libclang, CMake, Microsoft C++ desktop tools, and installed workspace dependencies. The missing Microsoft C++ desktop component was added to this machine during this build.
 
 For a repeatable engine check, run:
 

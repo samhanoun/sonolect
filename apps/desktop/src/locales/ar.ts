@@ -135,8 +135,7 @@ export const ar: Partial<Record<LocaleKeys, string>> = {
     "يطلب Sonolect navigator.mediaDevices.getUserMedia({ audio: true }).",
   "voice.recording.eyebrow": "استماع نشط",
   "voice.recording.title": "تحدّث، Sonolect يلتقط صوتك",
-  "voice.recording.detail":
-    "يجمع MediaRecorder أجزاء الصوت محلياً حتى الإيقاف.",
+  "voice.recording.detail": "يجمع MediaRecorder أجزاء الصوت محلياً حتى الإيقاف.",
   "voice.uploading.eyebrow": "إرسال التفريغ",
   "voice.uploading.title": "جارٍ تحضير مهمة الخادم…",
   "voice.uploading.detailConfigured":
