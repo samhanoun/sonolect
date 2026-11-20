@@ -1,3 +1,4 @@
+import { isHlc, toHlc } from "@sonolect/sync-core";
 import type { SonolectMode } from "@sonolect/types";
 
 import type { DictionaryEntry, Snippet, TranscriptTurn } from "./domain";
@@ -14,7 +15,9 @@ import type { DictionaryEntry, Snippet, TranscriptTurn } from "./domain";
  *   this session showed, but never writes the index; the ids it removes
  *   are recorded first, so the v2 history can't bring them back;
  * - the v2 history value is removed only after the new index was written
- *   and read back.
+ *   and read back;
+ * - a note's companion value (sync's sidecar, `<companion prefix><id>`) is
+ *   written with the note and removed with it.
  */
 
 /** AsyncStorage's own signatures satisfy this. */
@@ -42,6 +45,12 @@ export const LEGACY_V2_KEY = "sonolect.mobile.history.v2";
 export const DELETED_KEY = "sonolect.mobile.notes.deleted.v3";
 /** v0.1's history key. */
 export const LEGACY_V1_KEY = "sonolect.mobile.history";
+/**
+ * What sync keeps of a note beyond the note itself (src/sync/noteMapping.ts),
+ * one key per note: `<prefix><id>`. Outside NOTE_PREFIX, so a load never
+ * reads it as a note.
+ */
+export const SYNC_COMPANION_PREFIX = "sonolect.mobile.sync.note.";
 /** A value that could not be parsed is kept under its key plus this. */
 export const CORRUPT_SUFFIX = ".corrupt";
 const INDEX_VERSION = 3;
@@ -159,6 +168,8 @@ export function sanitizeTurn(
     source: oneOf(note.source, SOURCES, "microphone"),
     syncState: oneOf(note.syncState, SYNC_STATES, "local"),
     ...(note.pinned === true ? { pinned: true } : {}),
+    ...(isHlc(note.hlc) ? { hlc: toHlc(note.hlc) } : {}),
+    ...(isNoteId(note.conflictOf) ? { conflictOf: note.conflictOf } : {}),
   };
 }
 
@@ -290,11 +301,30 @@ export interface NotesLoad {
   notes: TranscriptTurn[];
 }
 
+/** One note for NoteStore.apply. */
+export interface NoteWrite {
+  note: TranscriptTurn;
+  /** Its companion value, or null to remove it; undefined leaves it as is. */
+  companion?: string | null;
+}
+
 export interface NoteStore {
   /** Reads the notes, moving the v2 history to one key per note once. */
   load(): Promise<NotesLoad>;
   /** Stores this list (newest first) as the notes. */
   save(notes: readonly TranscriptTurn[]): Promise<void>;
+  /**
+   * Stores single notes at once, for sync: `put` writes each note and its
+   * companion value in one write, `remove` deletes notes and their
+   * companions. It leaves the index alone, so a change costs one write
+   * whatever the number of notes: a load lists a stored note the index
+   * misses and drops an indexed one that is gone, and the next save writes
+   * the index. Rejects, writing nothing, while degraded.
+   */
+  apply(change: {
+    put?: readonly NoteWrite[];
+    remove?: readonly string[];
+  }): Promise<void>;
   /** Removes every note, the index and the older history values. */
   clear(): Promise<void>;
   /** True until a load succeeds, and after a load that failed. */
@@ -306,9 +336,20 @@ export function createNoteStore(
   {
     now = Date.now,
     batchSize = 50,
-  }: { now?: () => number; batchSize?: number } = {},
+    companionPrefix,
+  }: {
+    now?: () => number;
+    batchSize?: number;
+    /** Where companion values live (SYNC_COMPANION_PREFIX); none without. */
+    companionPrefix?: string;
+  } = {},
 ): NoteStore {
   const size = Math.max(1, Math.floor(batchSize));
+  /** A note's key and, with companions, its companion's key. */
+  const keysOf = (id: string): string[] =>
+    companionPrefix === undefined
+      ? [noteKey(id)]
+      : [noteKey(id), `${companionPrefix}${id}`];
   // Until a load succeeds, the stored notes are unknown: saves then remove
   // only the notes this session read or wrote, and never write the index.
   let degraded = true;
@@ -646,7 +687,7 @@ export function createNoteStore(
         serializeIndex([...new Set([...deleted, ...removed])]),
       );
     }
-    for (const batch of chunk(removed.map(noteKey), size)) {
+    for (const batch of chunk(removed.flatMap(keysOf), size)) {
       await kv.multiRemove(batch);
     }
     if (!degraded) {
@@ -655,6 +696,40 @@ export function createNoteStore(
     // A failure above keeps the previous baseline, so the next save writes
     // everything this one could not.
     known = next;
+  };
+
+  const apply = async ({
+    put = [],
+    remove = [],
+  }: {
+    put?: readonly NoteWrite[];
+    remove?: readonly string[];
+  }) => {
+    if (degraded) throw new Error("the notes are not loaded");
+    const nowMs = now();
+    const pairs: [string, string][] = [];
+    const removedKeys: string[] = [];
+    const written = new Map<string, { json: string; note: TranscriptTurn }>();
+    for (const { note, companion } of put) {
+      // A note a load would reject is never stored.
+      const clean = sanitizeTurn(note, nowMs);
+      if (!clean) continue;
+      const json = JSON.stringify(clean);
+      written.set(note.id, { json, note });
+      pairs.push([noteKey(note.id), json]);
+      if (companionPrefix !== undefined && companion !== undefined) {
+        const key = `${companionPrefix}${note.id}`;
+        if (companion === null) removedKeys.push(key);
+        else pairs.push([key, companion]);
+      }
+    }
+    const removed = remove.filter((id) => !written.has(id));
+    removedKeys.push(...removed.flatMap(keysOf));
+    // One write for the notes and their companions.
+    if (pairs.length > 0) await kv.multiSet(pairs);
+    for (const batch of chunk(removedKeys, size)) await kv.multiRemove(batch);
+    for (const [id, entry] of written) known.set(id, entry);
+    for (const id of removed) known.delete(id);
   };
 
   const clear = async () => {
@@ -667,9 +742,14 @@ export function createNoteStore(
       LEGACY_V1_KEY,
       ...[...known.keys()].map(noteKey),
     ]);
-    // Every note key, with the copies of broken notes.
+    // Every note key, with the copies of broken notes, and the companions.
     for (const key of await kv.getAllKeys()) {
-      if (key.startsWith(NOTE_PREFIX)) keys.add(key);
+      if (
+        key.startsWith(NOTE_PREFIX) ||
+        (companionPrefix !== undefined && key.startsWith(companionPrefix))
+      ) {
+        keys.add(key);
+      }
     }
     for (const batch of chunk([...keys], size)) await kv.multiRemove(batch);
     known = new Map();
@@ -679,6 +759,7 @@ export function createNoteStore(
   return {
     load: () => serialized(load),
     save: (notes) => serialized(() => save(notes)),
+    apply: (change) => serialized(() => apply(change)),
     clear: () => serialized(clear),
     isDegraded: () => degraded,
   };

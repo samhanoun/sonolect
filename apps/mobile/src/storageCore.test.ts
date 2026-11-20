@@ -10,6 +10,7 @@ import {
   LEGACY_V1_KEY,
   LEGACY_V2_KEY,
   MAX_TEXT_LENGTH,
+  SYNC_COMPANION_PREFIX,
   UNKNOWN_DATE,
   V01_SAMPLE_TRANSCRIPTS,
   asRecord,
@@ -261,6 +262,158 @@ describe("sanitizeTurn", () => {
     assert.deepEqual(
       Object.keys(result ?? {}).sort(),
       Object.keys(note(1)).sort(),
+    );
+  });
+});
+
+describe("sync fields", () => {
+  const hlc = { t: NOW - 1000, c: 2, d: "dev_1" };
+
+  it("keeps a valid HLC and conflict copy origin", () => {
+    const copy = note(1, { hlc, conflictOf: "turn_9", pinned: true });
+    assert.deepEqual(sanitizeTurn(copy, NOW), copy);
+    // Only t, c and d of the clock are kept.
+    assert.deepEqual(
+      sanitizeTurn({ ...note(1), hlc: { ...hlc, extra: 1 } }, NOW),
+      note(1, { hlc }),
+    );
+  });
+
+  it("drops a malformed HLC or conflict origin and keeps the note", () => {
+    for (const bad of [
+      { t: -1, c: 0, d: "dev" },
+      { t: 1.5, c: 0, d: "dev" },
+      { t: 1, c: 0, d: "" },
+      { t: 1, c: 0, d: "a b" },
+      "2026",
+      null,
+    ]) {
+      assert.deepEqual(sanitizeTurn({ ...note(1), hlc: bad }, NOW), note(1));
+    }
+    for (const bad of ["", 7, "x".repeat(200), null]) {
+      assert.deepEqual(
+        sanitizeTurn({ ...note(1), conflictOf: bad }, NOW),
+        note(1),
+      );
+    }
+  });
+});
+
+describe("single-note writes (sync)", () => {
+  const companionOf = (id: string) => `${SYNC_COMPANION_PREFIX}${id}`;
+  const syncStoreOn = (kv: KeyValueStore) =>
+    createNoteStore(kv, {
+      now: () => NOW,
+      companionPrefix: SYNC_COMPANION_PREFIX,
+    });
+
+  it("writes a note and its companion at once, without the index", async () => {
+    const kv = await seeded([note(1), note(2)]);
+    const store = syncStoreOn(kv);
+    await store.load();
+    kv.log.length = 0;
+    const remote = note(0, { hlc: { t: NOW, c: 0, d: "phone2" } });
+    await store.apply({ put: [{ note: remote, companion: '{"v":1}' }] });
+    assert.deepEqual(kv.writes(), [
+      `multiSet ${noteKey(remote.id)},${companionOf(remote.id)}`,
+    ]);
+    assert.equal(kv.data.get(companionOf(remote.id)), '{"v":1}');
+    assert.deepEqual(indexOf(kv), ["turn_1", "turn_2"]);
+    // A load lists it by date, and puts it in the index.
+    const loaded = await syncStoreOn(kv).load();
+    assert.deepEqual(ids(loaded.notes), ["turn_0", "turn_1", "turn_2"]);
+    assert.deepEqual(loaded.notes[0], remote);
+    assert.deepEqual(indexOf(kv), ["turn_0", "turn_1", "turn_2"]);
+  });
+
+  it("skips the written note at the next save, which writes the index", async () => {
+    const kv = await seeded([note(1)]);
+    const store = syncStoreOn(kv);
+    const [one] = (await store.load()).notes;
+    assert.ok(one);
+    const remote = note(0);
+    await store.apply({ put: [{ note: remote }] });
+    kv.log.length = 0;
+    await store.save([remote, one]);
+    assert.deepEqual(kv.writes(), [`setItem ${INDEX_KEY}`]);
+    assert.deepEqual(indexOf(kv), ["turn_0", "turn_1"]);
+  });
+
+  it("removes a note with its companion, and leaves other companions", async () => {
+    const kv = await seeded([note(1), note(2)]);
+    kv.data.set(companionOf("turn_1"), "{}");
+    kv.data.set(companionOf("turn_2"), "{}");
+    const store = syncStoreOn(kv);
+    await store.load();
+    kv.log.length = 0;
+    await store.apply({ remove: ["turn_1"] });
+    assert.deepEqual(kv.writes(), [
+      `multiRemove ${noteKey("turn_1")},${companionOf("turn_1")}`,
+    ]);
+    assert.equal(kv.data.has(companionOf("turn_2")), true);
+    // The index still lists it until a save or a load drops it.
+    const loaded = await syncStoreOn(kv).load();
+    assert.deepEqual(ids(loaded.notes), ["turn_2"]);
+    assert.deepEqual(indexOf(kv), ["turn_2"]);
+  });
+
+  it("drops a companion on request and keeps it otherwise", async () => {
+    const kv = await seeded([note(1)]);
+    kv.data.set(companionOf("turn_1"), "{}");
+    const store = syncStoreOn(kv);
+    const [one] = (await store.load()).notes;
+    assert.ok(one);
+    await store.apply({ put: [{ note: { ...one, pinned: true } }] });
+    assert.equal(kv.data.get(companionOf("turn_1")), "{}");
+    await store.apply({ put: [{ note: one, companion: null }] });
+    assert.equal(kv.data.has(companionOf("turn_1")), false);
+  });
+
+  it("removes a deleted note's companion on save, and every companion on clear", async () => {
+    const kv = await seeded([note(1), note(2), note(3)]);
+    for (const id of ["turn_1", "turn_2", "turn_3", "turn_9"]) {
+      kv.data.set(companionOf(id), "{}");
+    }
+    const store = syncStoreOn(kv);
+    const [one, two, three] = (await store.load()).notes;
+    assert.ok(one && two && three);
+    await store.save([one, three]);
+    assert.equal(kv.data.has(companionOf("turn_2")), false);
+    assert.equal(kv.data.has(companionOf("turn_1")), true);
+    await store.clear();
+    assert.deepEqual(
+      [...kv.data.keys()].filter((key) =>
+        key.startsWith(SYNC_COMPANION_PREFIX),
+      ),
+      [],
+    );
+  });
+
+  it("refuses to write while degraded", async () => {
+    const kv = await seeded([note(1)]);
+    kv.fail = (op, keys) => op === "getItem" && keys[0] === INDEX_KEY;
+    const store = syncStoreOn(kv);
+    await store.load();
+    kv.fail = () => false;
+    kv.log.length = 0;
+    await assert.rejects(store.apply({ put: [{ note: note(0) }] }));
+    await assert.rejects(store.apply({ remove: ["turn_1"] }));
+    assert.deepEqual(kv.writes(), []);
+  });
+
+  it("never touches companion keys without a companion prefix", async () => {
+    const kv = await seeded([note(1), note(2)]);
+    kv.data.set(companionOf("turn_2"), "{}");
+    const store = storeOn(kv);
+    const [one] = (await store.load()).notes;
+    assert.ok(one);
+    await store.save([one]);
+    await store.apply({ put: [{ note: note(0), companion: "{}" }] });
+    assert.deepEqual(
+      [...kv.data.keys()].filter((key) =>
+        key.startsWith(SYNC_COMPANION_PREFIX),
+      ),
+      [companionOf("turn_2")],
     );
   });
 });
