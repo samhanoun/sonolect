@@ -10,7 +10,7 @@ Open `build/Sonolect Local/Sonolect.exe`. Keep its `models` folder alongside the
 2. Press **Start recording**, speak, and stop. Alternatively, use Ctrl+Shift+M to toggle recording, or hold Ctrl+Shift+V.
 3. Find the result under **Saved recordings**. Use Copy, Edit & format, Retry locally, or Delete.
 
-Microphone permission is required when recording. Shortcuts may conflict with other installed applications. Each recording is limited to three minutes in this build.
+Microphone permission is required when recording. Shortcuts may conflict with other installed applications. A recording can run for up to four hours, and the text heard so far appears while you speak.
 
 Saved audio and raw transcripts live under the current Windows user's local app-data directory, in `com.sonolect.local/captures`. They remain until deleted. Browser preferences and transcript drafts live in the application's webview storage. This build does not encrypt these files itself. The app uses a separate identifier from the source prototypes.
 

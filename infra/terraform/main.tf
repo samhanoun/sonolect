@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 8.10"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 }
 
@@ -70,6 +74,10 @@ locals {
     "openai-api-key",
     "stripe-webhook-secret"
   ])
+
+  # Firebase ID tokens are issued for the Firebase project, which is the GCP
+  # project unless a separate one is configured.
+  firebase_project_id = coalesce(var.firebase_project_id, var.project_id)
 }
 
 resource "google_project_service" "services" {
@@ -230,6 +238,36 @@ resource "google_secret_manager_secret" "placeholders" {
   depends_on = [google_project_service.services]
 }
 
+# The worker only accepts calls that carry this shared service token
+# (SONOLECT_SERVICE_TOKENS). It is generated here and handed to the worker
+# through Secret Manager, so no deployment can come up unauthenticated.
+resource "random_password" "service_token" {
+  length  = 48
+  special = false
+}
+
+resource "google_secret_manager_secret" "service_tokens" {
+  secret_id = "${local.name_prefix}-service-tokens"
+  labels    = local.labels
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.services]
+}
+
+resource "google_secret_manager_secret_version" "service_tokens" {
+  secret      = google_secret_manager_secret.service_tokens.id
+  secret_data = random_password.service_token.result
+}
+
+resource "google_secret_manager_secret_iam_member" "service_tokens_accessor" {
+  secret_id = google_secret_manager_secret.service_tokens.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.cloud_run.email}"
+}
+
 resource "google_cloud_run_v2_service" "services" {
   for_each = local.cloud_run_services
 
@@ -262,9 +300,38 @@ resource "google_cloud_run_v2_service" "services" {
         }
       }
 
+      # Every deployed environment runs in production mode. Development mode
+      # binds the API to loopback, which Cloud Run cannot reach, and switches
+      # authentication off.
       env {
         name  = "NODE_ENV"
-        value = var.environment == "prod" ? "production" : "development"
+        value = "production"
+      }
+
+      # The API refuses to start in production without the Firebase project
+      # whose ID tokens it verifies.
+      env {
+        name  = "FIREBASE_PROJECT_ID"
+        value = local.firebase_project_id
+      }
+
+      # Browser origins allowed by CORS. Without this the API allows none.
+      env {
+        name  = "SONOLECT_ALLOWED_ORIGINS"
+        value = join(",", var.allowed_origins)
+      }
+
+      dynamic "env" {
+        for_each = each.key == "worker" ? [1] : []
+        content {
+          name = "SONOLECT_SERVICE_TOKENS"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.service_tokens.secret_id
+              version = google_secret_manager_secret_version.service_tokens.version
+            }
+          }
+        }
       }
 
       env {
@@ -294,7 +361,8 @@ resource "google_cloud_run_v2_service" "services" {
     google_firestore_database.default,
     google_sql_database.app,
     google_storage_bucket.app,
-    google_secret_manager_secret.placeholders
+    google_secret_manager_secret.placeholders,
+    google_secret_manager_secret_iam_member.service_tokens_accessor
   ]
 }
 

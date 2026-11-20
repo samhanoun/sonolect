@@ -54,8 +54,179 @@ try {
     payload,
   });
   assert.equal(webhook.statusCode, 202, webhook.body);
+
+  // Stripe sends pretty-printed JSON and signs those exact bytes. Verifying a
+  // re-serialised body would reject every real delivery.
+  const sign = (body: string, secret = "whsec_test") => {
+    const ts = Math.floor(Date.now() / 1000).toString();
+    const sig = createHmac("sha256", secret)
+      .update(`${ts}.${body}`)
+      .digest("hex");
+    return `t=${ts},v1=${sig}`;
+  };
+  const deliver = (body: string, signatureHeader = sign(body)) =>
+    app.inject({
+      method: "POST",
+      url: "/webhooks/stripe",
+      headers: {
+        "stripe-signature": signatureHeader,
+        "content-type": "application/json; charset=utf-8",
+      },
+      payload: body,
+    });
+  const planOf = async (userId: string) =>
+    (
+      await app.inject({
+        method: "GET",
+        url: `/billing/users/${userId}/quota`,
+      })
+    ).json<UsageQuotaSummary>().plan;
+
+  assert.equal(await planOf("user-42"), "free");
+
+  const checkout = JSON.stringify(
+    {
+      id: "evt_checkout_1",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          customer: "cus_42",
+          client_reference_id: "user-42",
+          payment_status: "paid",
+          metadata: { plan: "pro" },
+        },
+      },
+    },
+    null,
+    2,
+  );
+  const checkoutResponse = await deliver(checkout);
+  assert.equal(checkoutResponse.statusCode, 202, checkoutResponse.body);
+  assert.equal(
+    checkoutResponse.json<{ planApplied: boolean }>().planApplied,
+    true,
+  );
+  assert.equal(await planOf("user-42"), "pro");
+
+  const redelivered = await deliver(checkout);
+  assert.equal(redelivered.statusCode, 200, redelivered.body);
+  assert.equal(redelivered.json<{ duplicate: boolean }>().duplicate, true);
+
+  // A later subscription event only carries the customer; the link made at
+  // checkout resolves it to the user.
+  const upgraded = await deliver(
+    JSON.stringify(
+      {
+        id: "evt_sub_updated_1",
+        type: "customer.subscription.updated",
+        data: {
+          object: {
+            customer: "cus_42",
+            status: "active",
+            items: {
+              data: [{ price: { lookup_key: "sonolect_team_monthly" } }],
+            },
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  assert.equal(upgraded.statusCode, 202, upgraded.body);
+  assert.equal(await planOf("user-42"), "team");
+
+  const cancelled = await deliver(
+    JSON.stringify({
+      id: "evt_sub_deleted_1",
+      type: "customer.subscription.deleted",
+      data: { object: { customer: "cus_42", status: "canceled" } },
+    }),
+  );
+  assert.equal(cancelled.statusCode, 202, cancelled.body);
+  assert.equal(await planOf("user-42"), "free");
+
+  const forged = await deliver(checkout, sign(checkout, "whsec_attacker"));
+  assert.equal(forged.statusCode, 400, forged.body);
+
+  const tampered = await deliver(
+    checkout.replace("user-42", "user-43"),
+    sign(checkout),
+  );
+  assert.equal(tampered.statusCode, 400, tampered.body);
+  assert.equal(await planOf("user-43"), "free");
+
+  const notJson = "not json";
+  const garbage = await deliver(notJson);
+  assert.equal(garbage.statusCode, 400, garbage.body);
 } finally {
   await app.close();
+}
+
+// Production: usage and quota need the service token, and a caller acting for
+// one user cannot read or write another user's usage.
+const serviceToken = "b".repeat(40);
+const production = await createApp({
+  logger: false,
+  stripeWebhookSecret: "whsec_test",
+  env: { NODE_ENV: "production", SONOLECT_SERVICE_TOKENS: serviceToken },
+});
+try {
+  const asAlice = {
+    authorization: `Bearer ${serviceToken}`,
+    "x-user-id": "alice",
+  };
+  const anonymousQuota = await production.inject({
+    method: "GET",
+    url: "/billing/users/alice/quota",
+  });
+  assert.equal(anonymousQuota.statusCode, 401, anonymousQuota.body);
+
+  const anonymousUsage = await production.inject({
+    method: "POST",
+    url: "/billing/usage",
+    payload: { userId: "alice", metric: "minutes", quantity: 5, source: "api" },
+  });
+  assert.equal(anonymousUsage.statusCode, 401, anonymousUsage.body);
+
+  const ownQuota = await production.inject({
+    method: "GET",
+    url: "/billing/users/alice/quota",
+    headers: asAlice,
+  });
+  assert.equal(ownQuota.statusCode, 200, ownQuota.body);
+
+  const otherQuota = await production.inject({
+    method: "GET",
+    url: "/billing/users/bob/quota",
+    headers: asAlice,
+  });
+  assert.equal(otherQuota.statusCode, 403, otherQuota.body);
+
+  const otherUsage = await production.inject({
+    method: "POST",
+    url: "/billing/usage",
+    headers: asAlice,
+    payload: { userId: "bob", metric: "minutes", quantity: 5, source: "api" },
+  });
+  assert.equal(otherUsage.statusCode, 403, otherUsage.body);
+
+  const publicPlans = await production.inject({
+    method: "GET",
+    url: "/billing/plans",
+  });
+  assert.equal(publicPlans.statusCode, 200);
+
+  // The webhook stays reachable for Stripe and still demands a signature.
+  const unsignedWebhook = await production.inject({
+    method: "POST",
+    url: "/webhooks/stripe",
+    headers: { "content-type": "application/json" },
+    payload: "{}",
+  });
+  assert.equal(unsignedWebhook.statusCode, 400, unsignedWebhook.body);
+} finally {
+  await production.close();
 }
 
 console.log("Billing route smoke test passed");

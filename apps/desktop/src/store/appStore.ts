@@ -11,7 +11,12 @@ import {
   type TranscriptHistoryRow,
 } from "../transcriptHistory";
 import { resolveDesktopAuthConfig } from "../localDevAuth";
-import { useI18nStore, type SupportedLocale } from "../i18n";
+import {
+  getT,
+  isSupportedLocale,
+  useI18nStore,
+  type SupportedLocale,
+} from "../i18n";
 import {
   saveSettings,
   loadSettings,
@@ -20,11 +25,20 @@ import {
   clearTranscriptDraft,
 } from "../persistence";
 import {
+  loadMicDeviceId,
+  openMicrophone,
+  saveMicDeviceId,
+} from "../microphone";
+import {
   assignSpeakerLabel,
-  mergeTranscriptSegments,
+  mergeSegmentRun,
+  moveTranscriptSegment,
+  resyncSegments,
+  segmentsFromCapture,
   segmentsToText,
   splitTranscriptSegment,
   textToSegments,
+  type SavedCaptureSegment,
   type TranscriptSegment,
 } from "../segmentEditor";
 import {
@@ -45,13 +59,31 @@ import {
   type OnboardingChecklist,
   type Snippet,
 } from "../wisprWorkflow";
-import { insertTextIntoActiveApp, isTauriRuntime } from "../desktopNative";
+import {
+  insertTextIntoActiveApp,
+  isTauriRuntime,
+  restoreDictationTarget,
+} from "../desktopNative";
 import { formatDuration } from "../lib/format";
+import {
+  levelFromSamples,
+  type DictationOutcome,
+  type DictationSource,
+} from "../dictationBubble";
 import {
   useProviderStore,
   transcribeUsingProvider,
   setProviderMode,
 } from "../providerSettings";
+import {
+  loadCaptureSource,
+  recordLive,
+  recordSystemAudio,
+  saveCaptureSource,
+  type CaptureSource,
+  type LiveRecording,
+} from "../liveCaptureNative";
+import { localizeNativeMessage } from "../nativeMessages";
 
 export type PrivacyLevel = "local" | "cloud";
 export type RecordingState =
@@ -105,6 +137,16 @@ export type DesktopState = {
   transcriptHistoryError: string | undefined;
   voiceCapture: VoiceCaptureResult | undefined;
   voiceError: string | undefined;
+  /**
+   * What the recording in progress has understood so far. Only the desktop
+   * app's recorder reports it; empty otherwise.
+   */
+  liveTranscript: string;
+  /**
+   * An audio file is going through the app's recorder. The recorder holds
+   * one recording at a time, so a new one waits until the file is done.
+   */
+  importingAudio: boolean;
   polishedPreview: string;
   insertionStatus: string | undefined;
   dictionaryEntries: DictionaryEntry[];
@@ -116,10 +158,23 @@ export type DesktopState = {
   setSttLanguage: (lang: string) => void;
   whisperConfig: WhisperConfig;
   setWhisperConfig: (config: WhisperConfig) => void;
+  /** The microphone that records; empty for the system default. */
+  micDeviceId: string;
+  /** What the Studio's record button records. Dictation uses the microphone. */
+  captureSource: CaptureSource;
+  setCaptureSource: (source: CaptureSource) => void;
+  setMicDeviceId: (deviceId: string) => void;
   setCommandOpen: (open: boolean) => void;
-  toggleRecording: () => void;
-  startVoiceCapture: () => Promise<void>;
+  /** Where the current/last capture was started from. Bubble and hotkey
+   * captures are pasted into the focused app when transcription finishes. */
+  dictationSource: DictationSource;
+  /** Result of the last bubble/hotkey dictation, shown on the bubble. */
+  dictationOutcome: DictationOutcome | undefined;
+  toggleRecording: (source?: DictationSource) => void;
+  startVoiceCapture: (source?: DictationSource) => Promise<void>;
   stopVoiceCapture: () => void;
+  /** Stop listening and throw the audio away (bubble ✕ / Esc). */
+  cancelVoiceCapture: () => void;
   resetVoiceCapture: () => void;
   setActiveView: (view: ViewId) => void;
   setPrivacyLevel: (level: PrivacyLevel) => void;
@@ -145,6 +200,19 @@ export type DesktopState = {
   updateSegmentSpeaker: (segmentId: string, speaker: string) => void;
   mergeSelectedSegments: () => void;
   splitSelectedSegment: () => void;
+  /** Splits a segment at `splitIndex`, or at a readable midpoint. */
+  splitSegment: (segmentId: string, splitIndex?: number) => void;
+  moveSegment: (segmentId: string, direction: "up" | "down") => void;
+  /** Labels every selected segment with one speaker; empty clears the label. */
+  setSpeakerForSelection: (speaker: string) => void;
+  clearSegmentSelection: () => void;
+  /** Opens one saved recording in the editor, with its timings and audio. */
+  openCapture: (capture: {
+    id: string;
+    durationMs: number;
+    transcript: string | null;
+    segments?: SavedCaptureSegment[] | null;
+  }) => void;
   addToast: (message: string) => void;
   transformTranscript: () => void;
 };
@@ -155,12 +223,190 @@ const API_TOKEN = AUTH_CONFIG.token;
 const sessions: TranscriptSession[] = [];
 
 let activeRecorder: MediaRecorder | undefined;
+/** The desktop app's recorder, when it is the one recording. */
+let activeLive: LiveRecording | undefined;
+/** Whether that recorder transcribes with an online model. */
+let activeLiveOnline = false;
 let activeStream: MediaStream | undefined;
 let activeChunks: BlobPart[] = [];
 let activeStartedAt = 0;
 let captureTimer: ReturnType<typeof setTimeout> | undefined;
 let cloudAbort: AbortController | undefined;
 let permissionCancelled = false;
+/** Why the recorder stopped by itself (the four-hour limit, say). */
+let stallNotice: string | undefined;
+let discardCapture = false;
+/** Bumped when a capture is cancelled mid-transcription so its result is dropped. */
+let captureGeneration = 0;
+let meterContext: AudioContext | undefined;
+
+type LevelListener = (level: number) => void;
+const levelListeners = new Set<LevelListener>();
+
+/** Live microphone level (0..1) while recording, for the dictation bubble. */
+export function subscribeMicLevel(listener: LevelListener): () => void {
+  levelListeners.add(listener);
+  // A meter that appears mid-recording (a page opened while dictating)
+  // still gets levels: the metering only runs while someone listens.
+  if (!meterContext && activeStream) startLevelMeter(activeStream);
+  return () => levelListeners.delete(listener);
+}
+
+/**
+ * Meter the stream with a ScriptProcessor: unlike requestAnimationFrame or
+ * timers, audio callbacks keep firing while the main window is minimised,
+ * which is exactly when the floating bubble needs them.
+ */
+function startLevelMeter(stream: MediaStream) {
+  stopLevelMeter();
+  if (levelListeners.size === 0) return;
+  const Ctx =
+    globalThis.AudioContext ??
+    (globalThis as unknown as { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    const ctx = new Ctx();
+    const source = ctx.createMediaStreamSource(stream);
+    const processor = ctx.createScriptProcessor(2048, 1, 1);
+    const mute = ctx.createGain();
+    mute.gain.value = 0;
+    processor.onaudioprocess = (event) => {
+      const level = levelFromSamples(event.inputBuffer.getChannelData(0));
+      levelListeners.forEach((listener) => listener(level));
+    };
+    source.connect(processor);
+    processor.connect(mute);
+    mute.connect(ctx.destination);
+    // Created outside a user gesture (global hotkey) the context may start
+    // suspended; the bubble falls back to an ambient wave if it stays so.
+    if (ctx.state === "suspended") void ctx.resume().catch(() => undefined);
+    meterContext = ctx;
+  } catch {
+    meterContext = undefined;
+  }
+}
+
+function stopLevelMeter() {
+  const ctx = meterContext;
+  meterContext = undefined;
+  if (ctx) void ctx.close().catch(() => undefined);
+  levelListeners.forEach((listener) => listener(0));
+}
+
+/** Paste one bubble/hotkey dictation into whatever app has focus. */
+async function deliverDictation(text: string): Promise<DictationOutcome> {
+  const trimmed = text.trim();
+  if (!trimmed) return { kind: "empty" };
+  await restoreDictationTarget();
+  const result = await insertTextIntoActiveApp(trimmed);
+  if (result.ok) return { kind: "inserted", text: trimmed };
+  if (result.method === "clipboard-only") {
+    // The native status already says the text is on the clipboard.
+    return { kind: "copied", text: trimmed, reason: result.status };
+  }
+  try {
+    // Only works while a Sonolect window has focus; otherwise Chromium refuses.
+    await navigator.clipboard.writeText(trimmed);
+    return {
+      kind: "copied",
+      text: trimmed,
+      reason: getT()("bubble.status.copied", { status: result.status }),
+    };
+  } catch {
+    return {
+      kind: "error",
+      message: getT()("bubble.pasteFailed"),
+    };
+  }
+}
+
+/**
+ * Puts a finished capture into the transcript and, for a bubble or hotkey
+ * dictation, pastes its polished text into the app in front.
+ */
+async function completeCapture(
+  api: TranscriptJobResult,
+  metadata: VoiceCaptureMetadata,
+  objectUrl: string,
+) {
+  const completedAt = new Date().toISOString();
+  const capture: VoiceCaptureResult = {
+    ...metadata,
+    objectUrl,
+    completedAt,
+    api,
+  };
+  useDesktopStore.setState((state) => {
+    const nextBaseState = {
+      recordingState:
+        api.status === "offline" ? ("error" as const) : ("completed" as const),
+      voiceCapture: capture,
+      liveTranscript: "",
+      // A recording that stopped by itself is kept: its note says why.
+      voiceError: api.status === "offline" ? api.message : stallNotice,
+    };
+    const savedSegments = api.captureId
+      ? segmentsFromCapture({
+          id: api.captureId,
+          durationMs: metadata.durationMs,
+          transcript: api.transcript ?? "",
+          segments: api.segments ?? [],
+        })
+      : [];
+    if (savedSegments.length || api.segments?.length) {
+      const captureSegments = savedSegments.length
+        ? savedSegments
+        : (api.segments ?? []).map((segment, index) => ({
+            ...segment,
+            id: `capture-${completedAt}-${index + 1}-${segment.id}`,
+          }));
+      const next = syncSegments(
+        [...state.transcriptSegments, ...captureSegments],
+        [],
+      );
+      return {
+        ...nextBaseState,
+        ...withUndoSnapshot(state, next),
+        polishedPreview: polishDictation(next.transcript, {
+          dictionary: state.dictionaryEntries,
+          snippets: state.snippets,
+        }),
+      };
+    }
+    const next = syncTranscriptText(
+      `${state.transcript}${api.transcript ? `\n\n${api.transcript}` : ""}`,
+      state.transcriptSegments,
+    );
+    return {
+      ...nextBaseState,
+      ...withUndoSnapshot(state, next),
+      polishedPreview: polishDictation(next.transcript, {
+        dictionary: state.dictionaryEntries,
+        snippets: state.snippets,
+      }),
+    };
+  });
+  const { dictationSource } = useDesktopStore.getState();
+  if (dictationSource === "app" || api.status === "offline") return;
+  const spoken =
+    api.transcript?.trim() ||
+    (api.segments ?? []).map((segment) => segment.text).join(" ");
+  const polished = polishDictation(spoken, {
+    dictionary: useDesktopStore.getState().dictionaryEntries,
+    snippets: useDesktopStore.getState().snippets,
+  });
+  const outcome = await deliverDictation(polished);
+  useDesktopStore.setState({
+    dictationOutcome: outcome,
+    insertionStatus:
+      outcome.kind === "inserted"
+        ? getT()("bubble.status.inserted")
+        : outcome.kind === "copied"
+          ? outcome.reason
+          : undefined,
+  });
+}
 
 const preferredAudioMimeTypes = [
   "audio/webm;codecs=opus",
@@ -186,10 +432,19 @@ function splitAtReadableMidpoint(text: string) {
   return midpoint;
 }
 
-function syncTranscriptText(transcript: string) {
+/**
+ * The segments for a transcript edited as text. With `previous`, timings,
+ * speakers and audio links survive for every paragraph that did not change.
+ */
+function syncTranscriptText(
+  transcript: string,
+  previous?: TranscriptSegment[],
+) {
   return {
     transcript,
-    transcriptSegments: textToSegments(transcript),
+    transcriptSegments: previous
+      ? resyncSegments(previous, transcript)
+      : textToSegments(transcript),
     selectedSegmentIds: [],
   };
 }
@@ -313,13 +568,29 @@ function withUndoSnapshot(
 
 function stopActiveStream() {
   clearTimeout(captureTimer);
+  stopLevelMeter();
   activeStream?.getTracks().forEach((track) => track.stop());
   activeStream = undefined;
+}
+
+/**
+ * The saved interface language wins over the detected one, and the i18n store
+ * has to learn it before the first render.
+ */
+function initialLocale(): SupportedLocale {
+  const saved = loadSettings(SETTINGS_KEYS.locale);
+  if (isSupportedLocale(saved)) {
+    useI18nStore.getState().setLocale(saved);
+    return saved;
+  }
+  return useI18nStore.getState().locale;
 }
 
 export const useDesktopStore = create<DesktopState>((set, get) => ({
   commandOpen: false,
   recordingState: "idle",
+  dictationSource: "app",
+  dictationOutcome: undefined,
   activeView: "home",
   privacyLevel:
     (loadSettings(SETTINGS_KEYS.privacyLevel) as PrivacyLevel) || "local",
@@ -336,6 +607,8 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
   transcriptHistoryError: undefined,
   voiceCapture: undefined,
   voiceError: undefined,
+  liveTranscript: "",
+  importingAudio: false,
   polishedPreview: polishDictation(initialTranscriptSnapshot.transcript, {
     dictionary: loadJsonArray<DictionaryEntry>(
       SETTINGS_KEYS.dictionaryEntries,
@@ -352,9 +625,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
   onboardingChecklist: loadOnboardingChecklist(),
   transforming: false,
   toasts: [],
-  locale:
-    (loadSettings(SETTINGS_KEYS.locale) as SupportedLocale) ||
-    useI18nStore.getState().locale,
+  locale: initialLocale(),
   setLocale: (locale) => {
     useI18nStore.getState().setLocale(locale);
     saveSettings(SETTINGS_KEYS.locale, locale);
@@ -370,8 +641,18 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     saveSettings(SETTINGS_KEYS.whisperConfig, serializeWhisperConfig(config));
     set({ whisperConfig: config });
   },
+  micDeviceId: loadMicDeviceId(),
+  captureSource: loadCaptureSource(),
+  setCaptureSource: (source) => {
+    saveCaptureSource(source);
+    set({ captureSource: source });
+  },
+  setMicDeviceId: (deviceId) => {
+    saveMicDeviceId(deviceId);
+    set({ micDeviceId: deviceId });
+  },
   setCommandOpen: (open) => set({ commandOpen: open }),
-  toggleRecording: () => {
+  toggleRecording: (source = "app") => {
     const {
       recordingState,
       startVoiceCapture,
@@ -391,10 +672,86 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     if (recordingState === "completed" || recordingState === "error") {
       resetVoiceCapture();
     }
-    void startVoiceCapture();
+    void startVoiceCapture(source);
   },
-  startVoiceCapture: async () => {
+  startVoiceCapture: async (source = "app") => {
     if (!["idle", "completed", "error"].includes(get().recordingState)) return;
+    set({ dictationSource: source, dictationOutcome: undefined });
+
+    // Starting now would take the recorder away from the file being
+    // transcribed and lose it.
+    if (get().importingAudio) {
+      set({
+        recordingState: "error",
+        voiceError: "error.importInProgress",
+        voiceCapture: undefined,
+        liveTranscript: "",
+      });
+      return;
+    }
+
+    // A recording started in the Studio can take what is playing on this
+    // computer instead of the microphone. A dictation is always spoken.
+    if (
+      source === "app" &&
+      get().captureSource === "system" &&
+      isTauriRuntime()
+    ) {
+      permissionCancelled = false;
+      stallNotice = undefined;
+      discardCapture = false;
+      cloudAbort = new AbortController();
+      set({
+        recordingState: "requesting-permission",
+        voiceError: undefined,
+        voiceCapture: undefined,
+        liveTranscript: "",
+      });
+      try {
+        const stt = { ...useProviderStore.getState().preferences.stt };
+        const online =
+          stt.provider !== "local" && get().privacyLevel === "cloud";
+        if (online) await setProviderMode(true);
+        const live = await recordSystemAudio(
+          {
+            language: get().sttLanguage,
+            modelPath: get().whisperConfig.modelPath,
+            ...(online ? { provider: stt.provider, model: stt.model } : {}),
+          },
+          {
+            onPartial: (segments) =>
+              set({
+                liveTranscript: segments
+                  .map((segment) => segment.text)
+                  .join(" "),
+              }),
+            onLevel: (level) =>
+              levelListeners.forEach((listener) => listener(level)),
+            // The feed ended by itself or the recorder is full: keep what
+            // was recorded and say why it stopped.
+            onStalled: (message) => {
+              stallNotice = message;
+              get().stopVoiceCapture();
+            },
+          },
+        );
+        if (permissionCancelled) {
+          await live.cancel().catch(() => undefined);
+          set({ recordingState: "idle" });
+          return;
+        }
+        activeLive = live;
+        activeLiveOnline = online;
+        activeStartedAt = Date.now();
+        set({ recordingState: "recording" });
+      } catch (error) {
+        set({
+          recordingState: "error",
+          voiceError: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return;
+    }
 
     if (!navigator.mediaDevices?.getUserMedia) {
       set({
@@ -419,19 +776,72 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     };
     const onlineChoice = { ...useProviderStore.getState().preferences.stt };
     permissionCancelled = false;
+    stallNotice = undefined;
+    discardCapture = false;
     cloudAbort = new AbortController();
     set({
       recordingState: "requesting-permission",
       voiceError: undefined,
       voiceCapture: undefined,
+      liveTranscript: "",
     });
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const { stream, fellBack } = await openMicrophone(get().micDeviceId);
+      if (fellBack) get().addToast("toast.micFellBack");
       if (permissionCancelled) {
         stream.getTracks().forEach((track) => track.stop());
         set({ recordingState: "idle" });
         return;
+      }
+      if (isTauriRuntime()) {
+        // The app's own recorder: no length limit short of four hours, the
+        // audio goes to disk as it is spoken, and text arrives at each pause.
+        const online =
+          onlineChoice.provider !== "local" &&
+          captureSettings.processingMode === "cloud";
+        if (online) await setProviderMode(true);
+        const live = await recordLive(
+          stream,
+          {
+            language: captureSettings.language,
+            modelPath: captureSettings.modelPath,
+            ...(online
+              ? { provider: onlineChoice.provider, model: onlineChoice.model }
+              : {}),
+          },
+          {
+            onPartial: (segments) =>
+              set({
+                liveTranscript: segments
+                  .map((segment) => segment.text)
+                  .join(" "),
+              }),
+            // The recorder takes no more audio (four hours, say): keep what
+            // was recorded and say why it stopped.
+            onStalled: (message) => {
+              stallNotice = message;
+              get().stopVoiceCapture();
+            },
+          },
+        );
+        if (permissionCancelled) {
+          await live?.cancel().catch(() => undefined);
+          stream.getTracks().forEach((track) => track.stop());
+          set({ recordingState: "idle" });
+          return;
+        }
+        if (live) {
+          activeLive = live;
+          activeLiveOnline = online;
+          activeStream = stream;
+          activeStartedAt = Date.now();
+          startLevelMeter(stream);
+          set({ recordingState: "recording" });
+          return;
+        }
+        // The recorder could not start (no speech model yet, say). The
+        // short-recording path below explains what is missing.
       }
       const mimeType = supportedAudioMimeType();
       activeStream = stream;
@@ -455,6 +865,14 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       };
 
       activeRecorder.onstop = () => {
+        if (discardCapture) {
+          discardCapture = false;
+          stopActiveStream();
+          activeRecorder = undefined;
+          activeChunks = [];
+          set({ recordingState: "idle" });
+          return;
+        }
         const recorderMimeType =
           activeRecorder?.mimeType || mimeType || "audio/webm";
         const durationMs = Date.now() - activeStartedAt;
@@ -468,6 +886,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
         stopActiveStream();
         activeRecorder = undefined;
         activeChunks = [];
+        const generation = captureGeneration;
         set({ recordingState: "uploading" });
 
         void submitCapturedAudioCloud(blob, metadata, {
@@ -490,60 +909,12 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
               }
             : {}),
         })
-          .then((api) => {
-            const objectUrl = URL.createObjectURL(blob);
-            const completedAt = new Date().toISOString();
-            const capture: VoiceCaptureResult = {
-              ...metadata,
-              objectUrl,
-              completedAt,
-              api,
-            };
-            const fallbackTranscript =
-              api.status === "offline"
-                ? `\n\n[${formatDuration(metadata.durationMs)} · ${metadata.mimeType} · ${Math.round(metadata.sizeBytes / 1024)} KB]`
-                : `\n\n[Job ${api.jobId ?? "pending"} · ${formatDuration(metadata.durationMs)}]`;
-            set((state) => {
-              const nextBaseState = {
-                recordingState:
-                  api.status === "offline"
-                    ? ("error" as const)
-                    : ("completed" as const),
-                voiceCapture: capture,
-                voiceError: api.status === "offline" ? api.message : undefined,
-              };
-              if (api.segments?.length) {
-                const captureSegments = api.segments.map((segment, index) => ({
-                  ...segment,
-                  id: `capture-${completedAt}-${index + 1}-${segment.id}`,
-                }));
-                const next = syncSegments(
-                  [...state.transcriptSegments, ...captureSegments],
-                  [],
-                );
-                return {
-                  ...nextBaseState,
-                  ...withUndoSnapshot(state, next),
-                  polishedPreview: polishDictation(next.transcript, {
-                    dictionary: state.dictionaryEntries,
-                    snippets: state.snippets,
-                  }),
-                };
-              }
-              const next = syncTranscriptText(
-                `${state.transcript}${api.transcript ? `\n\n${api.transcript}` : ""}`,
-              );
-              return {
-                ...nextBaseState,
-                ...withUndoSnapshot(state, next),
-                polishedPreview: polishDictation(next.transcript, {
-                  dictionary: state.dictionaryEntries,
-                  snippets: state.snippets,
-                }),
-              };
-            });
+          .then(async (api) => {
+            if (generation !== captureGeneration) return;
+            await completeCapture(api, metadata, URL.createObjectURL(blob));
           })
           .catch((error: unknown) => {
+            if (generation !== captureGeneration) return;
             set({
               recordingState: "error",
               voiceError:
@@ -552,6 +923,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
           });
       };
 
+      startLevelMeter(stream);
       activeRecorder.start();
       captureTimer = setTimeout(() => get().stopVoiceCapture(), 179_000);
       set({ recordingState: "recording" });
@@ -571,6 +943,52 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       permissionCancelled = true;
       return;
     }
+    if (activeLive) {
+      const live = activeLive;
+      activeLive = undefined;
+      const elapsedMs = Date.now() - activeStartedAt;
+      const generation = captureGeneration;
+      const online = activeLiveOnline;
+      // Closing the audio feed comes first, then the microphone itself.
+      const finishing = live.finish();
+      stopActiveStream();
+      set({ recordingState: "uploading" });
+      void finishing
+        .then(async (result) => {
+          if (generation !== captureGeneration) return;
+          const durationMs = result.durationMs || elapsedMs;
+          await completeCapture(
+            {
+              status: "completed",
+              transcript: result.text,
+              segments: result.segments,
+              ...(result.captureId ? { captureId: result.captureId } : {}),
+              message: getT()(
+                online ? "voice.onlineModel" : "voice.localWhisper",
+              ),
+            },
+            // 16 kHz mono 16-bit WAV: 32 bytes a millisecond.
+            { durationMs, mimeType: "audio/wav", sizeBytes: durationMs * 32 },
+            "",
+          );
+        })
+        .catch((error: unknown) => {
+          if (generation !== captureGeneration) return;
+          const message =
+            error instanceof Error ? error.message : String(error);
+          set({
+            recordingState: "error",
+            liveTranscript: "",
+            // Unless nothing was recorded, the audio is saved and can be
+            // transcribed again from the Library.
+            voiceError:
+              message === localizeNativeMessage("No audio was recorded.")
+                ? message
+                : getT()("capture.keptForRetry", { error: message }),
+          });
+        });
+      return;
+    }
     if (activeRecorder?.state === "recording") {
       activeRecorder.stop();
       return;
@@ -578,6 +996,34 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     stopActiveStream();
     activeRecorder = undefined;
     set({ recordingState: "idle" });
+  },
+  cancelVoiceCapture: () => {
+    const { recordingState } = get();
+    if (recordingState === "recording" && activeLive) {
+      const live = activeLive;
+      activeLive = undefined;
+      // Deletes the recording on the native side too.
+      void live.cancel().catch(() => undefined);
+      stopActiveStream();
+      set({ recordingState: "idle", liveTranscript: "" });
+      return;
+    }
+    if (
+      recordingState === "recording" &&
+      activeRecorder?.state === "recording"
+    ) {
+      discardCapture = true;
+      clearTimeout(captureTimer);
+      activeRecorder.stop();
+      return;
+    }
+    if (recordingState === "uploading") {
+      captureGeneration += 1;
+      cloudAbort?.abort();
+      set({ recordingState: "idle" });
+      return;
+    }
+    get().stopVoiceCapture();
   },
   resetVoiceCapture: () =>
     set((state) => {
@@ -587,6 +1033,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
         recordingState: "idle",
         voiceError: undefined,
         voiceCapture: undefined,
+        liveTranscript: "",
       };
     }),
   setActiveView: (view) => set({ activeView: view }),
@@ -715,7 +1162,10 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
   },
   setTranscript: (value) =>
     set((state) => ({
-      ...withUndoSnapshot(state, syncTranscriptText(value)),
+      ...withUndoSnapshot(
+        state,
+        syncTranscriptText(value, state.transcriptSegments),
+      ),
       polishedPreview: polishDictation(value, {
         dictionary: state.dictionaryEntries,
         snippets: state.snippets,
@@ -725,7 +1175,10 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     const { polishedPreview } = get();
     if (!polishedPreview.trim()) return;
     set((state) => {
-      const next = syncTranscriptText(polishedPreview);
+      const next = syncTranscriptText(
+        polishedPreview,
+        state.transcriptSegments,
+      );
       return {
         ...withUndoSnapshot(state, next),
         polishedPreview: polishedForState({
@@ -907,12 +1360,8 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     }),
   mergeSelectedSegments: () => {
     const { transcriptSegments, selectedSegmentIds } = get();
-    if (selectedSegmentIds.length !== 2) return;
-    const merged = mergeTranscriptSegments(
-      transcriptSegments,
-      selectedSegmentIds[0]!,
-      selectedSegmentIds[1]!,
-    );
+    const merged = mergeSegmentRun(transcriptSegments, selectedSegmentIds);
+    if (merged === transcriptSegments) return;
     set((state) => {
       const next = syncSegments(merged, []);
       return {
@@ -925,17 +1374,23 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     });
   },
   splitSelectedSegment: () => {
-    const { transcriptSegments, selectedSegmentIds } = get();
-    if (selectedSegmentIds.length !== 1) return;
-    const segment = transcriptSegments.find(
-      (item) => item.id === selectedSegmentIds[0],
-    );
+    const { selectedSegmentIds, splitSegment } = get();
+    if (selectedSegmentIds.length === 1) splitSegment(selectedSegmentIds[0]!);
+  },
+  splitSegment: (segmentId, splitIndex) => {
+    const { transcriptSegments } = get();
+    const segment = transcriptSegments.find((item) => item.id === segmentId);
     if (!segment) return;
+    const usable =
+      splitIndex !== undefined &&
+      segment.text.slice(0, splitIndex).trim() &&
+      segment.text.slice(splitIndex).trim();
     const split = splitTranscriptSegment(
       transcriptSegments,
       segment.id,
-      splitAtReadableMidpoint(segment.text),
+      usable ? splitIndex : splitAtReadableMidpoint(segment.text),
     );
+    if (split === transcriptSegments) return;
     set((state) => {
       const next = syncSegments(split, []);
       return {
@@ -947,12 +1402,56 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       };
     });
   },
+  moveSegment: (segmentId, direction) => {
+    const moved = moveTranscriptSegment(
+      get().transcriptSegments,
+      segmentId,
+      direction,
+    );
+    if (moved === get().transcriptSegments) return;
+    set((state) => {
+      const next = syncSegments(moved, state.selectedSegmentIds);
+      return {
+        ...withUndoSnapshot(state, next),
+        polishedPreview: polishedForState({
+          ...state,
+          transcript: next.transcript,
+        }),
+      };
+    });
+  },
+  setSpeakerForSelection: (speaker) =>
+    set((state) => {
+      if (!state.selectedSegmentIds.length) return state;
+      const next = syncSegments(
+        state.transcriptSegments.map((segment) =>
+          state.selectedSegmentIds.includes(segment.id)
+            ? assignSpeakerLabel(segment, speaker)
+            : segment,
+        ),
+        state.selectedSegmentIds,
+      );
+      return withUndoSnapshot(state, next);
+    }),
+  clearSegmentSelection: () => set({ selectedSegmentIds: [] }),
+  openCapture: (capture) =>
+    set((state) => {
+      const next = syncSegments(segmentsFromCapture(capture), []);
+      return {
+        ...withUndoSnapshot(state, next),
+        activeSessionId: null,
+        polishedPreview: polishedForState({
+          ...state,
+          transcript: next.transcript,
+        }),
+      };
+    }),
   addToast: (message) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     set((state) => ({ toasts: [...state.toasts, { id, message }] }));
     setTimeout(() => {
       set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) }));
-    }, 3000);
+    }, 6000);
   },
   transformTranscript: () => {
     const { transforming, transcript, addToast } = get();
@@ -973,7 +1472,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     const title = `# ${firstWords}${firstWords.length < cleaned.length ? "…" : ""}`;
     const transformed = `${title}\n\n${paragraphs.join("\n\n")}`;
     set((state) => {
-      const next = syncTranscriptText(transformed);
+      const next = syncTranscriptText(transformed, state.transcriptSegments);
       return {
         ...withUndoSnapshot(state, next),
         polishedPreview: polishedForState({

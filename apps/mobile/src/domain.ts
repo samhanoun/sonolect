@@ -52,11 +52,34 @@ export interface Snippet {
   body: string;
 }
 
+/**
+ * How many days a saved note is kept before it is deleted automatically.
+ * 0 keeps notes until they are deleted by hand. The same choices as the
+ * desktop app's recording retention.
+ */
+export const RETENTION_DAY_CHOICES = [0, 1, 7, 30, 90] as const;
+export type RetentionDays = (typeof RETENTION_DAY_CHOICES)[number];
+
+export function isRetentionDays(value: unknown): value is RetentionDays {
+  return (
+    typeof value === "number" &&
+    (RETENTION_DAY_CHOICES as readonly number[]).includes(value)
+  );
+}
+
 export interface CompanionSettings {
   language: DictationLanguage;
   uiLanguage: UiLanguage;
   privacyLevel: PrivacyLevel;
+  /**
+   * Local first and Ephemeral: use the system speech service, which may send
+   * audio to Google or Apple, when on-device dictation isn't available. Off by
+   * default: the app then asks before each such dictation.
+   */
+  allowSystemService: boolean;
   saveHistory: boolean;
+  /** Notes older than this many days are deleted; 0 keeps them. */
+  retentionDays: RetentionDays;
   cloudSyncEnabled: boolean;
   localApiUrl?: string | undefined;
   hapticsEnabled: boolean;
@@ -74,13 +97,20 @@ export const REFINEMENT_MODES = [
 ] as const satisfies readonly SonolectMode[];
 export type RefinementMode = (typeof REFINEMENT_MODES)[number];
 
+/**
+ * The page size of the dormant Sonolect API history (localApi.ts; the
+ * server's maximum is 100). The phone keeps every note (data-2); the cap in
+ * mergeTranscriptHistory is on the README checklist for the API.
+ */
 export const HISTORY_LIMIT = 100;
 
 export const DEFAULT_SETTINGS: CompanionSettings = {
   language: "en-US",
   uiLanguage: "en",
   privacyLevel: "local_first",
+  allowSystemService: false,
   saveHistory: true,
+  retentionDays: 0,
   cloudSyncEnabled: false,
   hapticsEnabled: true,
   speechRate: 1,
@@ -96,17 +126,66 @@ export function isDictationLanguage(
   );
 }
 
-/** Coerces persisted settings from older app versions into the current shape. */
+/** The privacy levels, in the order Settings shows them. */
+export const PRIVACY_LEVELS = [
+  "standard",
+  "local_first",
+  "ephemeral",
+] as const satisfies readonly PrivacyLevel[];
+
+function isPrivacyLevel(value: unknown): value is PrivacyLevel {
+  return (
+    typeof value === "string" &&
+    (PRIVACY_LEVELS as readonly string[]).includes(value)
+  );
+}
+
+/** Whether captures are saved to the phone's library. */
+export function keepsHistory(
+  settings: Pick<CompanionSettings, "saveHistory" | "privacyLevel">,
+): boolean {
+  return settings.saveHistory && settings.privacyLevel !== "ephemeral";
+}
+
+const BOOLEAN_SETTINGS = [
+  "allowSystemService",
+  "saveHistory",
+  "cloudSyncEnabled",
+  "hapticsEnabled",
+  "onboarded",
+] as const satisfies readonly (keyof CompanionSettings)[];
+
+/**
+ * Coerces persisted settings from older app versions into the current shape.
+ * `base` fills what is missing or invalid: DEFAULT_SETTINGS, or on a first
+ * run the defaults derived from the device language (firstRun.ts).
+ */
 export function normalizeSettings(
   saved: Partial<CompanionSettings> | undefined,
+  base: CompanionSettings = DEFAULT_SETTINGS,
 ): CompanionSettings {
-  const merged = { ...DEFAULT_SETTINGS, ...(saved ?? {}) };
+  const merged = { ...base, ...(saved ?? {}) };
   if (!isDictationLanguage(merged.language)) {
-    merged.language = DEFAULT_SETTINGS.language;
+    merged.language = isDictationLanguage(base.language)
+      ? base.language
+      : DEFAULT_SETTINGS.language;
   }
   if (merged.uiLanguage !== "en" && merged.uiLanguage !== "fr") {
-    merged.uiLanguage = DEFAULT_SETTINGS.uiLanguage;
+    merged.uiLanguage =
+      base.uiLanguage === "en" || base.uiLanguage === "fr"
+        ? base.uiLanguage
+        : DEFAULT_SETTINGS.uiLanguage;
   }
+  if (!isPrivacyLevel(merged.privacyLevel)) {
+    merged.privacyLevel = DEFAULT_SETTINGS.privacyLevel;
+  }
+  // A value that isn't a boolean (a string such as "false" is truthy) falls
+  // back to the default instead of deciding whether notes are kept.
+  for (const key of BOOLEAN_SETTINGS) {
+    if (typeof merged[key] !== "boolean") merged[key] = DEFAULT_SETTINGS[key];
+  }
+  // Anything but a known choice keeps the notes: a bad value never deletes.
+  if (!isRetentionDays(merged.retentionDays)) merged.retentionDays = 0;
   if (
     typeof merged.speechRate !== "number" ||
     !Number.isFinite(merged.speechRate)

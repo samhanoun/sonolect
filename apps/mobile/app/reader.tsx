@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -9,120 +9,167 @@ import {
   View,
 } from "react-native";
 import * as Speech from "expo-speech";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useLocales } from "expo-localization";
+import { useFocusEffect } from "expo-router";
 
 import { strings } from "../src/i18n";
+import { formattingLocale } from "../src/library";
 import { useCompanionStore } from "../src/store";
-import { Button, Card, Chip, Label, Title } from "../src/ui/components";
+import { ttsController, useTts } from "../src/tts";
+import { filterVoices, formatRate, voiceLabel } from "../src/ttsCore";
+import {
+  Button,
+  Card,
+  Chip,
+  Label,
+  Title,
+  inputColors,
+} from "../src/ui/components";
+import { FadeIn, GlassScreen, glassStyles } from "../src/ui/glass";
+import { useTabBarClearance } from "../src/ui/GlassTabBar";
+import { useReducedTransparency } from "../src/ui/motion";
 import { colors, fonts, radius, space } from "../src/ui/theme";
 
 const RATES = [0.75, 1, 1.25, 1.5];
-type PlayState = "idle" | "playing" | "paused";
+/** The Reader's playback, as the read-aloud controller knows it. */
+const READER_ID = "reader";
 
 export default function ReaderScreen() {
   const settings = useCompanionStore((s) => s.settings);
   const latest = useCompanionStore((s) => s.latest);
+  const captureStatus = useCompanionStore((s) => s.capture.status);
   const updateSettings = useCompanionStore((s) => s.updateSettings);
   const t = strings(settings.uiLanguage);
+  const tts = useTts();
+  const clearance = useTabBarClearance();
+  const opaque = useReducedTransparency();
   const [text, setText] = useState("");
-  const [state, setState] = useState<PlayState>("idle");
+  /** The language of a capture loaded with 'Use latest' (ux-21). */
+  const [sourceLanguage, setSourceLanguage] = useState<string | null>(null);
   const [voices, setVoices] = useState<Speech.Voice[]>([]);
   const [voice, setVoice] = useState<string | undefined>();
   const canPause = Platform.OS === "ios";
+  const language = sourceLanguage ?? settings.language;
+  const locale = formattingLocale(
+    settings.uiLanguage,
+    useLocales()[0]?.languageTag,
+  );
+  // Playback state comes from the controller, so a stop from a replaced
+  // utterance can't reset it (speech-14); Library playback is not ours.
+  const state = tts.ownerId === READER_ID ? tts.status : "idle";
+  // The microphone would hear it (speech-4).
+  const captureBusy =
+    captureStatus === "listening" || captureStatus === "processing";
 
   useEffect(() => {
     let mounted = true;
     Speech.getAvailableVoicesAsync()
       .then((all) => {
         if (!mounted) return;
-        const base = settings.language.split("-")[0] ?? "en";
-        setVoices(
-          all
-            .filter((v) => v.language?.toLowerCase().startsWith(base))
-            .slice(0, 6),
+        const kept = filterVoices(all, language, Platform.OS);
+        setVoices(kept);
+        setVoice((current) =>
+          current && kept.some((v) => v.identifier === current)
+            ? current
+            : undefined,
         );
       })
-      .catch(() => setVoices([]));
+      .catch(() => {
+        if (mounted) setVoices([]);
+      });
     return () => {
       mounted = false;
     };
-  }, [settings.language]);
+  }, [language]);
 
-  useEffect(() => () => void Speech.stop(), []);
+  // Tabs stay mounted: leaving the Reader stops it (speech-4).
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        void ttsController.stop();
+      },
+      [],
+    ),
+  );
+
+  const onChangeText = (value: string) => {
+    setText(value);
+    if (!value.trim()) setSourceLanguage(null);
+  };
+
+  const loadLatest = () => {
+    if (!latest) return;
+    setText(latest.refinedText);
+    setSourceLanguage(latest.language !== "auto" ? latest.language : null);
+  };
 
   const play = () => {
-    const content = text.trim();
-    if (!content) return;
-    void Speech.stop();
-    setState("playing");
-    Speech.speak(content, {
-      language: settings.language,
+    ttsController.play(READER_ID, text, {
+      language,
       rate: settings.speechRate,
       ...(voice ? { voice } : {}),
-      onDone: () => setState("idle"),
-      onStopped: () => setState("idle"),
-      onError: () => setState("idle"),
     });
   };
 
-  const stop = () => {
-    void Speech.stop();
-    setState("idle");
-  };
-
-  const togglePause = async () => {
-    if (state === "playing") {
-      await Speech.pause();
-      setState("paused");
-    } else if (state === "paused") {
-      await Speech.resume();
-      setState("playing");
-    }
+  const togglePause = () => {
+    if (state === "playing") void ttsController.pause();
+    else if (state === "paused") void ttsController.resume();
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]}>
+    <GlassScreen>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
-          contentContainerStyle={styles.container}
+          contentContainerStyle={[
+            styles.container,
+            { paddingBottom: clearance + space.lg },
+          ]}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.header}>
+          <FadeIn style={styles.header}>
             <Title>{t.reader.title}</Title>
             <Text style={styles.muted}>{t.reader.subtitle}</Text>
-          </View>
+          </FadeIn>
 
-          <View style={styles.field}>
+          <FadeIn index={1} style={styles.field}>
             <Label>{t.reader.text}</Label>
+            {/* A long article scrolls inside the box, so Play stays in
+                reach (ux-21). */}
             <TextInput
               accessibilityLabel={t.reader.text}
               multiline
+              scrollEnabled
               value={text}
-              onChangeText={setText}
+              onChangeText={onChangeText}
               placeholder={t.reader.placeholder}
               placeholderTextColor={colors.muted}
-              style={styles.textarea}
+              style={[
+                glassStyles.panel,
+                styles.textarea,
+                opaque && glassStyles.panelOpaque,
+              ]}
+              {...inputColors}
             />
             {latest && !text ? (
               <Button
                 compact
                 label={t.reader.useLatest}
                 variant="ghost"
-                onPress={() => setText(latest.refinedText)}
+                onPress={loadLatest}
               />
             ) : null}
-          </View>
+          </FadeIn>
 
-          <Card>
+          <Card enterIndex={2}>
             <Label>{t.reader.speed}</Label>
             <View style={styles.chips}>
               {RATES.map((rate) => (
                 <Chip
                   key={rate}
-                  label={`${rate}×`}
+                  label={formatRate(rate, locale)}
                   selected={settings.speechRate === rate}
                   onPress={() => void updateSettings({ speechRate: rate })}
                 />
@@ -137,10 +184,10 @@ export default function ReaderScreen() {
                     selected={!voice}
                     onPress={() => setVoice(undefined)}
                   />
-                  {voices.map((v) => (
+                  {voices.map((v, index) => (
                     <Chip
                       key={v.identifier}
-                      label={v.name}
+                      label={voiceLabel(v, index, t, Platform.OS)}
                       selected={voice === v.identifier}
                       onPress={() => setVoice(v.identifier)}
                     />
@@ -154,7 +201,7 @@ export default function ReaderScreen() {
                   variant="primary"
                   icon="play"
                   label={t.reader.play}
-                  disabled={!text.trim()}
+                  disabled={!text.trim() || captureBusy}
                   onPress={play}
                   style={styles.flex}
                 />
@@ -163,7 +210,7 @@ export default function ReaderScreen() {
                   variant="primary"
                   icon={state === "playing" ? "pause" : "play"}
                   label={state === "playing" ? t.reader.pause : t.reader.resume}
-                  onPress={() => void togglePause()}
+                  onPress={togglePause}
                   style={styles.flex}
                 />
               ) : (
@@ -171,6 +218,7 @@ export default function ReaderScreen() {
                   variant="primary"
                   icon="play"
                   label={t.reader.play}
+                  disabled={!text.trim() || captureBusy}
                   onPress={play}
                   style={styles.flex}
                 />
@@ -179,7 +227,7 @@ export default function ReaderScreen() {
                 icon="stop"
                 accessibilityLabel={t.reader.stop}
                 disabled={state === "idle"}
-                onPress={stop}
+                onPress={() => void ttsController.stop()}
               />
             </View>
             {!text.trim() ? (
@@ -188,14 +236,13 @@ export default function ReaderScreen() {
           </Card>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </GlassScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
-  container: { padding: space.xl, gap: space.lg, paddingBottom: 40 },
+  container: { padding: space.xl, gap: space.lg },
   header: { gap: 6 },
   muted: {
     fontFamily: fonts.body,
@@ -204,13 +251,15 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   field: { gap: space.sm },
+  // A text field: its outline reaches 3:1 on every edge (ux-26).
   textarea: {
     minHeight: 220,
-    padding: 14,
-    borderRadius: radius.lg,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
+    maxHeight: 280,
+    padding: 16,
+    borderRadius: radius.xl,
+    borderColor: colors.lineInteractive,
+    borderTopColor: colors.lineInteractive,
+    borderBottomColor: colors.lineInteractive,
     color: colors.text,
     fontFamily: fonts.body,
     fontSize: 16,
