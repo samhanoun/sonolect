@@ -18,12 +18,21 @@ import {
   type ModelTask,
 } from "../providerSettings";
 import { isTauriRuntime } from "../desktopNative";
+import { useT, type LocaleKeys, type Translator } from "../i18n";
 
-const TASK_NAMES = {
-  stt: "Speech to text",
-  tts: "Text to speech",
-  text: "Text editing",
+const TASK_NAMES: Record<ModelTask, LocaleKeys> = {
+  stt: "studio.task.stt",
+  tts: "studio.task.tts",
+  text: "studio.task.text",
 };
+const CATALOG_HINTS: Record<ModelTask, LocaleKeys> = {
+  stt: "studio.models.catalogHint.stt",
+  tts: "studio.models.catalogHint.tts",
+  text: "studio.models.catalogHint.text",
+};
+/** Provider brand names stay as they are; only "Local Whisper" is translated. */
+const providerName = (t: Translator, provider: keyof typeof PROVIDER_NAMES) =>
+  provider === "local" ? t("provider.name.local") : PROVIDER_NAMES[provider];
 export function StudioModelSelector({
   task,
   inlineStatus = false,
@@ -41,6 +50,8 @@ export function StudioModelSelector({
     setVoice,
     message,
   } = useProviderStore();
+  const t = useT();
+  const taskName = t(TASK_NAMES[task]);
   const choice = preferences[task];
   const available =
     choice.provider === "local"
@@ -55,9 +66,9 @@ export function StudioModelSelector({
   return (
     <div className="studio-model-select">
       <label>
-        Provider
+        {t("studio.models.provider")}
         <select
-          aria-label={`${TASK_NAMES[task]} provider`}
+          aria-label={t("studio.models.providerFor", { task: taskName })}
           value={choice.provider}
           onChange={(event) => {
             selectModel(task, {
@@ -69,32 +80,34 @@ export function StudioModelSelector({
         >
           {providers.map((provider) => (
             <option key={provider} value={provider}>
-              {PROVIDER_NAMES[provider]}
+              {providerName(t, provider)}
             </option>
           ))}
         </select>
       </label>
       {choice.provider === "local" ? (
         <div className="studio-hint">
-          <Cpu size={18} /> Your installed Whisper model runs on this computer.
+          <Cpu size={18} /> {t("studio.models.localHint")}
         </div>
       ) : (
         <>
           <label>
-            Model
+            {t("studio.models.model")}
             <select
-              aria-label={`${TASK_NAMES[task]} model`}
+              aria-label={t("studio.models.modelFor", { task: taskName })}
               value={choice.model}
               onChange={(event) => {
                 selectModel(task, { ...choice, model: event.target.value });
                 if (task === "tts") setVoice("");
               }}
             >
-              <option value="">Choose a compatible model</option>
+              <option value="">{t("studio.models.choose")}</option>
               {choice.model &&
                 !available.some((model) => model.id === choice.model) && (
                   <option value={choice.model}>
-                    {choice.model} · saved selection
+                    {t("studio.models.savedSelection", {
+                      model: choice.model,
+                    })}
                   </option>
                 )}
               {available.map((model) => (
@@ -110,7 +123,9 @@ export function StudioModelSelector({
             onClick={() => void refreshModels(choice.provider as ProviderId)}
           >
             <RefreshCw size={15} />
-            {busy === choice.provider ? "Loading models…" : "Load live catalog"}
+            {busy === choice.provider
+              ? t("studio.models.loading")
+              : t("studio.models.loadCatalog")}
           </button>
           {inlineStatus && message && (
             <p role="status" className="studio-inline-status">
@@ -118,11 +133,7 @@ export function StudioModelSelector({
             </p>
           )}
           {!available.length && (
-            <p className="studio-muted">
-              Load the live catalog to see models that support{" "}
-              {TASK_NAMES[task].toLowerCase()}. No audio or text is sent when
-              loading models.
-            </p>
+            <p className="studio-muted">{t(CATALOG_HINTS[task])}</p>
           )}
         </>
       )}
@@ -134,6 +145,7 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
   const { keys, saveKey, removeKey, refreshModels, busy } = useProviderStore();
   const [key, setKey] = useState("");
   const [saving, setSaving] = useState(false);
+  const t = useT();
   const router = provider === "openrouter";
   const Icon = router ? Route : Terminal;
   const save = async () => {
@@ -154,28 +166,30 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
           <h3>{PROVIDER_NAMES[provider]}</h3>
           <p>
             {router
-              ? "One key, many speech models"
-              : "Models for thoughtful text editing"}
+              ? t("studio.models.routerTagline")
+              : t("studio.models.zenTagline")}
           </p>
         </div>
         <span className={`studio-tag ${keys[provider] ? "green" : ""}`}>
-          {keys[provider] ? "Key saved" : "No key saved"}
+          {keys[provider]
+            ? t("studio.models.keySaved")
+            : t("studio.models.noKey")}
         </span>
       </div>
       <div className="studio-tags">
         {router ? (
           <>
-            <span className="studio-tag green">Speech to text</span>
-            <span className="studio-tag green">Text to speech</span>
+            <span className="studio-tag green">{t("studio.task.stt")}</span>
+            <span className="studio-tag green">{t("studio.task.tts")}</span>
           </>
         ) : (
           <span className="studio-tag amber">
-            Dedicated speech not available
+            {t("studio.models.noSpeech")}
           </span>
         )}
-        <span className="studio-tag">Text editing</span>
+        <span className="studio-tag">{t("studio.task.text")}</span>
       </div>
-      <label htmlFor={`${provider}-key`}>API key</label>
+      <label htmlFor={`${provider}-key`}>{t("studio.models.apiKey")}</label>
       <div className="studio-input-action">
         <input
           id={`${provider}-key`}
@@ -186,8 +200,10 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
           onChange={(event) => setKey(event.target.value)}
           placeholder={
             keys[provider]
-              ? "Paste a new key to replace the saved key"
-              : `Paste your ${PROVIDER_NAMES[provider]} key`
+              ? t("studio.models.replaceKey")
+              : t("studio.models.pasteKey", {
+                  provider: PROVIDER_NAMES[provider],
+                })
           }
         />
         <button
@@ -195,12 +211,11 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
           onClick={() => void save()}
           disabled={!key.trim() || saving || !isTauriRuntime()}
         >
-          {saving ? "Saving…" : "Save key"}
+          {saving ? t("studio.common.saving") : t("studio.models.saveKey")}
         </button>
       </div>
       <p className="studio-key-note">
-        <LockKeyhole size={12} /> Stored in Windows Credential Manager. Never in
-        browser preferences.
+        <LockKeyhole size={12} /> {t("studio.models.keyNote")}
       </p>
       <div className="studio-card-actions">
         <button
@@ -208,14 +223,14 @@ function ProviderCard({ provider }: { provider: ProviderId }) {
           onClick={() => void refreshModels(provider)}
           disabled={!!busy}
         >
-          Browse models <ArrowUpRight size={13} />
+          {t("studio.models.browse")} <ArrowUpRight size={13} />
         </button>
         {keys[provider] && (
           <button
             className="studio-link muted"
             onClick={() => void removeKey(provider)}
           >
-            Remove saved key
+            {t("studio.models.removeKey")}
           </button>
         )}
       </div>
@@ -227,6 +242,7 @@ export default function StudioModels() {
   const [tab, setTab] = useState<ModelTask | "providers">("providers");
   const { refreshKeyStatus, message } = useProviderStore();
   const setActiveView = useDesktopStore((state) => state.setActiveView);
+  const t = useT();
   useEffect(() => {
     void refreshKeyStatus();
   }, [refreshKeyStatus]);
@@ -234,12 +250,12 @@ export default function StudioModels() {
     <div className="studio-page">
       <div className="studio-page-heading">
         <div>
-          <p className="studio-eyebrow">Make it yours</p>
-          <h1>Your models, your choice</h1>
-          <p>Choose how Sonolect listens, speaks, and refines your words.</p>
+          <p className="studio-eyebrow">{t("studio.models.eyebrow")}</p>
+          <h1>{t("studio.models.title")}</h1>
+          <p>{t("studio.models.subtitle")}</p>
         </div>
         <span className="studio-chip">
-          <ShieldCheck size={15} /> Keys stay on your device
+          <ShieldCheck size={15} /> {t("studio.models.chip")}
         </span>
       </div>
       <div className="studio-tabs">
@@ -249,15 +265,14 @@ export default function StudioModels() {
             className={value === tab ? "active" : ""}
             onClick={() => setTab(value)}
           >
-            {value === "providers" ? "Providers" : TASK_NAMES[value]}
+            {value === "providers"
+              ? t("studio.models.tabProviders")
+              : t(TASK_NAMES[value])}
           </button>
         ))}
       </div>
       {!isTauriRuntime() && (
-        <p className="studio-notice">
-          Browser preview. Open the Windows app to save keys and run native
-          speech.
-        </p>
+        <p className="studio-notice">{t("studio.models.previewNotice")}</p>
       )}
       {message && (
         <p role="status" className="studio-notice">
@@ -275,61 +290,48 @@ export default function StudioModels() {
               <Cpu size={25} />
             </div>
             <div>
-              <h3>Prefer to keep it local?</h3>
-              <p>
-                Whisper runs on your computer. No API key. No account. No audio
-                uploads.
-              </p>
+              <h3>{t("studio.models.localTitle")}</h3>
+              <p>{t("studio.models.localBody")}</p>
             </div>
             <button
               className="studio-button secondary"
               onClick={() => setActiveView("settings")}
             >
-              Manage local model <span>→</span>
+              {t("studio.models.manageLocal")} <span>→</span>
             </button>
           </div>
           <div className="studio-grid workflow">
             <section className="studio-card">
-              <h3>Set up your voice workflow</h3>
-              <p className="studio-muted">
-                Each task can use a different model.
-              </p>
+              <h3>{t("studio.models.workflowTitle")}</h3>
+              <p className="studio-muted">{t("studio.models.workflowBody")}</p>
               {(["stt", "tts", "text"] as const).map((task) => (
                 <button
                   key={task}
                   className="studio-workflow-row"
                   onClick={() => setTab(task)}
                 >
-                  <span>{TASK_NAMES[task]}</span>
-                  <span>Choose model →</span>
+                  <span>{t(TASK_NAMES[task])}</span>
+                  <span>{t("studio.models.chooseModel")}</span>
                 </button>
               ))}
             </section>
             <section className="studio-privacy-card">
               <ShieldCheck size={27} />
-              <h3>Always in your control</h3>
-              <p>
-                Adding a key doesn’t change your processing mode. Audio and text
-                only go online when you choose cloud processing.
-              </p>
+              <h3>{t("studio.models.controlTitle")}</h3>
+              <p>{t("studio.models.controlBody")}</p>
               <span>
-                <Check size={13} /> Private by default
+                <Check size={13} /> {t("studio.models.privateDefault")}
               </span>
             </section>
           </div>
         </>
       ) : (
         <section className="studio-card">
-          <h2>{TASK_NAMES[tab]}</h2>
-          <p className="studio-muted">
-            Models are filtered by the provider’s published capabilities.
-          </p>
+          <h2>{t(TASK_NAMES[tab])}</h2>
+          <p className="studio-muted">{t("studio.models.filtered")}</p>
           <StudioModelSelector task={tab} />
           {tab !== "text" && (
-            <p className="studio-notice">
-              OpenCode Zen is available for text editing. Its public API does
-              not currently advertise dedicated speech models.
-            </p>
+            <p className="studio-notice">{t("studio.models.zenNotice")}</p>
           )}
         </section>
       )}
