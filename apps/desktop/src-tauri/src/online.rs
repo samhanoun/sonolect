@@ -315,6 +315,7 @@ pub async fn provider_transcribe(
                 text,
                 segments: vec![],
                 language: payload.language,
+                capture_id: None,
             })
         })
     })
