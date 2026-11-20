@@ -93,7 +93,14 @@ export function useCapturePlayer(): CapturePlayer {
     }
   };
 
-  return { ...status, play, pause: () => playback.current?.pause() };
+  const pause = () => {
+    playback.current?.pause();
+    // Shown at once: while the audio is still being read nothing plays yet,
+    // so the element may not report the pause.
+    setStatus((current) => ({ ...current, playing: false }));
+  };
+
+  return { ...status, play, pause };
 }
 
 /**

@@ -57,7 +57,8 @@ export class CapturePlayback {
   /**
    * Plays a recording from a position, reading its audio first when another
    * one is loaded. `starting` runs just before playback starts. Resolves false
-   * when a newer call, or close(), came first: nothing is changed then.
+   * when a newer call, pause() or close() came first: from then on it changes
+   * nothing and reports no error.
    */
   async play(
     id: string,
@@ -98,7 +99,12 @@ export class CapturePlayback {
     }
   }
 
+  /**
+   * Pauses playback. A call still reading, or still waiting to play, ends
+   * without playing and without an error.
+   */
   pause() {
+    this.request += 1;
     this.media.pause();
   }
 

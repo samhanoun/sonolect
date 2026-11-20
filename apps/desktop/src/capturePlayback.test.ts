@@ -23,8 +23,17 @@ class FakeMedia implements PlaybackMedia {
   pauses = 0;
   /** play() is refused for a reason other than the audio, as autoplay rules do. */
   refuse = false;
+  /**
+   * play() waits for start(), as while the audio loads, and pause()
+   * interrupts it, as a browser does.
+   */
+  waitToPlay = false;
   readonly played: { type: string; atMs: number }[] = [];
   private source = "";
+  private waiting: {
+    start: () => void;
+    interrupt: (error: Error) => void;
+  }[] = [];
 
   constructor(
     private readonly blobs: Map<string, Blob>,
@@ -55,10 +64,25 @@ class FakeMedia implements PlaybackMedia {
         "NotSupportedError",
       );
     }
+    if (this.waitToPlay)
+      await new Promise<void>((start, interrupt) =>
+        this.waiting.push({ start, interrupt }),
+      );
     this.played.push({ type, atMs: Math.round(this.currentTime * 1000) });
+  }
+  /** Lets a waiting play() start. */
+  start() {
+    for (const play of this.waiting.splice(0)) play.start();
   }
   pause() {
     this.pauses += 1;
+    for (const play of this.waiting.splice(0))
+      play.interrupt(
+        new DOMException(
+          "The play() request was interrupted by a call to pause().",
+          "AbortError",
+        ),
+      );
   }
 }
 
@@ -319,6 +343,79 @@ describe("capture playback", () => {
     assert.deepEqual(player.media.played, [{ type: "audio/wav", atMs: 0 }]);
     assert.equal(player.blobs.size, 2);
     assert.equal(player.media.src, "blob:2");
+  });
+
+  it("pausing while the WAV is read keeps it from playing", async () => {
+    const player = harness({
+      kept: { "1-1": "opus" },
+      unplayable: ["audio/ogg"],
+      held: true,
+    });
+    let started = 0;
+    const first = player.playback.play("1-1", 2000, () => (started += 1));
+    await settle();
+    player.answer(0);
+    await settle();
+    // The Opus file could not be played and the WAV is being read: the page
+    // already shows the recording as playing, so it offers Pause.
+    assert.deepEqual(
+      player.reads.map((read) => read.format),
+      ["ogg", "wav"],
+    );
+    assert.equal(started, 1);
+    const pauses = player.media.pauses;
+    player.playback.pause();
+    assert.equal(player.media.pauses, pauses + 1);
+    player.answer(1);
+    assert.equal(await first, false);
+    assert.deepEqual(player.media.played, []);
+    // The WAV that came after the pause is not handed to the element.
+    assert.equal(player.blobs.size, 1);
+    assert.equal(player.playing(), "audio/ogg");
+
+    // Played again, it is read as WAV again, and plays.
+    const second = player.playback.play("1-1", 2000, () => (started += 1));
+    await settle();
+    player.answer(2);
+    assert.equal(await second, true);
+    assert.deepEqual(
+      player.reads.map((read) => read.format),
+      ["ogg", "wav", "wav"],
+    );
+    assert.deepEqual(player.media.played, [{ type: "audio/wav", atMs: 2000 }]);
+    assert.equal(started, 2);
+  });
+
+  it("pausing while a recording is read keeps it from playing", async () => {
+    const player = harness({ kept: { "1-1": "opus" }, held: true });
+    let started = 0;
+    const call = player.playback.play("1-1", 0, () => (started += 1));
+    await settle();
+    player.playback.pause();
+    player.answer(0);
+    assert.equal(await call, false);
+    assert.equal(started, 0);
+    assert.equal(player.media.src, "");
+    assert.deepEqual(player.media.played, []);
+  });
+
+  it("pausing before playback starts ends the call without an error", async () => {
+    const player = harness({ kept: { "1-1": "opus" } });
+    player.media.waitToPlay = true;
+    const call = player.playback.play("1-1", 0, noop);
+    await settle();
+    player.playback.pause();
+    // The browser's "interrupted by a call to pause()" is not an error to
+    // show: the pause was asked for.
+    assert.equal(await call, false);
+    assert.deepEqual(player.media.played, []);
+
+    // A play that is let start still plays.
+    const again = player.playback.play("1-1", 0, noop);
+    await settle();
+    player.media.start();
+    assert.equal(await again, true);
+    assert.deepEqual(player.media.played, [{ type: "audio/ogg", atMs: 0 }]);
   });
 
   it("reports a read error and reads again next time", async () => {
