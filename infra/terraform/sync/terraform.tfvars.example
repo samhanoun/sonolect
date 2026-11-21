@@ -1,0 +1,11 @@
+# Copy to terraform.tfvars (git ignores it) and fill in. docs/sync-setup.md
+# explains each choice.
+
+project_id         = "sonolect-sync-123456"
+region             = "europe-west1"
+firestore_location = "europe-west1"
+image              = "europe-west1-docker.pkg.dev/sonolect-sync-123456/sonolect/sync-service:0123456789ab"
+
+# Optional: your own domain (see docs/sync-setup.md). Without it, the apps use
+# the run.app URL from the service_url output.
+# domain = "sync.example.com"
