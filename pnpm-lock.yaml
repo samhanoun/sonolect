@@ -53,6 +53,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@sonolect/sync-core':
+        specifier: workspace:*
+        version: link:../../packages/sync-core
       '@sonolect/types':
         specifier: workspace:*
         version: link:../../packages/types

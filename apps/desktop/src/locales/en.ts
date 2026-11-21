@@ -510,6 +510,63 @@ export const en = {
   "studio.retention.days.one": "{count} day",
   "studio.retention.days.other": "{count} days",
 
+  // Note sync between devices
+  "studio.sync.title": "Sync between devices",
+  "studio.sync.subtitle":
+    "Your notes on all your devices, encrypted end to end: the sync server keeps them but cannot read them.",
+  "studio.sync.server": "Sync server: {server}",
+  "studio.sync.audioStays":
+    "Recordings stay on the device that made them. Only the notes sync.",
+  "studio.sync.offState": "Sync is off.",
+  "studio.sync.onState": "Sync is on.",
+  "studio.sync.turnOn": "Turn on sync",
+  "studio.sync.turningOn": "Turning on…",
+  "studio.sync.join": "Join with a code",
+  "studio.sync.joinLabel": "Sync code or link from your other device",
+  "studio.sync.joinSubmit": "Join",
+  "studio.sync.joining": "Joining…",
+  "studio.sync.cancel": "Cancel",
+  "studio.sync.warning":
+    "Joining shares every note with whoever holds this code.",
+  "studio.sync.lastSync": "Last synced: {time}.",
+  "studio.sync.neverSynced": "Not synced yet.",
+  "studio.sync.syncing": "Syncing…",
+  "studio.sync.syncNow": "Sync now",
+  "studio.sync.showCode": "Show code",
+  "studio.sync.hideCode": "Hide code",
+  "studio.sync.codeHint":
+    "On your other device, choose to join sync, then scan this QR code or type the code.",
+  "studio.sync.codeLabel": "Sync code",
+  "studio.sync.qrLabel": "QR code to join this sync",
+  "studio.sync.turnOff": "Turn off sync",
+  "studio.sync.turnOffQuestion": "Turn off sync on this device?",
+  "studio.sync.keepServer": "Keep the server copy",
+  "studio.sync.keepServerHint":
+    "Your other devices keep syncing. This one can join again with the code.",
+  "studio.sync.deleteServer": "Delete the server copy",
+  "studio.sync.deleteServerHint":
+    "Your other devices see “This sync was deleted” and turn sync off. Every device keeps its notes.",
+  "studio.sync.turningOff": "Turning off…",
+  "studio.sync.notesKept": "Your notes stay on this device.",
+  "studio.sync.error.unauthorized":
+    "This sync key is not accepted by the server.",
+  "studio.sync.error.deleted": "This sync was deleted.",
+  "studio.sync.error.tooLarge": "A note is too large to sync.",
+  "studio.sync.error.server": "Sync is unavailable right now.",
+  "studio.sync.error.offline":
+    "Offline. Notes will sync when you're back online.",
+  "studio.sync.notice.quota":
+    "Sync storage is full. Delete notes to sync new ones.",
+  "studio.sync.notice.newerSchema": "Update Sonolect to sync every note.",
+  "studio.sync.pairing.invalid": "This is not a Sonolect sync code.",
+  "studio.sync.pairing.version": "Update Sonolect to use this code.",
+  "studio.sync.pairing.length": "Check the code: it has 56 characters.",
+  "studio.sync.pairing.typo": "A character is wrong.",
+  "studio.sync.preview": "Sync works in the installed app.",
+  "studio.sync.deleteAllHint": "Sync is turned off on this device too.",
+  "studio.sync.deleteAllServer":
+    "Sync is on. Delete the server copy of your notes too? OK deletes it: your other devices turn sync off and keep their notes. Cancel keeps it for them.",
+
   // Studio models and providers
   "studio.task.stt": "Speech to text",
   "studio.task.tts": "Text to speech",
@@ -636,6 +693,7 @@ export const en = {
   "bubble.status.copied": "Copied dictation to the clipboard. {status}",
   "studio.privacy.problemRecordings": "Recordings: {reason}",
   "studio.privacy.problemSettings": "Settings: {reason}",
+  "studio.privacy.problemSync": "Sync: {reason}",
   "native.downloadRunning": "A model download is already running.",
   "native.cannotLoadModel": "Cannot load speech model: {reason}",
   "native.cannotSaveRecording": "Cannot save recording: {reason}",
@@ -738,6 +796,10 @@ export const en = {
   "studio.segments.saved": "Saved to your library.",
   "studio.library.listen": "Listen",
   "studio.library.pause": "Pause",
+  "studio.library.synced": "Synced",
+  "studio.library.noAudio": "The recording stays on the device that made it.",
+  "studio.library.conflictOf": "Conflict copy of the note from {date}",
+  "studio.library.conflictCopy": "Conflict copy",
   "native.audioGone":
     "The audio of this recording is no longer on this device.",
   "native.recordingGone": "This recording is no longer in your library.",
@@ -826,6 +888,20 @@ export const en = {
   "native.pactlFailed": "pactl failed: {reason}",
   "native.systemAudioBusy": "System audio is unavailable.",
   "native.ffmpegNeeded": "ffmpeg is needed to record system audio.",
+  "native.syncNotAvailable":
+    "Sync is not available in this version of Sonolect.",
+  "native.syncKeychainLinux":
+    "Sync is unavailable on this system: it keeps its key in a keychain (Secret Service, such as GNOME Keyring or KWallet), and none is running.",
+  "native.syncKeychainUnavailable":
+    "Sync is unavailable on this system: the keychain could not be opened.",
+  "native.syncKeychainFailed":
+    "The sync key could not be read or saved in the keychain.",
+  "native.syncInvalidKey": "This is not a valid sync key.",
+  "native.syncKeyExists":
+    "Sync is already on with another key. Turn it off first.",
+  "native.syncStateFailed": "The sync state could not be saved.",
+  "native.syncInterrupted": "Sync was interrupted.",
+  "native.syncInvalidNote": "Invalid synced note.",
 } as const;
 
 export type LocaleKeys = keyof typeof en;
