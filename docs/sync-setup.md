@@ -448,7 +448,7 @@ there: a preview build with a plain-http URL has no sync.
   eas build --platform all --profile production
   ```
 
-  (Older EAS CLI versions call it `eas env:create`.)
+  Older EAS CLI versions have `eas env:create` instead, with the same flags.
 
 - **Local release build**: export `EXPO_PUBLIC_SONOLECT_SYNC_URL` next to the
   variables in [mobile-release.md](mobile-release.md#setting-the-policy-url),

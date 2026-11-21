@@ -2,24 +2,27 @@
 
 What a store build of the mobile app (`apps/mobile`) needs, and what the
 owner must provide. The app is the phone-only build: `API_FEATURES_ENABLED`
-is `false` in `apps/mobile/src/features.ts`, so it talks to no Sonolect
-server.
+is `false` in `apps/mobile/src/features.ts`, so it talks to no Sonolect API
+server. The one Sonolect server it can reach is the end-to-end encrypted
+sync server, and only in a build that sets `EXPO_PUBLIC_SONOLECT_SYNC_URL`,
+after the user turns sync on (see [Note sync](#note-sync)).
 
 ## Environment variables
 
 `apps/mobile/app.config.js` reads these through
 `apps/mobile/config/release.cjs`. Nothing in the repo or in CI sets them.
 
-| Variable                      | Used for                                                                                                                                                                                                                    |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SONOLECT_PRIVACY_POLICY_URL` | The hosted privacy policy. Settings and the onboarding card link to it. It must be an `https://` URL. Unset, the app shows no link.                                                                                         |
-| `SONOLECT_RELEASE`            | Set it to `1` for a release built without EAS (a local `expo prebuild` or archive). It makes the policy URL and `SONOLECT_BUILD_NUMBER` required. Do not set it in `eas.json`.                                              |
-| `SONOLECT_BUILD_NUMBER`       | The build number of a local release archive: it sets `ios.buildNumber` (CFBundleVersion) and `android.versionCode`. A whole number from 1 to 2100000000, raised for every upload. EAS builds use remote versioning instead. |
-| `EAS_BUILD_PROFILE`           | Set by EAS Build, not by you. The `production` profile counts as a release build, so it needs the policy URL too. Other profiles (preview, development) don't.                                                              |
-| `EAS_BUILD`                   | Set by EAS Build, not by you: `true` on its build servers, `1` for `eas build --local`. In both cases `SONOLECT_BUILD_NUMBER` is not needed, and the `bundleRelease` checks of route (b) are skipped.                       |
+| Variable                        | Used for                                                                                                                                                                                                                        |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SONOLECT_PRIVACY_POLICY_URL`   | The hosted privacy policy. Settings and the onboarding card link to it. It must be an `https://` URL. Unset, the app shows no link.                                                                                             |
+| `SONOLECT_RELEASE`              | Set it to `1` for a release built without EAS (a local `expo prebuild` or archive). It makes the policy URL and `SONOLECT_BUILD_NUMBER` required. Do not set it in `eas.json`.                                                  |
+| `SONOLECT_BUILD_NUMBER`         | The build number of a local release archive: it sets `ios.buildNumber` (CFBundleVersion) and `android.versionCode`. A whole number from 1 to 2100000000, raised for every upload. EAS builds use remote versioning instead.     |
+| `EAS_BUILD_PROFILE`             | Set by EAS Build, not by you. The `production` profile counts as a release build, so it needs the policy URL too. Other profiles (preview, development) don't.                                                                  |
+| `EAS_BUILD`                     | Set by EAS Build, not by you: `true` on its build servers, `1` for `eas build --local`. In both cases `SONOLECT_BUILD_NUMBER` is not needed, and the `bundleRelease` checks of route (b) are skipped.                           |
+| `EXPO_PUBLIC_SONOLECT_SYNC_URL` | Optional: the end-to-end encrypted sync server ([sync-setup.md](sync-setup.md)). Unset, no sync and no sync request. `https://` only, except in development builds (`http://127.0.0.1`, `http://localhost`, `http://10.0.2.2`). |
 
 Development builds, `expo start`, the web export and the CI jobs run without
-these variables. They build normally and show no policy link.
+these variables. They build normally and show no policy link and no sync.
 
 ## Why a release build fails without the policy URL
 
@@ -45,7 +48,8 @@ A URL that is not `https://` stops every build, release or not:
 ## Setting the policy URL
 
 - **EAS Build**: add `SONOLECT_PRIVACY_POLICY_URL` to the EAS production
-  environment with `eas env:create`, with plain-text visibility: the URL is
+  environment with `eas env:set` (`eas env:create` in older EAS CLI
+  versions), with plain-text visibility: the URL is
   public, and `eas build` reads `app.config.js` on your computer before the
   upload, which secret variables are not available to. It reads it again on
   the build server. The production build profile in `apps/mobile/eas.json`
@@ -232,6 +236,9 @@ last one: `versionCode` on Android, `CFBundleVersion` on iOS.
 - **Native code** (Android): CI checks that its test APK ships only
   `arm64-v8a` libraries, so an x86_64 emulator refuses it with
   `INSTALL_FAILED_NO_MATCHING_ABIS` instead of crashing at launch.
+- **Sync**: in a build without `EXPO_PUBLIC_SONOLECT_SYNC_URL`, Settings has
+  no sync section. In a build with it, Settings shows it, and pairing with
+  another device works as in [sync-setup.md](sync-setup.md#10-pair-two-devices).
 
 ## What the owner must provide
 
@@ -243,20 +250,36 @@ decisions.
 1. Write the policy for the phone-only build. It must say that notes stay on
    the phone, and that dictation runs on the device or through Apple's or
    Google's speech service: always with _Standard_, and with _Local first_
-   or _Ephemeral_ only with the user's consent. It must say that
-   there are no Sonolect servers in this build, explain _Erase all data_,
-   and give a contact.
+   or _Ephemeral_ only with the user's consent. It must explain _Erase all
+   data_ and give a contact. For a build without a sync URL, it must say
+   that there are no Sonolect servers in this build. For a build with one,
+   it must say instead what sync sends, who runs the sync server and where,
+   how long the server keeps it, and how to delete it (see
+   [Note sync](#note-sync)).
 2. Host it at an `https://` URL.
 3. Set `SONOLECT_PRIVACY_POLICY_URL` in the EAS production environment
-   (`eas env:create`), and in CI if CI ever builds releases.
+   (`eas env:set`), and in CI if CI ever builds releases.
 4. Use the same URL in App Store Connect and in the Play Console.
 
 ### Store privacy declarations
 
 1. Fill in Play Data safety and the App Store App Privacy labels (see below).
-   With the API off, the developer receives no data.
+   With the API off and no sync URL, the developer receives no data. With a
+   sync URL, the sync server the owner runs receives what
+   [Note sync](#note-sync) lists, once the user turns sync on.
 2. Decide, with legal advice if needed, how to declare the hand-off of audio
-   to the OS speech service (Google or Apple).
+   to the OS speech service (Google or Apple), and, for a build with a sync
+   URL, how to declare sync.
+
+### Sync server (optional)
+
+1. Host the sync server: [sync-setup.md](sync-setup.md), steps 1 to 8.
+2. Set `EXPO_PUBLIC_SONOLECT_SYNC_URL` in the EAS `production` and `preview`
+   environments, with plain-text visibility (step 9 there), or export it
+   for a local release build.
+3. Update the privacy policy and the store forms before the first build
+   with sync reaches users.
+4. Pair the build with another device (step 10 there).
 
 ### Android upload key and Google Play
 
@@ -336,11 +359,12 @@ decisions.
 ## Store privacy declarations: what the build does
 
 Facts for Play Data safety and App Store App Privacy. They describe this
-phone-only build; turning the API back on changes them.
+phone-only build; turning the API back on changes them, and so does a sync
+URL in the build (see [Note sync](#note-sync)).
 
-- **No Sonolect servers.** The build has no account, no analytics, no crash
-  reporting and no ads. No transcript, note, dictionary entry or recording is
-  sent to the developer.
+- **No Sonolect servers**, unless the build has a sync URL. The build has no
+  account, no analytics, no crash reporting and no ads. Without sync, no
+  transcript, note, dictionary entry or recording is sent to the developer.
 - **Microphone audio** goes to the speech recognizer of the phone:
   - on the device, when the phone can recognize the chosen language there;
   - otherwise to the system speech service (Apple Speech on iOS, the Android
@@ -362,6 +386,46 @@ phone-only build; turning the API back on changes them.
   the app the user picks.
 - **Permissions**: microphone (`RECORD_AUDIO` on Android), and on iOS
   microphone and speech recognition, with English and French prompts.
+
+### Note sync
+
+Only in a build with `EXPO_PUBLIC_SONOLECT_SYNC_URL`, and only after the user
+turns sync on in Settings or joins with a code. Until then the app sends
+nothing to the sync server. Sync adds no permission.
+
+- **Where it goes**: the sync server at the build's URL, which the owner (the
+  developer) runs on Google Cloud: Cloud Run and Firestore in the region the
+  owner picked ([sync-setup.md](sync-setup.md)). Only over HTTPS.
+- **Sent end-to-end encrypted, unreadable by the server and the developer**:
+  every note's text and its other fields (title, language, mode, times,
+  duration, pinned, segments, and fields other devices added), plus a
+  random per-install device id inside each note's clock. Each note is
+  sealed on the phone with XChaCha20-Poly1305 under a key that exists only
+  on the user's devices. Dictionary entries, snippets and settings do not
+  sync.
+- **Sent and kept in the clear**: a random vault id; the SHA-256 of a random
+  bearer token (the token itself goes with every request); one opaque id
+  per note (an HMAC of the note id, which does not reveal it); each record's
+  revision, sequence number, size (rounded up to 256 bytes) and times; and
+  the phone's IP address, which the service uses for rate limiting in memory
+  and which Cloud Run's request logs keep with the vault id, the time and
+  the user agent for as long as Cloud Logging keeps them.
+- **Not sent**: recordings, a name, an email address, a phone number, an
+  account, an advertising or hardware identifier. There is no account.
+- **Kept on the server** until the user deletes the note (its sealed
+  tombstone is purged 90 days later) or deletes the server copy: turning
+  sync off with _Delete the server copy_, or _Erase all data_ with that
+  choice. Local retention (_Keep notes for_) deletes only on the phone.
+- **Shared with**: the user's own devices that hold the key, and anyone the
+  user gives the code to. The screens that show or accept the code say
+  that joining shares every note with whoever holds it. Google processes
+  the ciphertext and logs as the owner's cloud provider.
+
+Open question for the owner: how to declare sync on both forms. For
+example, whether end-to-end encrypted notes that the developer cannot read
+count as data collected, and how to declare the IP addresses and opaque
+identifiers in the server's logs. This page states only what the build does;
+the classification is the owner's decision, with legal advice if needed.
 
 Open question for the owner: whether the hand-off of audio to the OS speech
 service counts as data collected or shared on either form. The developer
