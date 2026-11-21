@@ -156,6 +156,27 @@ export interface SyncReport {
   vaultCreated: boolean;
 }
 
+/** A delete the user made, as `recordDeletes` takes it. */
+export interface LocalDelete {
+  id: string;
+  /** The note's HLC when it was deleted. */
+  hlc?: Hlc | undefined;
+  /**
+   * When it was deleted: the HLC the app stamped at the time of the delete
+   * (`stamp(hlc)`). Kept as it is when it is later than the note as this
+   * device knows it, so an edit made elsewhere after the delete still wins.
+   * Without it, the delete is dated when `recordDeletes` runs.
+   */
+  deletedAt?: Hlc | undefined;
+  /**
+   * The version of the note this device last synced, from
+   * `pendingDeletesOf`. Used when this engine does not know the note (a
+   * fresh state for the same vault), so that version is not mistaken for an
+   * edit made elsewhere and kept as a conflict copy.
+   */
+  synced?: { hlc: Hlc; fp?: string | undefined } | undefined;
+}
+
 export interface SyncStatus {
   vaultId: string;
   deviceId: string;
@@ -183,12 +204,12 @@ export interface SyncEngine {
   stamp(previous?: Hlc): Hlc;
   /**
    * Records notes the user deleted, so the delete reaches the other devices.
-   * Pass each note's HLC at the time of the delete. Saved before it resolves.
-   * Not for retention: a note that expires locally is just left out.
+   * Pass each note's HLC at the time of the delete, and when the app recorded
+   * the delete earlier than now, the HLC it stamped then (`deletedAt`).
+   * Saved before it resolves. Not for retention: a note that expires locally
+   * is just left out.
    */
-  recordDeletes(
-    deletes: readonly { id: string; hlc?: Hlc | undefined }[],
-  ): Promise<void>;
+  recordDeletes(deletes: readonly LocalDelete[]): Promise<void>;
   /**
    * Pulls remote changes, then uploads local ones. Calls made while a run is
    * going are merged into one more run after it. Throws SyncError (check
@@ -226,6 +247,8 @@ type Applied = "applied" | "skipped" | "unreadable" | "deferred";
 type LocalIndex = Map<string, LocalNoteSummary>;
 
 const PUSH_ROUNDS = 3;
+/** Clock differences between this device and the server, for `expiredMayDelete`. */
+const EXPIRED_SLACK_MS = 24 * 60 * 60_000;
 /** JSON around each write's ciphertext: rid, baseRev, deleted, punctuation. */
 const WRITE_OVERHEAD = 96;
 /** Keeps a batch well under the request limit. */
@@ -295,20 +318,41 @@ class Engine implements SyncEngine {
     return this.clock.tick(validHlc(previous));
   }
 
-  async recordDeletes(
-    deletes: readonly { id: string; hlc?: Hlc | undefined }[],
-  ): Promise<void> {
+  async recordDeletes(deletes: readonly LocalDelete[]): Promise<void> {
     this.assertOpen();
     let changed = false;
-    for (const { id, hlc } of deletes) {
+    for (const { id, hlc, deletedAt, synced } of deletes) {
       if (!isSyncableNoteId(id)) continue;
+      const rid = this.ridFor(id);
+      const syncedHlc = synced ? validHlc(synced.hlc) : undefined;
+      if (syncedHlc && !this.records.has(rid)) {
+        // Known again as the version the server had: not uploaded from here
+        // (revision 0) until the pull has seen it.
+        this.setRecord(rid, {
+          id,
+          rev: 0,
+          hlc: syncedHlc,
+          deleted: false,
+          ...(typeof synced?.fp === "string" ? { fp: synced.fp } : {}),
+        });
+        changed = true;
+      }
       // Later than the note as this device knows it, here and on the server.
-      let floor = this.records.get(this.ridFor(id))?.hlc;
+      let floor = this.records.get(rid)?.hlc;
       const given = validHlc(hlc);
       if (given && (!floor || compareHlc(given, floor) > 0)) floor = given;
       const existing = this.meta.pendingDeletes[id];
-      if (existing && (!floor || compareHlc(existing, floor) > 0)) continue;
-      this.meta.pendingDeletes[id] = this.clock.tick(floor);
+      const at = validHlc(deletedAt);
+      if (at && (!floor || compareHlc(at, floor) > 0)) {
+        // Stamped when the user deleted it: an edit made elsewhere after that
+        // moment, but synced before this call, still wins.
+        if (existing && compareHlc(existing, at) >= 0) continue;
+        this.clock.observe(at);
+        this.meta.pendingDeletes[id] = at;
+      } else {
+        if (existing && (!floor || compareHlc(existing, floor) > 0)) continue;
+        this.meta.pendingDeletes[id] = this.clock.tick(floor);
+      }
       changed = true;
     }
     if (changed) await this.persist();
@@ -440,7 +484,9 @@ class Engine implements SyncEngine {
           // behind this device (restored from a backup, or the vault was
           // created again): start from seq 0.
           if (error.code === SYNC_ERROR_CODES.cursorExpired)
-            next = { reason: "expired", deleteAbsent: true };
+            next = this.expiredMayDelete()
+              ? { reason: "expired", deleteAbsent: true }
+              : { reason: "reset", deleteAbsent: false };
           else if (error.code === SYNC_ERROR_CODES.cursorReset)
             next = { reason: "reset", deleteAbsent: false };
         } else if (
@@ -471,6 +517,23 @@ class Engine implements SyncEngine {
         await this.persist();
       }
     }
+  }
+
+  /**
+   * Whether a 410 cursor_expired can mean that tombstones this device never
+   * saw were purged. The server purges a tombstone only once it is older
+   * than `tombstoneTtlMs`, and every tombstone after this device's cursor was
+   * written after its last pull. A device that pulled more recently than
+   * that cannot have missed one: the answer comes from a server that lost
+   * data or does not tell the truth, and a note it leaves out is uploaded
+   * again rather than deleted here.
+   */
+  private expiredMayDelete(): boolean {
+    const lastPull = this.meta.lastPullAt;
+    return (
+      lastPull !== undefined &&
+      this.now() - lastPull > SYNC_LIMITS.tombstoneTtlMs - EXPIRED_SLACK_MS
+    );
   }
 
   private async pullPass(report: SyncReport): Promise<boolean> {
@@ -536,7 +599,7 @@ class Engine implements SyncEngine {
         throw new SyncError("server", "the sync server sent an empty page");
     }
     if (pending && seen) {
-      await this.reconcileAbsent(seen, pending.deleteAbsent, report, local);
+      await this.reconcileAbsent(seen, pending, report, local);
       this.meta.cursor = since;
       // A fresh baseline: the server's head may legitimately be lower now.
       this.meta.highSeq = Math.max(head, since);
@@ -553,13 +616,20 @@ class Engine implements SyncEngine {
   /** After a full pass: what to do with records the server no longer has. */
   private async reconcileAbsent(
     seen: Set<string>,
-    deleteAbsent: boolean,
+    { reason, deleteAbsent }: PendingFullResync,
     report: SyncReport,
     local: { index: LocalIndex | null },
   ): Promise<void> {
     for (const [rid, known] of [...this.records]) {
       if (seen.has(rid) || known.rev === 0) continue;
       if (!deleteAbsent) {
+        if (known.deleted && reason !== "reset") {
+          // A tombstone the service purged on schedule: every device that
+          // synced since has applied it, and one away longer resyncs with
+          // deletes. Uploading it again would only fill the vault.
+          this.setRecord(rid, null);
+          continue;
+        }
         // The server lost it: upload this device's version again.
         this.setRecord(rid, { ...unsent(known), ahead: true });
         continue;
@@ -1146,6 +1216,43 @@ class Engine implements SyncEngine {
     this.saving = result.catch(() => undefined);
     return result;
   }
+}
+
+/**
+ * The deletes a saved sync state has not uploaded yet, read without the
+ * vault keys. For an app about to forget the state while the server copy
+ * stays (sync turned off, or the notes cleared on this device only): it
+ * keeps them, and hands them to `recordDeletes` of the next engine for the
+ * same vault, so they still reach the other devices. Close the engine first.
+ */
+export async function pendingDeletesOf(
+  state: SyncStateStore,
+): Promise<{ vaultId: string; deletes: LocalDelete[] } | null> {
+  const snapshot = await state.load();
+  if (!snapshot) return null;
+  const synced = new Map<string, RecordState>();
+  for (const record of snapshot.records.values())
+    if (!record.deleted && record.rev > 0) synced.set(record.id, record);
+  return {
+    vaultId: snapshot.meta.vaultId,
+    deletes: Object.entries(snapshot.meta.pendingDeletes).map(
+      ([id, deletedAt]) => {
+        const known = synced.get(id);
+        return {
+          id,
+          deletedAt: toHlc(deletedAt),
+          ...(known
+            ? {
+                synced: {
+                  hlc: toHlc(known.hlc),
+                  ...(known.fp ? { fp: known.fp } : {}),
+                },
+              }
+            : {}),
+        };
+      },
+    ),
+  };
 }
 
 /**

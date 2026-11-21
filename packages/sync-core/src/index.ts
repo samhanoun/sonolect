@@ -21,6 +21,7 @@ export {
   sealRecord,
 } from "./envelope";
 export {
+  type LocalDelete,
   type LocalExpectation,
   type LocalNote,
   type LocalNoteSummary,
@@ -33,6 +34,7 @@ export {
   type SyncStatus,
   localMatches,
   openSyncEngine,
+  pendingDeletesOf,
 } from "./engine";
 export {
   SyncClosedError,

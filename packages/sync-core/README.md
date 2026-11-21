@@ -111,8 +111,8 @@ const engine = await openSyncEngine({
 
 // On every local create, edit, refine, rename or pin:
 note.hlc = engine.stamp(note.hlc);
-// On a user delete (not retention):
-await engine.recordDeletes([{ id, hlc }]);
+// On a user delete (not retention), with the stamp taken when it happened:
+await engine.recordDeletes([{ id, hlc, deletedAt: engine.stamp(hlc) }]);
 // On launch, on resume, after local changes (debounced) and on a timer:
 const report = await engine.sync();
 ```
@@ -148,7 +148,15 @@ const report = await engine.sync();
   `updatedAtMs`, but no later than the moment sync started. An edit made
   elsewhere since then therefore wins.
 - **Deletes.** An explicit delete calls `recordDeletes`, which writes a
-  tombstone.
+  tombstone. An app that hands a delete to the engine later than the user
+  made it passes the HLC it stamped at the time as `deletedAt`, so an edit
+  made elsewhere in between still wins.
+- **Forgetting the state while the server copy stays** (sync turned off
+  with the server copy kept, or the notes cleared on this device only):
+  the app reads the deletes not uploaded yet with `pendingDeletesOf(state)`
+  first, keeps them with the vault id, and passes them to `recordDeletes` of
+  the next engine for that vault. A delete therefore still reaches the other
+  devices, and a later rejoin does not bring the note back.
   - Local retention never calls it. A note that expires locally is simply
     no longer listed, and the server copy stays.
   - The engine does not import a note that `isExpired` says this device's
@@ -179,13 +187,22 @@ const report = await engine.sync();
   | Trigger                                                            | Missing remote records                                                              |
   | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
   | No sync for more than 60 days (`stale`)                            | Treated as deleted only after more than 90 days                                     |
-  | 410 `cursor_expired` (`expired`)                                   | Deleted locally (their tombstones were purged), unless edited here since            |
+  | 410 `cursor_expired` (`expired`)                                   | Deleted locally (their tombstones were purged), unless edited here since; see below |
   | 410 `cursor_reset`, a head below our seq, or a new epoch (`reset`) | Uploaded again                                                                      |
   | 401 (`reset`)                                                      | The engine recreates the vault, then uploads again; the vault id comes from the key |
   | `sync({full: true})` (`requested`)                                 | Uploaded again                                                                      |
 
 - **Tombstones** live 90 days on the server. After that the service purges
   them, and any cursor older than the purge gets 410 `cursor_expired`.
+  - An honest server can send `cursor_expired` only to a device that last
+    pulled more than 90 days ago. The engine deletes absent notes on it only
+    then (with a day of slack for clocks); a device that pulled more
+    recently treats it as `reset` and uploads them again, so a server or
+    proxy that answers `cursor_expired` and leaves records out cannot delete
+    notes on a device.
+  - A full pass for any reason but `reset` forgets tombstones the server
+    purged instead of uploading them again; `reset` (the server lost data)
+    uploads them again, so no device brings a deleted note back.
 - **Joining** with `parsePairing(code)` merges the local notes into the
   vault. The first sync uploads them and pulls everything else.
 - **Quotas.**
@@ -276,14 +293,18 @@ joining shares every note with whoever holds the code.
 
 ## Threat model
 
-- **The server sees only:** vault ids, the SHA-256 of the bearer token,
-  record ids, revisions, sequence numbers, record sizes (rounded up to 256
-  bytes), timestamps, IP addresses and ciphertext.
+- **The server sees only:** vault ids, the SHA-256 of the bearer token
+  (one token per vault, shared by every device in it), record ids,
+  revisions, sequence numbers, the vault's epoch, which records are deletes
+  (tombstones) and when they were written, record sizes (rounded up to 256
+  bytes), timestamps, the apps' user agent, IP addresses and ciphertext.
 - **The server never sees:** a key, a note id or a word of a note. The apps
   never send or log the root key, `encKey` or `idKey`, and never log tokens
   or request bodies.
 - **A malicious or compromised server can:**
-  - withhold, delay or delete records;
+  - withhold, delay or delete records on the server (a device deletes a
+    note only for a sealed tombstone, or for a record missing after more
+    than 90 days away);
   - replay old records, which the engine refuses per note by HLC;
   - roll the whole vault back, which the engine detects by head, seq and
     epoch, and answers with a full resync;
@@ -313,7 +334,9 @@ describes the routes. Every byte string is unpadded base64url.
 - known-answer vectors for the keys, the record ids and the envelope;
 - the pairing formats and the QR matrix;
 - the HLC, the state store and the transport error mapping;
-- 25 engine scenarios against the in-memory server: two devices, conflicts,
-  deletes beating and losing to edits, retention, paging, batching, rollback
-  refusal, a server restored from a backup, a wiped server, purged tombstones,
-  vault deletion, lost answers, restarts and interrupted runs.
+- 29 engine scenarios against the in-memory server: two devices, conflicts,
+  deletes beating and losing to edits, deletes dated when they were made,
+  retention, paging, batching, rollback refusal, a server restored from a
+  backup, a wiped server, purged tombstones, a server that answers
+  `cursor_expired` and leaves records out, vault deletion, lost answers,
+  restarts, interrupted runs and deletes handed to a fresh state.

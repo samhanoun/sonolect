@@ -2,18 +2,19 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { base64urlDecode } from "./encoding";
-import { openSyncEngine, type SyncEngine } from "./engine";
+import { openSyncEngine, pendingDeletesOf, type SyncEngine } from "./engine";
 import { SyncClosedError, SyncError } from "./errors";
 import { deriveVaultKeys, generateRootKey, recordId } from "./keys";
 import { conflictCopyId, isPastRetention, type SyncNote } from "./payload";
 import { createMemoryStateStore, type SyncStateStore } from "./state";
+import type { SyncTransport } from "./transport";
 import {
   type MemoryNoteStore,
   type MemoryVaultServerOptions,
   createMemoryNoteStore,
   createMemoryVaultServer,
 } from "./testing";
-import { SYNC_LIMITS } from "./wire";
+import { SYNC_ERROR_CODES, SYNC_LIMITS } from "./wire";
 import { DAY, manualClock, note, randomBytes } from "./test-helpers";
 
 function setup(serverOptions: MemoryVaultServerOptions["limits"] = {}) {
@@ -28,13 +29,14 @@ function setup(serverOptions: MemoryVaultServerOptions["limits"] = {}) {
       notes?: MemoryNoteStore;
       state?: SyncStateStore;
       isExpired?: (note: SyncNote) => boolean;
+      transport?: SyncTransport;
     } = {},
   ) => {
     const notes = options.notes ?? createMemoryNoteStore();
     const state = options.state ?? createMemoryStateStore();
     const engine = await openSyncEngine({
       keys,
-      transport: server.transport(keys),
+      transport: options.transport ?? server.transport(keys),
       notes,
       state,
       randomBytes,
@@ -381,8 +383,11 @@ describe("sync engine", () => {
     assert.deepEqual(a.ids(), ["kept", "mine"]);
   });
 
-  it("resyncs when the server purged tombstones this device has not seen (410 cursor_expired)", async () => {
-    const { device, server, clock } = setup({ tombstoneTtlMs: 1000 });
+  it("deletes nothing on a 410 cursor_expired that an honest server could not send", async () => {
+    // The server purged a tombstone after a second, well before the 90 days
+    // the protocol keeps them: B synced moments earlier, so it cannot have
+    // missed a purged tombstone, and it keeps n1 and uploads it again.
+    const { device, server, clock, keys } = setup({ tombstoneTtlMs: 1000 });
     const a = await device();
     const b = await device();
     a.edit("n1", "one");
@@ -396,9 +401,103 @@ describe("sync engine", () => {
     clock.advance(5000);
     server.purgeTombstones();
     const report = await b.engine.sync();
-    assert.equal(report.full, "expired");
-    assert.deepEqual(b.ids(), ["n2", "n3"]);
+    assert.equal(report.full, "reset");
+    assert.deepEqual(b.ids(), ["n1", "n2", "n3"]);
     assert.equal(b.engine.status().fullResyncPending, null);
+    // A's delete is newer than the copy B uploaded again: it wins, and both
+    // devices end up without n1.
+    await a.engine.sync();
+    await b.engine.sync();
+    assert.deepEqual(a.ids(), ["n2", "n3"]);
+    assert.deepEqual(b.ids(), ["n2", "n3"]);
+    assert.equal(
+      server.records(keys.vaultId).filter((record) => !record.deleted).length,
+      2,
+    );
+  });
+
+  it("is not made to delete notes by a server that answers cursor_expired and leaves records out", async () => {
+    const { device, server, keys, clock } = setup();
+    const a = await device();
+    for (const [id, text] of [
+      ["groceries", "milk"],
+      ["todo", "call back"],
+      ["diary-2026", "private"],
+    ] as const)
+      a.edit(id, text);
+    await a.engine.sync();
+    await a.engine.sync();
+    clock.advance(2 * 60_000);
+    // A dishonest server (or a proxy the device trusts): 410 cursor_expired
+    // once, then a listing without one record that it still holds.
+    const honest = server.transport(keys);
+    const hidden = recordId(keys, "diary-2026");
+    let lied = false;
+    const lying: SyncTransport = {
+      ...honest,
+      async changes(since, limit) {
+        if (since > 0 && !lied) {
+          lied = true;
+          throw new SyncError("gone", "cursor expired", {
+            status: 410,
+            code: SYNC_ERROR_CODES.cursorExpired,
+          });
+        }
+        const page = await honest.changes(since, limit);
+        return {
+          ...page,
+          records: page.records.filter((record) => record.rid !== hidden),
+        };
+      },
+    };
+    await a.engine.close();
+    const victim = await device({
+      notes: a.notes,
+      state: a.state,
+      transport: lying,
+    });
+    const report = await victim.engine.sync();
+    assert.equal(lied, true);
+    assert.equal(report.pulled, 0);
+    assert.deepEqual(victim.ids(), ["diary-2026", "groceries", "todo"]);
+    assert.equal(victim.text("diary-2026"), "private");
+    assert.ok(server.records(keys.vaultId).some((r) => r.rid === hidden));
+  });
+
+  it("does not upload tombstones again that the service purged on schedule", async () => {
+    const { device, server, clock, keys } = setup();
+    const a = await device();
+    const b = await device();
+    for (let i = 0; i < 5; i += 1) a.edit(`n${i}`, `note ${i}`);
+    await a.engine.sync();
+    await b.engine.sync();
+    for (let i = 0; i < 5; i += 1) await a.remove(`n${i}`);
+    await a.engine.sync();
+    await b.engine.sync();
+    assert.deepEqual(b.ids(), []);
+    // Both devices sync every month while the tombstones age.
+    for (let month = 0; month < 3; month += 1) {
+      clock.advance(30 * DAY);
+      await a.engine.sync();
+      await b.engine.sync();
+    }
+    clock.advance(2 * DAY);
+    server.purgeTombstones();
+    assert.equal(server.records(keys.vaultId).length, 0);
+    const requested = await b.engine.sync({ full: true });
+    assert.equal(requested.full, "requested");
+    assert.equal(requested.pushed, 0);
+    assert.equal(server.records(keys.vaultId).length, 0);
+    // A server that lost its data still gets every record again, tombstones
+    // included, so no device brings a deleted note back.
+    a.edit("live", "still here");
+    await a.engine.sync();
+    server.wipe();
+    const reset = await a.engine.sync();
+    assert.equal(reset.full, "reset");
+    const records = server.records(keys.vaultId);
+    assert.equal(records.length, 6);
+    assert.equal(records.filter((record) => record.deleted).length, 5);
   });
 
   it("creates the vault again when the server lost it (401), and uploads everything", async () => {
@@ -711,6 +810,66 @@ describe("sync engine", () => {
       SyncClosedError,
     );
     assert.equal(await a.state.load(), null);
+  });
+
+  it("dates a delete when the user made it, so a later edit elsewhere still wins", async () => {
+    const { device, clock } = setup();
+    const a = await device();
+    const b = await device();
+    a.edit("n1", "base");
+    await a.engine.sync();
+    await b.engine.sync();
+    clock.advance(1000);
+    // A deletes n1; the delete reaches the engine only an hour later (the app
+    // was closed meanwhile).
+    const hlc = a.notes.get("n1")!.hlc;
+    const deletedAt = a.engine.stamp(hlc);
+    a.notes.remove("n1");
+    clock.advance(30 * 60_000);
+    b.edit("n1", "edited on B after the delete");
+    await b.engine.sync();
+    clock.advance(30 * 60_000);
+    await a.engine.recordDeletes([{ id: "n1", hlc, deletedAt }]);
+    const report = await a.engine.sync();
+    assert.deepEqual(report.conflictCopies, []);
+    assert.equal(a.text("n1"), "edited on B after the delete");
+    await b.engine.sync();
+    assert.deepEqual(b.ids(), ["n1"]);
+    assert.equal(b.text("n1"), "edited on B after the delete");
+  });
+
+  it("hands deletes not yet uploaded to the next engine of the same vault", async () => {
+    const { device, server, keys } = setup();
+    const a = await device();
+    const b = await device();
+    a.edit("keep", "keep me");
+    a.edit("gone", "delete me everywhere");
+    await a.engine.sync();
+    await b.engine.sync();
+    // Offline: the delete waits in A's state.
+    await a.remove("gone");
+    await a.engine.close();
+    const carried = await pendingDeletesOf(a.state);
+    assert.equal(carried?.vaultId, keys.vaultId);
+    assert.deepEqual(
+      carried?.deletes.map(({ id }) => id),
+      ["gone"],
+    );
+    await a.state.clear();
+    assert.equal(await pendingDeletesOf(a.state), null);
+    // A fresh state for the same vault (sync turned on again, or the notes
+    // downloaded again): the delete still reaches the server and B.
+    const again = await device({ notes: a.notes, state: a.state });
+    await again.engine.recordDeletes(carried!.deletes);
+    await again.engine.sync();
+    assert.deepEqual(again.ids(), ["keep"]);
+    await b.engine.sync();
+    assert.deepEqual(b.ids(), ["keep"]);
+    assert.ok(
+      server
+        .records(keys.vaultId)
+        .some((r) => r.rid === recordId(keys, "gone") && r.deleted),
+    );
   });
 });
 
