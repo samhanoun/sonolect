@@ -12,6 +12,9 @@ import type {
 import { DEFAULT_SETTINGS, normalizeSettings } from "./domain";
 import { SYNC_URL } from "./features";
 import { resolveInitialSettings } from "./firstRun";
+import type { OnlineProvider } from "./onlineRefine";
+import type { ProviderKeyStatus } from "./providerKeys";
+import { createProviderKeyStore } from "./providerKeys";
 import type { NoteWrite, NotesLoad } from "./storageCore";
 import {
   APP_KEY_PREFIX,
@@ -31,10 +34,12 @@ import { SYNC_KEY_ITEM } from "./sync/keyStore";
 /**
  * Settings, notes, dictionary and snippets live in the app sandbox via
  * AsyncStorage (SecureStore caps values at ~2 KB). Notes are stored one key
- * per note (storageCore.ts). Nothing is deleted on a read error. The API
- * access token and the sync key are the only secrets and stay in
- * SecureStore (Keychain / Keystore). On web, the token is kept in memory
- * only, and sync is not offered.
+ * per note (storageCore.ts). Nothing is deleted on a read error. The
+ * secrets stay in SecureStore (Keychain / Keystore), on this phone only:
+ * the dormant API access token, the sync key, and the user's own provider
+ * keys for online editing (providerKeys.ts, at most 1,024 characters each).
+ * On web, the token is kept in memory only, sync is not offered, and no
+ * provider key is stored at all.
  */
 const KEYS = {
   settings: "sonolect.mobile.settings",
@@ -53,6 +58,10 @@ const notes = createNoteStore(
 );
 const values = createJsonStore(AsyncStorage);
 const webSecrets = new Map<string, string>();
+const providerKeys = createProviderKeyStore(
+  Platform.OS === "web" ? null : SecureStore,
+  () => ({ keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY }),
+);
 
 let legacyMigration: Promise<void> | undefined;
 
@@ -129,12 +138,20 @@ async function removeKeys(keys: readonly string[]): Promise<void> {
 }
 
 export const mobileStorage = {
-  async loadSettings(): Promise<Loaded<CompanionSettings>> {
+  /**
+   * stored: settings were found on the phone. False on a first run, after
+   * Erase all data, and after a reinstall, when the iOS keychain may still
+   * hold an earlier install's provider keys.
+   */
+  async loadSettings(): Promise<
+    Loaded<CompanionSettings> & { stored: boolean }
+  > {
     await migrateLegacySecureStore();
     const read = await values.read(KEYS.settings);
     const saved = read.ok ? asRecord(read.value) : undefined;
     return {
       ok: read.ok,
+      stored: saved !== undefined,
       // Nothing stored (or nothing usable): a first run follows the device.
       value: saved
         ? normalizeSettings(saved as Partial<CompanionSettings>)
@@ -240,11 +257,35 @@ export const mobileStorage = {
     }
   },
 
+  /** The provider key, read only to send a note. Never stored on web. */
+  loadProviderKey(provider: OnlineProvider): Promise<string | undefined> {
+    return providerKeys.load(provider);
+  },
+
+  /** Which providers have a saved key, as booleans only. */
+  providerKeyStatus(): Promise<ProviderKeyStatus> {
+    return providerKeys.status();
+  },
+
+  /** False, with nothing saved, for an invalid key or on web. */
+  saveProviderKey(provider: OnlineProvider, key: string): Promise<boolean> {
+    return providerKeys.save(provider, key);
+  },
+
+  removeProviderKey(provider: OnlineProvider): Promise<void> {
+    return providerKeys.remove(provider);
+  },
+
+  removeProviderKeys(): Promise<void> {
+    return providerKeys.removeAll();
+  },
+
   /**
    * Removes everything Sonolect stored on this device: every AsyncStorage
    * key under 'sonolect.mobile.' (settings, notes, the index, older history
    * values, the copies of broken values, and sync's state and companion
-   * values) and the SecureStore items, the sync key among them.
+   * values) and the SecureStore items, the sync key and the provider keys
+   * among them.
    */
   async eraseAll(): Promise<void> {
     // Every step runs even when one fails; the first failure is reported.
@@ -268,6 +309,7 @@ export const mobileStorage = {
       values.reset();
     });
     await attempt(() => this.saveApiToken(undefined));
+    await attempt(() => providerKeys.removeAll());
     if (Platform.OS !== "web") {
       await Promise.all(
         [KEYS.settings, LEGACY_V1_KEY, LEGACY_AUTH_KEY, SYNC_KEY_ITEM].map(
