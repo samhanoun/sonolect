@@ -28,7 +28,15 @@
 
 ## API cost controls
 
-The paid `/v1/transcribe` and `/v1/polish` routes are limited per verified account (30 requests per minute by default, `aiRouteLimits` in `createApp`), polish input is capped at 20,000 characters and 200 dictionary entries, and provider errors are logged rather than returned. The limit is held in memory per instance, so with several Cloud Run instances the effective budget is per instance; move it to a shared store (Firestore or Redis) before relying on it for billing.
+The paid `/v1/transcribe` and `/v1/polish` routes are limited per verified account (30 requests per minute by default, `aiRouteLimits` in `createApp`), polish input is capped at 20,000 characters, 200 dictionary entries and a 256-character style preset (a longer preset gets 422, never a silent drop), and provider errors are logged rather than returned. The limit is held in memory per instance, so with several Cloud Run instances the effective budget is per instance; move it to a shared store (Firestore or Redis) before relying on it for billing.
+
+## Production mode
+
+In production the API and the agent, audio and worker services never answer with made-up results and never take data they would lose. The full list of routes is in [api.md](api.md#what-production-serves). The billing and sync services are not covered by this rule yet.
+
+- The API does not register its preview routes in production: the profile, audio job, transcript, command, quota and sync manifest routes. They keep data only in the process, so a restart or a second instance loses it, and some answer with fixed values. `SONOLECT_API_PREVIEW_ROUTES=1` turns them on; leave it unset on Cloud Run.
+- The agent, audio and worker services answer 501 `not_implemented` or 503 `not_configured` where they would otherwise return a placeholder: a local "rewrite" without a provider key, a mock transcript, a command or task that never runs.
+- The API treats an unset or empty `NODE_ENV` as production. The internal services treat an unset `NODE_ENV` as development, so their images set `NODE_ENV=production`.
 
 ## Internal services
 

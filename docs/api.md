@@ -1,7 +1,61 @@
 # Sonolect API Design
 
-The product API (`services/api`) is not documented here yet. TODO: expand this
-section from the approved Sonolect architecture specification.
+TODO: Expand this document from the approved Sonolect architecture specification.
+
+## What production serves
+
+In production the API and the agent, audio and worker services never answer with made-up results and never take data they would lose. Routes and endpoints that cannot meet that rule are off or fail with an error in production. Outside production they behave as before, for local development and tests.
+
+### API (`services/api`)
+
+The API runs in production when `NODE_ENV` is `production`, unset or empty. The container image and the Cloud Run services in `infra/terraform` set `NODE_ENV=production`, and a plain `node dist/index.js` starts in production too. Every route except `GET /health` needs a Firebase ID token.
+
+| Route                                                                            | In production | Why                                                                                                                |
+| -------------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `GET /health`                                                                    | On            |                                                                                                                    |
+| `POST /v1/transcribe`                                                            | On            | Google Speech-to-Text. Answers 503 `not_configured` without `GCP_PROJECT_ID`.                                      |
+| `POST /v1/polish`                                                                | On            | Vertex AI. Answers 503 `not_configured` without `GCP_PROJECT_ID`.                                                  |
+| `GET /users/profile`                                                             | Off           | Keeps a record per user in memory. The plan and the creation date are made up.                                     |
+| `POST /audio/jobs`, `GET /audio/jobs/:id`, `POST /audio/jobs/:id/audio`          | Off           | Job metadata stays in memory and the audio in a temp dir. Only the local audio worker transcribes it.              |
+| `GET /transcripts`, `POST /transcripts`, `GET`/`PATCH`/`DELETE /transcripts/:id` | Off           | Kept in memory, or in a local JSON file with `SONOLECT_API_STORE_PATH`. A restart or a second instance loses them. |
+| `POST /commands/execute`                                                         | Off           | Answers "Command accepted" and runs nothing.                                                                       |
+| `GET /usage/quota`                                                               | Off           | Fixed limits, and minutes used is always 0.                                                                        |
+| `GET /sync/manifest`                                                             | Off           | Lists the in-memory transcripts and commands.                                                                      |
+
+An off route is not registered. A signed-in caller gets 404. A caller without a token gets 401, as on every route but `GET /health`. The API logs the off routes once at start.
+
+`SONOLECT_API_PREVIEW_ROUTES=1` (or `true`) registers the off routes in production too, for example for a single self-hosted instance. The API then logs a warning at start. Leave it unset on Cloud Run: instances restart and scale out, so the data would be lost.
+
+No shipped app calls an off route. Desktop release builds set no `VITE_SONOLECT_API_URL`, and the mobile API switch (`API_FEATURES_ENABLED` in `apps/mobile/src/features.ts`) is off.
+
+#### `POST /v1/polish` input
+
+| Field         | Rule                                                                                                                                      |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `transcript`  | Required, non-empty, at most 20,000 characters (413 above).                                                                               |
+| `stylePreset` | Optional text of at most 256 characters, sent to the model as an instruction. A longer or non-text value gets 422 `invalid_style_preset`. |
+| `dictionary`  | At most 200 entries (413 above). Entries with a `spoken` or `written` longer than 100 characters are skipped.                             |
+| `locale`      | Optional, at most 64 characters.                                                                                                          |
+
+A model answer with no text gets 502 `polish_empty`; the API never returns the raw transcript as if it were polished.
+
+The mobile app sends one preset per mode (`stylePresetForMode` in `apps/mobile/src/refine.ts`, 57 to 87 characters). The desktop app sends no preset. A test in `services/api` reads the mobile presets and fails if one ever exceeds the cap.
+
+### Internal services
+
+The agent, audio and worker services run in production only when `NODE_ENV=production`. For them an unset `NODE_ENV` means development; their images set `NODE_ENV=production`. The service token is checked first, so a caller without one gets 401. Each service logs its unavailable endpoints once at start.
+
+| Service | Endpoint                                                                                                                    | In production                                                                                                                                                                                                                |
+| ------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| agent   | `POST /llm/rewrite`, `POST /llm/summarize`                                                                                  | Calls the provider when its key is set. 503 `not_configured` when neither `OPENAI_API_KEY` nor `ANTHROPIC_API_KEY` is set, or when the requested provider has no key. Outside production they fall back to a local clean-up. |
+| agent   | `POST /commands/execute`, `GET /commands/:id`                                                                               | 501 `not_implemented`: no command executor is connected.                                                                                                                                                                     |
+| agent   | `POST /agents`                                                                                                              | 501 `not_implemented`: custom agents are kept only in memory.                                                                                                                                                                |
+| agent   | `GET /agents`                                                                                                               | On. Lists the built-in agents.                                                                                                                                                                                               |
+| audio   | `POST /transcriptions`, `GET /transcriptions/:id`, `POST /transcriptions/:id/cancel`                                        | 501 `not_implemented`: the mock provider is off and Google Speech-to-Text runs in the API (`POST /v1/transcribe`).                                                                                                           |
+| audio   | `POST /refinements`                                                                                                         | `rewrite` and `translate` answer 501 `refinement_unavailable`. `clean` and `summarize` stay on, labelled `provider: "template"`.                                                                                             |
+| worker  | `GET /tasks`, `POST /tasks`, `POST /events/audio`, `POST /events/agent`, `POST /events/billing`, `POST /tasks/:id/dispatch` | 501 `not_implemented`: the task handlers are placeholders and the queue lives in memory.                                                                                                                                     |
+
+This page does not cover the billing service. The sync service's protocol is in the next section.
 
 ## Note sync vault API
 
