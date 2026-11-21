@@ -182,6 +182,14 @@ export type SavedCapture = {
   conflictOf?: string;
   updatedAtMs?: number;
 };
+/**
+ * A note that came through sync: it has no recording here (recordings do not
+ * sync) and names the app that made it, which recordings made here do not.
+ * A recording made here whose audio is gone is not one.
+ */
+function cameThroughSync(capture: SavedCapture): boolean {
+  return capture.hasAudio === false && capture.origin !== undefined;
+}
 /** Lists the library, and remembers which notes have no audio here. */
 async function listSavedCaptures(): Promise<SavedCapture[]> {
   const captures = await nativeProviderCall<SavedCapture[]>(
@@ -1104,7 +1112,7 @@ export function StudioLibrary({
                     ? t("studio.library.retryNeeded")
                     : item.conflictOf
                       ? t("studio.library.conflictCopy")
-                      : item.hasAudio === false
+                      : cameThroughSync(item)
                         ? t("studio.library.synced")
                         : t("studio.library.savedOnDevice")}
                 </span>
@@ -1124,7 +1132,11 @@ export function StudioLibrary({
                 </p>
               )}
               {item.hasAudio === false && (
-                <p className="studio-muted">{t("studio.library.noAudio")}</p>
+                <p className="studio-muted">
+                  {cameThroughSync(item)
+                    ? t("studio.library.noAudio")
+                    : t("native.audioGone")}
+                </p>
               )}
               <div className="studio-card-actions">
                 {item.hasAudio !== false && (

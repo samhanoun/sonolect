@@ -99,6 +99,45 @@ test.describe("note sync", () => {
     expect(server.log).toEqual([]);
   });
 
+  test("a recording made here whose audio is gone is not shown as synced", async ({
+    page,
+  }) => {
+    await installMockTauri(page, [
+      { ...recording, hasAudio: false },
+      {
+        ...recording,
+        id: "1700000000000-2",
+        transcript: "From the phone.",
+        origin: "mobile",
+        hasAudio: false,
+      },
+    ]);
+    await page.goto("/");
+    await nav(page, "Library").click();
+    const local = page.locator("article", {
+      hasText: "Recorded on this desktop.",
+    });
+    await expect(
+      local.getByText("Saved on device", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      local.getByText(
+        "The audio of this recording is no longer on this device.",
+      ),
+    ).toBeVisible();
+    await expect(local.getByText("Synced", { exact: true })).toHaveCount(0);
+    // Nothing to play or to transcribe again.
+    await expect(local.getByRole("button", { name: "Listen" })).toHaveCount(0);
+    await expect(
+      local.getByRole("button", { name: "Retry locally" }),
+    ).toHaveCount(0);
+    const synced = page.locator("article", { hasText: "From the phone." });
+    await expect(synced.getByText("Synced", { exact: true })).toBeVisible();
+    await expect(
+      synced.getByText("The recording stays on the device that made it."),
+    ).toBeVisible();
+  });
+
   test("turning sync on shows the code for the other devices, with its warning", async ({
     page,
   }) => {
