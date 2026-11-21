@@ -25,9 +25,11 @@ import { syncVoiceKeyboardPreferences } from "../modules/sonolect-voice-keyboard
 import { strings, type Strings } from "../src/i18n";
 import { noticeText } from "../src/notices";
 import { systemServiceAllowedWithoutAsking } from "../src/speechPolicy";
-import { useCompanionStore } from "../src/store";
+import { syncController, useCompanionStore } from "../src/store";
+import { showFailure } from "../src/ui/actions";
 import { MIN_TOUCH_SIZE } from "../src/ui/components";
 import { confirm } from "../src/ui/confirm";
+import { askEraseAll } from "../src/ui/eraseAll";
 import { GlassTabBar } from "../src/ui/GlassTabBar";
 import { useReducedMotion } from "../src/ui/motion";
 import { colors, fonts, radius, space } from "../src/ui/theme";
@@ -278,6 +280,41 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
     }
   };
 
+  /**
+   * Erase all. With sync on, as in Settings: it also forgets the sync key,
+   * and offers to delete the server copy first. When that delete fails,
+   * nothing is erased and the screen stays.
+   */
+  const eraseAndRetry = async () => {
+    if (syncController()?.view().status !== "on") {
+      await deleteAndRetry(
+        t.settings.eraseTitle,
+        t.settings.eraseMessage,
+        async () => {
+          await useCompanionStore.getState().eraseAll();
+        },
+      );
+      return;
+    }
+    if (busy.current) return;
+    busy.current = true;
+    try {
+      const choice = await askEraseAll(t, true);
+      if (!choice) return;
+      const outcome = await useCompanionStore
+        .getState()
+        .eraseAll({ deleteServerCopy: choice === "everywhere" })
+        .catch(() => "failed" as const);
+      if (outcome === "serverCopyKept") {
+        showFailure(t.sync.deleteFailed);
+        return;
+      }
+      await retry();
+    } finally {
+      busy.current = false;
+    }
+  };
+
   return (
     <SafeAreaView style={styles.recovery}>
       <StatusBar style="light" />
@@ -310,16 +347,7 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
         <RecoveryButton
           variant="danger"
           label={t.settings.eraseAll}
-          onPress={() =>
-            void deleteAndRetry(
-              t.settings.eraseTitle,
-              t.settings.eraseMessage,
-              // This phone only, the server copy kept.
-              async () => {
-                await useCompanionStore.getState().eraseAll();
-              },
-            )
-          }
+          onPress={() => void eraseAndRetry()}
         />
       </ScrollView>
     </SafeAreaView>

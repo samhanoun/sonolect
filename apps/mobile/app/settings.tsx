@@ -45,7 +45,8 @@ import {
   ToggleRow,
   inputColors,
 } from "../src/ui/components";
-import { choose, confirm } from "../src/ui/confirm";
+import { confirm } from "../src/ui/confirm";
+import { askEraseAll } from "../src/ui/eraseAll";
 import { FadeIn, GlassScreen } from "../src/ui/glass";
 import { useTabBarClearance } from "../src/ui/GlassTabBar";
 import { SyncSection } from "../src/ui/SyncSection";
@@ -176,33 +177,7 @@ export default function SettingsScreen() {
     confirming.current = true;
     let choice: "here" | "everywhere" | null;
     try {
-      choice = syncOn
-        ? await choose({
-            title: t.settings.eraseTitle,
-            message: t.sync.eraseMessage,
-            choices: [
-              {
-                value: "here",
-                label: t.sync.eraseThisPhone,
-                destructive: true,
-              },
-              {
-                value: "everywhere",
-                label: t.sync.eraseDeleteServerCopy,
-                destructive: true,
-              },
-            ],
-            cancelLabel: t.common.cancel,
-          })
-        : (await confirm({
-              title: t.settings.eraseTitle,
-              message: t.settings.eraseMessage,
-              confirmLabel: t.settings.eraseButton,
-              cancelLabel: t.common.cancel,
-              destructive: true,
-            }))
-          ? "here"
-          : null;
+      choice = await askEraseAll(t, syncOn);
     } finally {
       confirming.current = false;
     }
