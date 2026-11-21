@@ -50,6 +50,12 @@ variable "domain" {
   }
 }
 
+variable "skip_invoker_check" {
+  description = "false: anyone may call the service through an allUsers run.invoker binding. Set true when an organization policy (domain restricted sharing) refuses allUsers: Cloud Run then skips the invoker check instead, which is just as public."
+  type        = bool
+  default     = false
+}
+
 variable "deletion_protection" {
   description = "Protect the Firestore database and the Cloud Run service from deletion, including by terraform destroy."
   type        = bool

@@ -155,6 +155,9 @@ resource "google_cloud_run_v2_service" "sync" {
   deletion_protection = var.deletion_protection
   ingress             = "INGRESS_TRAFFIC_ALL"
   labels              = local.labels
+  # Public either way: through the allUsers binding below, or, where an
+  # organization policy forbids allUsers, by skipping the invoker check.
+  invoker_iam_disabled = var.skip_invoker_check
 
   template {
     service_account = google_service_account.sync.email
@@ -247,6 +250,8 @@ resource "google_cloud_run_v2_service" "sync" {
 # The apps call the service directly, and each vault checks its own bearer
 # token, so anyone may invoke it (as the API's invoker in ../main.tf).
 resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
+  count = var.skip_invoker_check ? 0 : 1
+
   project  = var.project_id
   location = google_cloud_run_v2_service.sync.location
   name     = google_cloud_run_v2_service.sync.name
