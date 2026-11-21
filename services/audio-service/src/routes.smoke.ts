@@ -75,8 +75,49 @@ try {
   await app.close();
 }
 
-// Production: service token required, and no fabricated output of any kind.
+// With a token configured, one user cannot read another user's job.
 const serviceToken = "s".repeat(40);
+const guarded = await createApp({
+  logger: false,
+  env: { SONOLECT_SERVICE_TOKENS: serviceToken },
+});
+try {
+  const headers = {
+    authorization: `Bearer ${serviceToken}`,
+    "x-user-id": "user-1",
+  };
+  const created = await guarded.inject({
+    method: "POST",
+    url: "/transcriptions",
+    headers,
+    payload: {
+      audio: {
+        uri: "gs://sonolect-dev-audio/example.webm",
+        mimeType: "audio/webm",
+      },
+    },
+  });
+  assert.equal(created.statusCode, 202, created.body);
+  const job = created.json<TranscriptionJob>();
+
+  const otherUser = await guarded.inject({
+    method: "GET",
+    url: `/transcriptions/${job.id}`,
+    headers: { ...headers, "x-user-id": "user-2" },
+  });
+  assert.equal(otherUser.statusCode, 404);
+
+  const owner = await guarded.inject({
+    method: "GET",
+    url: `/transcriptions/${job.id}`,
+    headers,
+  });
+  assert.equal(owner.statusCode, 200, owner.body);
+} finally {
+  await guarded.close();
+}
+
+// Production: service token required, and no fabricated output of any kind.
 const production = await createApp({
   logger: false,
   env: { NODE_ENV: "production", SONOLECT_SERVICE_TOKENS: serviceToken },
@@ -99,24 +140,23 @@ try {
   });
   assert.equal(anonymous.statusCode, 401, anonymous.body);
 
-  const mockInProduction = await production.inject({
-    method: "POST",
-    url: "/transcriptions",
-    headers,
-    payload: { audio },
-  });
-  assert.equal(mockInProduction.statusCode, 202, mockInProduction.body);
-  const mockJob = mockInProduction.json<TranscriptionJob>();
-  assert.equal(mockJob.status, "failed");
-  assert.equal(mockJob.transcriptText, undefined);
-  assert.ok(mockJob.error?.includes("provider_unavailable"));
-
-  const otherUser = await production.inject({
-    method: "GET",
-    url: `/transcriptions/${mockJob.id}`,
-    headers: { ...headers, "x-user-id": "user-2" },
-  });
-  assert.equal(otherUser.statusCode, 404);
+  // No provider can transcribe here in production, so the job endpoints
+  // answer 501 and store nothing.
+  for (const request of [
+    { method: "POST", url: "/transcriptions", payload: { audio } },
+    {
+      method: "POST",
+      url: "/transcriptions",
+      payload: { audio, provider: "google" },
+    },
+    { method: "GET", url: "/transcriptions/any-id" },
+    { method: "POST", url: "/transcriptions/any-id/cancel" },
+  ] as const) {
+    const response = await production.inject({ ...request, headers });
+    assert.equal(response.statusCode, 501, response.body);
+    assert.equal(response.json<{ error: string }>().error, "not_implemented");
+    assert.ok(!response.body.includes("mock transcript"));
+  }
 
   const translate = await production.inject({
     method: "POST",

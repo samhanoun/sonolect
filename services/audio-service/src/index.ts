@@ -24,9 +24,11 @@ import {
 import {
   BoundedMap,
   ServiceHttpError,
+  disableEndpoints,
   getServiceUserId,
   registerServiceSecurity,
   resolveListenOptions,
+  type UnavailableEndpoint,
 } from "@sonolect/service-kit";
 
 const serviceName = "sonolect-audio-service";
@@ -86,6 +88,28 @@ interface ProviderSelectionOptions {
   requested?: SttProviderName | undefined;
   env?: SttProviderEnv | undefined;
 }
+
+/**
+ * No provider can transcribe in production: the mock is off there, and the
+ * google provider always fails because Google Speech-to-Text runs in the API
+ * service. The job endpoints answer 501 instead of storing a failed job in
+ * memory.
+ */
+const TRANSCRIPTION_UNAVAILABLE_MESSAGE =
+  "This service cannot transcribe in production. The API serves POST /v1/transcribe.";
+const PRODUCTION_UNAVAILABLE: readonly UnavailableEndpoint[] = [
+  "POST /transcriptions",
+  "GET /transcriptions/:id",
+  "POST /transcriptions/:id/cancel",
+].map((route) => ({
+  route,
+  statusCode: 501,
+  error: "not_implemented",
+  message: TRANSCRIPTION_UNAVAILABLE_MESSAGE,
+}));
+const PRODUCTION_NOTES = [
+  "POST /refinements: rewrite and translate answer 501; clean and summarize use the template provider",
+];
 
 const createStores = (): InMemoryStores => ({
   transcriptionJobs: new BoundedMap<string, TranscriptionJob>(
@@ -253,6 +277,8 @@ export async function createApp(
   await app.register(helmet);
   await app.register(cors, { origin: false });
   registerServiceSecurity(app, { serviceName, env });
+  if (isProduction(env))
+    disableEndpoints(app, PRODUCTION_UNAVAILABLE, PRODUCTION_NOTES);
 
   app.get("/health", async () => ({
     status: "ok",
