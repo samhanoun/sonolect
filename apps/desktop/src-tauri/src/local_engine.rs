@@ -1,20 +1,24 @@
 //! Embedded CPU Whisper, adapted from sonolect/sonolect's whisper.rs at 021a50b.
 //! No command shell, external service, or test-stub backend is used here.
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::{
     fs,
-    io::{Cursor, Read, Write},
+    io::{Cursor, Read},
     path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
 };
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-const MODEL_SHA: &str = "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe";
-const MODEL_SIZE: u64 = 147951465;
+use super::model_download::{self, PinnedModel};
+
+/// The multilingual Whisper Base model, as published by whisper.cpp.
+const MODEL: PinnedModel = PinnedModel {
+    url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+    sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+    size: 147_951_465,
+};
 static ENGINE: OnceLock<Mutex<Option<(PathBuf, WhisperContext)>>> = OnceLock::new();
-static DOWNLOAD: Mutex<()> = Mutex::new(());
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,68 +124,8 @@ pub fn local_model_status(
 #[tauri::command]
 pub async fn download_local_model(app: tauri::AppHandle) -> Result<ModelStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let _lock = DOWNLOAD
-            .try_lock()
-            .map_err(|_| "A model download is already running.")?;
         let path = default_model(&app)?;
-        fs::create_dir_all(path.parent().ok_or("Invalid model directory")?)
-            .map_err(|e| e.to_string())?;
-        let partial = path.with_extension("bin.part");
-        let result = (|| -> Result<(), String> {
-            let client = reqwest::blocking::Client::builder()
-                .timeout(std::time::Duration::from_secs(600))
-                .build()
-                .map_err(|e| e.to_string())?;
-            let mut response = client
-                .get("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin")
-                .send()
-                .and_then(|r| r.error_for_status())
-                .map_err(|e| format!("Model download failed: {e}"))?;
-            let mut file = fs::File::create(&partial).map_err(|e| e.to_string())?;
-            let mut hash = Sha256::new();
-            let mut downloaded = 0u64;
-            let mut buffer = [0u8; 65536];
-            let mut last_progress = 0;
-            loop {
-                let count = response.read(&mut buffer).map_err(|e| e.to_string())?;
-                if count == 0 {
-                    break;
-                }
-                downloaded += count as u64;
-                if downloaded > MODEL_SIZE {
-                    return Err("Model exceeded its expected size.".into());
-                }
-                hash.update(&buffer[..count]);
-                file.write_all(&buffer[..count])
-                    .map_err(|e| e.to_string())?;
-                if downloaded - last_progress > 1_000_000 {
-                    let _ = app.emit(
-                        "local-model-progress",
-                        (downloaded * 100 / MODEL_SIZE) as u32,
-                    );
-                    last_progress = downloaded;
-                }
-            }
-            file.sync_all().map_err(|e| e.to_string())?;
-            drop(file);
-            if downloaded != MODEL_SIZE
-                || hash
-                    .finalize()
-                    .iter()
-                    .map(|b| format!("{b:02x}"))
-                    .collect::<String>()
-                    != MODEL_SHA
-            {
-                return Err("Model checksum failed. Please retry the download.".into());
-            }
-            fs::rename(&partial, &path).map_err(|e| e.to_string())?;
-            Ok(())
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(&partial);
-        }
-        result?;
-        let _ = app.emit("local-model-progress", 100u32);
+        model_download::download_verified(&app, &MODEL, &path, "local-model-progress")?;
         local_model_status(app, None)
     })
     .await

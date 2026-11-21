@@ -7,11 +7,14 @@ use tauri::Manager;
 mod audio_feed;
 mod bubble;
 mod compact_audio;
+mod fbank;
 mod insertion;
 mod ipc_audio;
 mod local_engine;
 mod local_history;
+mod model_download;
 mod online;
+mod speakers;
 mod streaming;
 mod sync;
 mod system_audio;
@@ -256,6 +259,16 @@ fn main() {
         }
         return;
     }
+    if args.get(1).map(String::as_str) == Some("--detect-speakers") {
+        match speakers::cli(&args[2..]) {
+            Ok(json) => println!("{json}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(bubble::init())
@@ -279,6 +292,10 @@ fn main() {
             online::provider_rewrite,
             local_engine::local_model_status,
             local_engine::download_local_model,
+            speakers::speaker_model_status,
+            speakers::download_speaker_model,
+            speakers::detect_speakers,
+            speakers::cancel_speaker_detection,
             local_history::list_local_captures,
             local_history::delete_local_capture,
             local_history::retry_local_capture,
