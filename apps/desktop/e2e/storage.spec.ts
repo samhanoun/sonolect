@@ -2,8 +2,10 @@ import { expect, test, type Page } from "@playwright/test";
 import {
   installMockTauri,
   nativeCalls,
+  releaseHeldReads,
   type MockCapture,
 } from "./support/mockTauri";
+import { played, watchPlayback } from "./support/playback";
 
 function nav(page: Page, name: string) {
   return page.getByRole("navigation").getByRole("button", { name }).first();
@@ -149,6 +151,117 @@ test.describe("compressed recordings", () => {
         async () => (await nativeCalls(page, "compress_local_captures")).length,
       )
       .toBe(before + 1);
+  });
+});
+
+test.describe("playing compressed recordings", () => {
+  const id = "1700000000000-1";
+
+  /** Plays the saved one-second recording from the library to its end. */
+  async function listenToTheEnd(page: Page) {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto("/");
+    await nav(page, "Library").click();
+    const listen = page.locator(".studio-card-actions button").first();
+    await expect(listen).toHaveText("Listen");
+    await listen.click();
+    // The playhead reaches the end of the tone, then playback stops.
+    await expect(listen).toHaveText(/^Listen\s*0:01$/);
+    await expect(page.locator(".studio-notice")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  }
+
+  test("a compressed recording plays from its Opus file", async ({ page }) => {
+    await installMockTauri(page, [capture(id, 1000)], { compressed: [id] });
+    await watchPlayback(page);
+    await listenToTheEnd(page);
+    expect(await nativeCalls(page, "read_local_capture_audio")).toEqual([
+      { command: "read_local_capture_audio", args: { id, format: "ogg" } },
+    ]);
+    expect((await played(page)).types).toEqual(["audio/ogg"]);
+  });
+
+  test("an Opus file the webview cannot play is read again as WAV", async ({
+    page,
+  }) => {
+    await installMockTauri(page, [capture(id, 1000)], {
+      compressed: [id],
+      unplayableOpus: true,
+    });
+    await watchPlayback(page);
+    await listenToTheEnd(page);
+    expect(await nativeCalls(page, "read_local_capture_audio")).toEqual([
+      { command: "read_local_capture_audio", args: { id, format: "ogg" } },
+      { command: "read_local_capture_audio", args: { id, format: "wav" } },
+    ]);
+    expect((await played(page)).types).toEqual(["audio/ogg", "audio/wav"]);
+  });
+
+  test("pausing while the WAV is read keeps it from playing", async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await installMockTauri(page, [capture(id, 1000)], {
+      compressed: [id],
+      unplayableOpus: true,
+      holdWavReads: true,
+    });
+    await watchPlayback(page);
+    const read = (format: string) => ({
+      command: "read_local_capture_audio",
+      args: { id, format },
+    });
+    await page.goto("/");
+    await nav(page, "Library").click();
+    const listen = page.locator(".studio-card-actions button").first();
+    await listen.click();
+    // The Opus file cannot be played, and the WAV takes a while to read.
+    await expect
+      .poll(() => nativeCalls(page, "read_local_capture_audio"))
+      .toEqual([read("ogg"), read("wav")]);
+    await expect(listen).toHaveText(/^Pause/);
+    await listen.click();
+    await expect(listen).toHaveText(/^Listen/);
+    await releaseHeldReads(page);
+    // The page has had time to act on the WAV, and has not played it: only
+    // the Opus file was asked to play.
+    await page.evaluate(
+      () => new Promise((resolve) => setTimeout(resolve, 100)),
+    );
+    expect(await played(page)).toMatchObject({
+      types: ["audio/ogg"],
+      plays: 1,
+    });
+    await expect(listen).toHaveText(/^Listen/);
+
+    // Listening again reads the WAV again and plays it to the end.
+    await listen.click();
+    await expect
+      .poll(() => nativeCalls(page, "read_local_capture_audio"))
+      .toEqual([read("ogg"), read("wav"), read("wav")]);
+    await releaseHeldReads(page);
+    await expect(listen).toHaveText(/^Listen\s*0:01$/);
+    expect((await played(page)).types).toEqual(["audio/ogg", "audio/wav"]);
+    await expect(page.locator(".studio-notice")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("a webview without Opus asks for WAV", async ({ page }) => {
+    await installMockTauri(page, [capture(id, 1000)], { compressed: [id] });
+    await page.addInitScript(() => {
+      const canPlayType = HTMLMediaElement.prototype.canPlayType;
+      HTMLMediaElement.prototype.canPlayType = function (type: string) {
+        return /ogg|opus/i.test(type) ? "" : canPlayType.call(this, type);
+      };
+    });
+    await watchPlayback(page);
+    await listenToTheEnd(page);
+    expect(await nativeCalls(page, "read_local_capture_audio")).toEqual([
+      { command: "read_local_capture_audio", args: { id, format: "wav" } },
+    ]);
+    expect((await played(page)).types).toEqual(["audio/wav"]);
   });
 });
 

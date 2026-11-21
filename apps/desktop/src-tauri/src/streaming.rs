@@ -412,8 +412,9 @@ pub fn transcribe_file(
     if compact_audio::is_compressed(audio_path) {
         return transcribe_samples(compact_audio::open(audio_path)?, transcribe, on_partial);
     }
-    let reader =
-        hound::WavReader::open(audio_path).map_err(|e| format!("Invalid WAV audio: {e}"))?;
+    // Counts the last seconds of a recording cut off by a crash, which its
+    // header was not brought up to date with.
+    let reader = compact_audio::open_wav(audio_path)?;
     let spec = reader.spec();
     if spec.channels != 1
         || u64::from(spec.sample_rate) != SAMPLE_RATE
@@ -958,6 +959,34 @@ mod tests {
         assert_eq!(
             transcribe_file(&wav, fake_engine(), Box::new(|_| {})).unwrap_err(),
             "No audio was recorded."
+        );
+    }
+
+    #[test]
+    fn a_recording_cut_off_by_a_crash_is_transcribed_to_its_end() {
+        let folder = tempfile::tempdir().unwrap();
+        let recording = folder.path().join("7-1.wav");
+        let mut recorder = Recorder::begin(&recording, fake_engine(), Box::new(|_| {})).unwrap();
+        let mut audio = speech(5.0);
+        audio.extend(silence(1.0));
+        audio.extend(speech(3.5));
+        for piece in audio.chunks(8000) {
+            recorder.append(&pcm(piece)).unwrap();
+        }
+        // What is on disk when the app is killed now: the header was last
+        // brought up to date at five seconds, but all 9.5 seconds are there.
+        let wav = folder.path().join("8-1.wav");
+        fs::copy(&recording, &wav).unwrap();
+        recorder.abandon();
+        assert_eq!(hound::WavReader::open(&wav).unwrap().duration(), 5 * 16_000);
+
+        let outcome = transcribe_file(&wav, fake_engine(), Box::new(|_| {})).unwrap();
+        assert_eq!(outcome.duration_ms, 9_500);
+        assert_eq!(outcome.segments.last().unwrap().end_ms, 9_500);
+        // And the file now says so too.
+        assert_eq!(
+            hound::WavReader::open(&wav).unwrap().duration() as usize,
+            audio.len()
         );
     }
 

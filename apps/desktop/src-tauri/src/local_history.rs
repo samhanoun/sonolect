@@ -124,16 +124,29 @@ pub fn list_local_captures(app: tauri::AppHandle) -> Result<Vec<Capture>, String
     captures.sort_by_key(|capture| std::cmp::Reverse(capture.created_at_ms));
     Ok(captures)
 }
+/// Whether playback asks for Ogg: "ogg" or "wav", WAV when not given.
+fn prefers_ogg(format: Option<&str>) -> Result<bool, String> {
+    match format {
+        None | Some("wav") => Ok(false),
+        Some("ogg") => Ok(true),
+        Some(_) => Err("Invalid audio format.".into()),
+    }
+}
 /// The saved audio of one recording, as a raw binary response, so the studio
-/// can play it back and jump to a segment.
+/// can play it back and jump to a segment. With `format` "ogg", a compressed
+/// recording comes as its Ogg Opus file, for a webview that plays it; with
+/// "wav" (the default) every recording comes as WAV.
 #[tauri::command]
 pub async fn read_local_capture_audio(
     app: tauri::AppHandle,
     id: String,
+    format: Option<String>,
 ) -> Result<tauri::ipc::Response, String> {
     valid_id(&id)?;
+    let prefer_ogg = prefers_ogg(format.as_deref())?;
     tauri::async_runtime::spawn_blocking(move || {
-        super::compact_audio::read_as_wav(&directory(&app)?, &id).map(tauri::ipc::Response::new)
+        super::compact_audio::read_for_playback(&directory(&app)?, &id, prefer_ogg)
+            .map(tauri::ipc::Response::new)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -207,11 +220,20 @@ pub fn update_local_capture(
     valid_id(&id)?;
     update_record(&directory(&app)?, &id, transcript, segments)
 }
+/// The files a recording can have besides its record: its audio as WAV, as
+/// Opus and as a high-quality Opus copy made while recording (`hq.opus`), and
+/// what an interruption can leave half written.
+const RECORDING_FILES: [&str; 5] = ["wav", "opus", "hq.opus", "opus.tmp", "json.tmp"];
 #[tauri::command]
 pub fn delete_local_capture(app: tauri::AppHandle, id: String) -> Result<(), String> {
     valid_id(&id)?;
-    for extension in ["wav", "opus", "opus.tmp", "json", "json.tmp"] {
-        let path = directory(&app)?.join(format!("{id}.{extension}"));
+    delete_recording(&directory(&app)?, &id)
+}
+/// Removes a recording's files, its record last, so a recording that could
+/// not be removed whole stays in the library.
+fn delete_recording(directory: &std::path::Path, id: &str) -> Result<(), String> {
+    for extension in RECORDING_FILES.into_iter().chain(["json"]) {
+        let path = directory.join(format!("{id}.{extension}"));
         if path.exists() {
             fs::remove_file(path).map_err(|e| e.to_string())?;
         }
@@ -261,7 +283,7 @@ fn purge_directory(
                         .map(|capture| capture.created_at_ms);
                     match created {
                         Some(created) if created < cutoff_ms => {
-                            for extension in ["wav", "opus", "opus.tmp", "json.tmp"] {
+                            for extension in RECORDING_FILES {
                                 let _ =
                                     fs::remove_file(directory.join(format!("{id}.{extension}")));
                             }
@@ -329,9 +351,28 @@ pub async fn retry_local_capture(
 }
 #[cfg(test)]
 mod tests {
-    use super::{purge_directory, update_record, Capture};
+    use super::{delete_recording, prefers_ogg, purge_directory, update_record, Capture};
     use crate::WhisperSegment;
     use std::fs;
+
+    /// Every kind of file a recording can leave, besides its record.
+    const EVERY_KIND: [&str; 5] = ["wav", "opus", "hq.opus", "opus.tmp", "json.tmp"];
+
+    fn every_file(directory: &std::path::Path, id: &str) {
+        for extension in EVERY_KIND {
+            fs::write(directory.join(format!("{id}.{extension}")), b"audio").unwrap();
+        }
+    }
+
+    fn files_of(directory: &std::path::Path, id: &str) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .filter(|name| name.starts_with(&format!("{id}.")))
+            .collect();
+        names.sort();
+        names
+    }
 
     fn record(directory: &std::path::Path, id: &str, created_at_ms: u64) {
         let capture = Capture {
@@ -394,6 +435,64 @@ mod tests {
         assert!(!directory.join("1-1.opus.tmp").exists());
         assert!(directory.join("2-1.json").exists());
         assert!(directory.join("2-1.opus").exists());
+    }
+
+    #[test]
+    fn retention_deletes_every_file_of_an_expired_recording() {
+        let folder = tempfile::tempdir().unwrap();
+        let directory = folder.path();
+        let day = 86_400_000;
+        let now = 100 * day;
+        for (id, age) in [("1-1", 40), ("2-1", 2)] {
+            record(directory, id, now - age * day);
+            every_file(directory, id);
+        }
+
+        assert_eq!(purge_directory(directory, Some(30), now).unwrap(), 1);
+        assert!(files_of(directory, "1-1").is_empty());
+        assert_eq!(files_of(directory, "2-1").len(), 6);
+    }
+
+    #[test]
+    fn deleting_all_data_removes_every_kind_of_audio_file() {
+        let folder = tempfile::tempdir().unwrap();
+        let directory = folder.path();
+        record(directory, "1-1", 5);
+        every_file(directory, "1-1");
+        // Audio whose record is gone, and a system-audio file of old.
+        fs::write(directory.join("2-1.hq.opus"), b"audio").unwrap();
+        fs::write(directory.join("system-1.wav"), b"RIFF").unwrap();
+
+        assert_eq!(purge_directory(directory, None, 100).unwrap(), 2);
+        assert_eq!(fs::read_dir(directory).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn deleting_a_recording_removes_every_file_it_has() {
+        let folder = tempfile::tempdir().unwrap();
+        let directory = folder.path();
+        for id in ["1-1", "2-1"] {
+            record(directory, id, 5);
+            every_file(directory, id);
+        }
+        delete_recording(directory, "1-1").unwrap();
+        assert!(files_of(directory, "1-1").is_empty());
+        assert_eq!(files_of(directory, "2-1").len(), 6);
+        // Nothing left to delete is not an error.
+        delete_recording(directory, "1-1").unwrap();
+    }
+
+    #[test]
+    fn playback_takes_ogg_or_wav_and_nothing_else() {
+        assert_eq!(prefers_ogg(None), Ok(false));
+        assert_eq!(prefers_ogg(Some("wav")), Ok(false));
+        assert_eq!(prefers_ogg(Some("ogg")), Ok(true));
+        for format in ["", "OGG", "opus", "mp3", "../wav"] {
+            assert_eq!(
+                prefers_ogg(Some(format)),
+                Err("Invalid audio format.".to_string())
+            );
+        }
     }
 
     fn segment(start_ms: u64, end_ms: u64, text: &str, speaker: Option<&str>) -> WhisperSegment {

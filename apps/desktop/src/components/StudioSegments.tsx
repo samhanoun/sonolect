@@ -10,6 +10,7 @@ import {
 import { useDesktopStore } from "../store/appStore";
 import { isTauriRuntime } from "../desktopNative";
 import { nativeProviderCall } from "../providerSettings";
+import { CapturePlayback } from "../capturePlayback";
 import { useT } from "../i18n";
 import {
   formatTimestamp,
@@ -32,12 +33,11 @@ export type CapturePlayer = {
 
 /**
  * Plays saved recordings. The audio is read from the device once per
- * recording and kept until another one is played or the page closes.
+ * recording, as Opus when the webview can play it, and kept until another
+ * one is played or the page closes.
  */
 export function useCapturePlayer(): CapturePlayer {
-  const audio = useRef<HTMLAudioElement | null>(null);
-  const loaded = useRef<{ id: string; url: string } | null>(null);
-  const request = useRef(0);
+  const playback = useRef<CapturePlayback | null>(null);
   const [status, setStatus] = useState({
     captureId: undefined as string | undefined,
     playing: false,
@@ -45,18 +45,10 @@ export function useCapturePlayer(): CapturePlayer {
     error: "",
   });
 
-  useEffect(
-    () => () => {
-      request.current += 1;
-      audio.current?.pause();
-      if (loaded.current) URL.revokeObjectURL(loaded.current.url);
-      loaded.current = null;
-    },
-    [],
-  );
+  useEffect(() => () => playback.current?.close(), []);
 
-  const element = () => {
-    if (audio.current) return audio.current;
+  const player = () => {
+    if (playback.current) return playback.current;
     const created = new Audio();
     const position = () => Math.round(created.currentTime * 1000);
     created.addEventListener("timeupdate", () =>
@@ -73,34 +65,26 @@ export function useCapturePlayer(): CapturePlayer {
           positionMs: position(),
         })),
       );
-    audio.current = created;
-    return created;
+    playback.current = new CapturePlayback(created, {
+      read: (id, format) =>
+        nativeProviderCall<ArrayBuffer>("read_local_capture_audio", {
+          id,
+          format,
+        }),
+      createUrl: (blob) => URL.createObjectURL(blob),
+      revokeUrl: (url) => URL.revokeObjectURL(url),
+    });
+    return playback.current;
   };
 
   const play = async (captureId: string, fromMs = 0) => {
-    const current = (request.current += 1);
     try {
-      const player = element();
-      if (loaded.current?.id !== captureId) {
-        player.pause();
-        const bytes = await nativeProviderCall<ArrayBuffer>(
-          "read_local_capture_audio",
-          { id: captureId },
-        );
-        // A newer click, or leaving the page, wins over this one.
-        if (current !== request.current) return;
-        if (loaded.current) URL.revokeObjectURL(loaded.current.url);
-        const url = URL.createObjectURL(
-          new Blob([bytes], { type: "audio/wav" }),
-        );
-        loaded.current = { id: captureId, url };
-        player.src = url;
-      }
-      player.currentTime = Math.max(0, fromMs) / 1000;
-      setStatus({ captureId, playing: true, positionMs: fromMs, error: "" });
-      await player.play();
+      // A newer click, or leaving the page, wins over this one, which then
+      // ends without an error.
+      await player().play(captureId, fromMs, () =>
+        setStatus({ captureId, playing: true, positionMs: fromMs, error: "" }),
+      );
     } catch (error) {
-      if (current !== request.current) return;
       setStatus((previous) => ({
         ...previous,
         playing: false,
@@ -109,7 +93,14 @@ export function useCapturePlayer(): CapturePlayer {
     }
   };
 
-  return { ...status, play, pause: () => audio.current?.pause() };
+  const pause = () => {
+    playback.current?.pause();
+    // Shown at once: while the audio is still being read nothing plays yet,
+    // so the element may not report the pause.
+    setStatus((current) => ({ ...current, playing: false }));
+  };
+
+  return { ...status, play, pause };
 }
 
 /**
