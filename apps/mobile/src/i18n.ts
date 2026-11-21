@@ -314,7 +314,7 @@ const en = {
   sync: {
     title: "SYNC",
     intro:
-      "Sync your notes with your other devices, end-to-end encrypted. Recordings stay on this phone.",
+      "Sync your notes with your other devices, end-to-end encrypted. Recordings don't sync.",
     shareWarning: "Joining shares every note with whoever holds the code.",
     turnOn: "Turn on sync",
     join: "Join with a code",
@@ -360,8 +360,9 @@ const en = {
     joinTitle: "Join this sync?",
     joinNotes: (n: number) =>
       n === 0
-        ? "This phone has no notes yet."
-        : `This phone's ${n === 1 ? "note" : `${n} notes`} will sync with every device that has this code.`,
+        ? "This phone has no notes to copy yet."
+        : `This phone's ${n === 1 ? "note" : `${n} notes`} will be copied into this sync.`,
+    joinInvalidTitle: "This link can't be used",
     joinConfirm: "Join",
     alreadyJoined: "This phone already uses this sync.",
     otherVaultOn: "Sync is already on. Turn it off to join another sync.",
@@ -707,7 +708,7 @@ const fr: Strings = {
   sync: {
     title: "SYNCHRONISATION",
     intro:
-      "Synchronisez vos notes avec vos autres appareils, chiffrées de bout en bout. Les enregistrements restent sur ce téléphone.",
+      "Synchronisez vos notes avec vos autres appareils, chiffrées de bout en bout. Les enregistrements ne sont pas synchronisés.",
     shareWarning:
       "Rejoindre partage toutes les notes avec quiconque détient le code.",
     turnOn: "Activer la synchronisation",
@@ -757,10 +758,11 @@ const fr: Strings = {
     joinTitle: "Rejoindre cette synchronisation ?",
     joinNotes: (n: number) =>
       n === 0
-        ? "Ce téléphone n'a pas encore de notes."
+        ? "Ce téléphone n'a pas encore de notes à copier."
         : n === 1
-          ? "La note de ce téléphone se synchronisera avec chaque appareil qui a ce code."
-          : `Les ${n} notes de ce téléphone se synchroniseront avec chaque appareil qui a ce code.`,
+          ? "La note de ce téléphone sera copiée dans cette synchronisation."
+          : `Les ${n} notes de ce téléphone seront copiées dans cette synchronisation.`,
+    joinInvalidTitle: "Ce lien ne peut pas être utilisé",
     joinConfirm: "Rejoindre",
     alreadyJoined: "Ce téléphone utilise déjà cette synchronisation.",
     otherVaultOn:

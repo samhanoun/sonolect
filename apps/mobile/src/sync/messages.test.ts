@@ -144,6 +144,17 @@ describe("sync messages", () => {
     };
     walk(STRINGS.en.sync, STRINGS.fr.sync, "sync");
     assert.match(STRINGS.fr.sync.joinNotes(2), /2 notes/);
-    assert.match(STRINGS.en.sync.joinNotes(1), /This phone's note will sync/);
+    assert.equal(
+      STRINGS.en.sync.joinNotes(1),
+      "This phone's note will be copied into this sync.",
+    );
+    assert.equal(
+      STRINGS.en.sync.joinNotes(3),
+      "This phone's 3 notes will be copied into this sync.",
+    );
+    assert.equal(
+      STRINGS.fr.sync.joinNotes(3),
+      "Les 3 notes de ce téléphone seront copiées dans cette synchronisation.",
+    );
   });
 });

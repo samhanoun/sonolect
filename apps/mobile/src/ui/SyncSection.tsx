@@ -311,12 +311,15 @@ export function JoinConfirmation({
   t,
   noteCount,
   busy,
+  ready = true,
   onJoin,
   onCancel,
 }: {
   t: Strings;
   noteCount: number;
   busy: boolean;
+  /** False while joining must wait (the join link, before the key is read). */
+  ready?: boolean;
   onJoin: () => void;
   onCancel: () => void;
 }) {
@@ -331,7 +334,7 @@ export function JoinConfirmation({
         <Button
           variant="primary"
           label={t.sync.joinConfirm}
-          disabled={busy}
+          disabled={busy || !ready}
           onPress={onJoin}
         />
         <Button label={t.common.cancel} disabled={busy} onPress={onCancel} />
