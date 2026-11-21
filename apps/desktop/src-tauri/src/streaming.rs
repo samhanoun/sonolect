@@ -482,6 +482,10 @@ const HIGH_BITRATE_MONO: i32 = 64_000;
 /// The audio of a recording in progress: its working 16 kHz mono WAV and,
 /// for a high-quality recording, the Opus copy written beside it
 /// (`{id}.hq.opus`). Each piece goes to both as it arrives.
+///
+/// The copy is optional. Should it fail to be started, written or ended (a
+/// full disk, say), it is removed, and the recording goes on in the WAV,
+/// which then stays as its audio, as in speech quality.
 pub struct LiveAudio {
     wav: PathBuf,
     high_path: PathBuf,
@@ -535,11 +539,7 @@ impl LiveAudio {
             return Err(FOUR_HOURS.into());
         }
         let converted = converter.push(samples)?;
-        if let Some(high) = self.high.as_mut() {
-            if !converted.high.is_empty() {
-                high.write(&converted.high)?;
-            }
-        }
+        self.write_high(&converted.high);
         if !converted.speech.is_empty() {
             self.recorder.append_samples(&converted.speech)?;
         }
@@ -557,22 +557,47 @@ impl LiveAudio {
             };
         }
         let converter = Converter::new(format, self.quality == Quality::High)?;
-        if let Some(channels) = converter.high_channels() {
+        let channels = converter.high_channels();
+        self.converter = Some(converter);
+        if let Some(channels) = channels {
             let bitrate = if channels == 2 {
                 HIGH_BITRATE_STEREO
             } else {
                 HIGH_BITRATE_MONO
             };
-            self.high = Some(compact_audio::OpusWriter::create(
+            match compact_audio::OpusWriter::create(
                 &self.high_path,
                 HIGH_RATE,
                 channels,
                 bitrate,
                 opus::Application::Audio,
-            )?);
+            ) {
+                Ok(high) => self.high = Some(high),
+                Err(error) => self.drop_high(&error),
+            }
         }
-        self.converter = Some(converter);
         Ok(())
+    }
+
+    /// Adds 48 kHz audio to the high-quality copy, while there is one.
+    fn write_high(&mut self, samples: &[i16]) {
+        if samples.is_empty() {
+            return;
+        }
+        if let Some(Err(error)) = self.high.as_mut().map(|high| high.write(samples)) {
+            self.drop_high(&error);
+        }
+    }
+
+    /// Gives up the high-quality copy after `error`: the copy is removed and
+    /// the recording goes on in the WAV, which then stays as its audio.
+    fn drop_high(&mut self, error: &str) {
+        // Closed before it is removed: Windows keeps open files.
+        drop(self.high.take());
+        remove_high(&self.high_path, error);
+        if let Some(converter) = self.converter.as_mut() {
+            converter.drop_high();
+        }
     }
 
     /// What the converter still holds goes to the copy and the WAV.
@@ -581,26 +606,23 @@ impl LiveAudio {
             return Ok(());
         };
         let rest = converter.finish()?;
-        if let Some(high) = self.high.as_mut() {
-            if !rest.high.is_empty() {
-                high.write(&rest.high)?;
-            }
-        }
+        self.write_high(&rest.high);
         self.recorder.append_last(&rest.speech)
     }
 
-    /// Transcribes what is left and waits for the engine. A high-quality
-    /// copy then takes the WAV's place; should that fail, the WAV stays,
-    /// with the whole recording, and the copy left beside it is taken up
-    /// later (see `compact_audio::compress`).
+    /// Transcribes what is left and waits for the engine. A complete
+    /// high-quality copy then takes the WAV's place. Should the rename fail,
+    /// the WAV stays, with the whole recording, and the copy left beside it
+    /// is taken up later (see `compact_audio::compress`). Without a complete
+    /// copy, the WAV is the recording.
     pub fn finish(mut self) -> Result<Outcome, String> {
         self.flush()?;
         let outcome = self.recorder.finish()?;
-        if let Some(high) = self.high.take() {
-            if high.finish().is_ok() && fs::rename(&self.high_path, &self.opus).is_ok() {
-                // Left behind, the WAV is removed by the next compression.
-                let _ = fs::remove_file(&self.wav);
-            }
+        if end_high(self.high.take(), &self.high_path)
+            && fs::rename(&self.high_path, &self.opus).is_ok()
+        {
+            // Left behind, the WAV is removed by the next compression.
+            let _ = fs::remove_file(&self.wav);
         }
         Ok(outcome)
     }
@@ -611,9 +633,7 @@ impl LiveAudio {
     pub fn abandon(mut self) {
         let _ = self.flush();
         self.recorder.abandon();
-        if let Some(high) = self.high.take() {
-            let _ = high.finish();
-        }
+        end_high(self.high.take(), &self.high_path);
     }
 
     /// Stops and removes the high-quality copy. The caller removes the rest.
@@ -623,6 +643,26 @@ impl LiveAudio {
         drop(self.high.take());
         let _ = fs::remove_file(&self.high_path);
     }
+}
+
+/// Ends the high-quality copy `high` at `path`, if there still is one.
+/// Returns whether it is complete, every piece of the recording in it; one
+/// that cannot be ended is removed.
+fn end_high(high: Option<compact_audio::OpusWriter<File>>, path: &Path) -> bool {
+    match high.map(compact_audio::OpusWriter::finish) {
+        Some(Ok(_)) => true,
+        Some(Err(error)) => {
+            remove_high(path, &error);
+            false
+        }
+        None => false,
+    }
+}
+
+/// Removes a high-quality copy that could not be written, closed already.
+fn remove_high(path: &Path, error: &str) {
+    let _ = fs::remove_file(path);
+    eprintln!("The high-quality copy of a recording stopped: {error}");
 }
 
 fn invalid_pcm(format: PcmFormat) -> &'static str {
@@ -1467,6 +1507,133 @@ mod tests {
         assert_eq!(files(folder.path()), ["18-1.wav", "19-1.opus"]);
         let opus = folder.path().join("19-1.opus");
         assert_eq!(compact_audio::open(&opus).unwrap().count(), 2 * 16_000);
+    }
+
+    /// Records `sent` (48 kHz stereo) in speech quality, in half-second
+    /// pieces: what a high-quality recording whose copy fails must equal.
+    fn speech_quality_samples(folder: &Path, id: &str, sent: &[i16]) -> (Vec<i16>, Outcome) {
+        let mut audio = live(folder, id, Quality::Speech);
+        for piece in sent.chunks(2 * 24_000) {
+            audio.append(stereo_48k(), piece).unwrap();
+        }
+        let outcome = audio.finish().unwrap();
+        let path = folder.join(format!("{id}.wav"));
+        let samples = hound::WavReader::open(&path)
+            .unwrap()
+            .samples::<i16>()
+            .map(Result::unwrap)
+            .collect();
+        fs::remove_file(path).unwrap();
+        (samples, outcome)
+    }
+
+    fn wav_samples(path: &Path) -> Vec<i16> {
+        hound::WavReader::open(path)
+            .unwrap()
+            .samples::<i16>()
+            .map(Result::unwrap)
+            .collect()
+    }
+
+    /// A high-quality copy whose output breaks once `reader` is dropped: a
+    /// pipe nobody reads any more, as a full disk refuses every write. Its
+    /// headers are written already.
+    #[cfg(unix)]
+    fn breakable_copy() -> (compact_audio::OpusWriter<File>, std::io::PipeReader) {
+        let (reader, writer) = std::io::pipe().unwrap();
+        let file = File::from(std::os::fd::OwnedFd::from(writer));
+        let copy = compact_audio::OpusWriter::new(
+            file,
+            HIGH_RATE,
+            2,
+            HIGH_BITRATE_STEREO,
+            opus::Application::Audio,
+        )
+        .unwrap();
+        (copy, reader)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_copy_that_cannot_be_started_leaves_the_whole_recording_in_the_wav() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut sent = high(4.0, 2);
+        sent.extend(vec![0; 2 * 48_000 * 6]);
+        sent.extend(high(2.0, 2));
+        let (expected, speech) = speech_quality_samples(folder.path(), "20-1", &sent);
+
+        // A full disk: the copy's first page cannot be written.
+        std::os::unix::fs::symlink("/dev/full", folder.path().join("21-1.hq.opus")).unwrap();
+        let (seen, sink) = collector();
+        let mut audio =
+            LiveAudio::begin(folder.path(), "21-1", Quality::High, fake_engine(), sink).unwrap();
+        for piece in sent.chunks(2 * 24_000) {
+            audio.append(stereo_48k(), piece).unwrap();
+        }
+        assert!(audio.high.is_none());
+        assert_eq!(audio.converter.as_ref().unwrap().high_channels(), None);
+        let outcome = audio.finish().unwrap();
+        // The recording and its text are whole, as in speech quality.
+        assert_eq!(outcome.duration_ms, 12_000);
+        assert_eq!(outcome.segments.len(), 2);
+        assert_eq!(outcome.segments, speech.segments);
+        assert_eq!(*seen.lock().unwrap(), outcome.segments);
+        // The WAV stays as the recording, every sample in it.
+        assert_eq!(files(folder.path()), ["21-1.wav"]);
+        assert_eq!(wav_samples(&folder.path().join("21-1.wav")), expected);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_copy_that_stops_being_written_leaves_the_whole_recording_in_the_wav() {
+        let folder = tempfile::tempdir().unwrap();
+        let sent = high(3.0, 2);
+        let (expected, speech) = speech_quality_samples(folder.path(), "22-0", &sent);
+
+        // The disk fills up a second into the recording.
+        let mut audio = live(folder.path(), "22-1", Quality::High);
+        let mut pieces = sent.chunks(2 * 24_000);
+        audio.append(stereo_48k(), pieces.next().unwrap()).unwrap();
+        let (copy, reader) = breakable_copy();
+        drop(reader);
+        audio.high = Some(copy);
+        for piece in pieces {
+            audio.append(stereo_48k(), piece).unwrap();
+        }
+        // The copy is gone, and no more of it is made.
+        assert!(audio.high.is_none());
+        assert_eq!(audio.converter.as_ref().unwrap().high_channels(), None);
+        assert_eq!(files(folder.path()), ["22-1.wav"]);
+        let outcome = audio.finish().unwrap();
+        assert_eq!(outcome.duration_ms, 3_000);
+        assert_eq!(outcome.segments, speech.segments);
+        assert_eq!(files(folder.path()), ["22-1.wav"]);
+        assert_eq!(wav_samples(&folder.path().join("22-1.wav")), expected);
+
+        // Or only once the recording ends: the copy cannot be ended.
+        let (expected, _) = speech_quality_samples(folder.path(), "23-0", &sent[..2 * 48_000]);
+        let mut audio = live(folder.path(), "23-1", Quality::High);
+        let mut pieces = sent.chunks(2 * 24_000);
+        audio.append(stereo_48k(), pieces.next().unwrap()).unwrap();
+        let (copy, reader) = breakable_copy();
+        audio.high = Some(copy);
+        // Less than a page: nothing of it is written before the end.
+        audio.append(stereo_48k(), pieces.next().unwrap()).unwrap();
+        drop(reader);
+        assert!(audio.high.is_some());
+        assert_eq!(audio.finish().unwrap().duration_ms, 1_000);
+        assert_eq!(files(folder.path()), ["22-1.wav", "23-1.wav"]);
+        assert_eq!(wav_samples(&folder.path().join("23-1.wav")), expected);
+
+        // Abandoned with a copy that cannot be ended: the WAV is left alone.
+        let mut audio = live(folder.path(), "24-1", Quality::High);
+        let mut pieces = sent.chunks(2 * 24_000);
+        audio.append(stereo_48k(), pieces.next().unwrap()).unwrap();
+        let (copy, reader) = breakable_copy();
+        audio.high = Some(copy);
+        drop(reader);
+        audio.abandon();
+        assert_eq!(files(folder.path()), ["22-1.wav", "23-1.wav", "24-1.wav"]);
     }
 
     #[test]

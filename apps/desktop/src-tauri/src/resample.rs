@@ -306,6 +306,12 @@ impl Converter {
         self.high.as_ref().map(|(_, channels)| *channels as u8)
     }
 
+    /// Stops making the high-quality copy, which can no longer be kept:
+    /// from now on only the speech output comes out.
+    pub fn drop_high(&mut self) {
+        self.high = None;
+    }
+
     /// 16 kHz samples the input taken so far makes, delivered or not yet.
     pub fn speech_length(&self) -> u64 {
         self.speech_length_for(self.taken)
