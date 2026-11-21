@@ -31,7 +31,7 @@ The jobs then perform installer sanity checks:
 
 Linux `.deb` and `.AppImage` are already covered by the existing desktop Tauri build path.
 
-After its build, each job also runs the speaker detection tests (`speakers`, `fbank`, `model_download`), including the ones that need the speaker model, with `cargo test --release` and the same `tauri/custom-protocol` feature as the build. Its compiled dependencies are reused, so this is much cheaper than a separate test job: on Linux, the test build after a release build took 19 s, and the 26 tests 4 s. It matters because tract chooses its SIMD code per CPU, and only Ubuntu runs Rust tests otherwise.
+After its build, each job also runs the speaker detection tests (`speakers`, `fbank`, `model_download`), including the ones that need the speaker model, with `cargo test --release` and the same `tauri/custom-protocol` feature as the build. Its compiled dependencies are reused, so this is much cheaper than a separate test job: on Linux, the test build after a release build took 19 s, and the 28 tests 4 s. It matters because tract chooses its SIMD code per CPU, and only Ubuntu runs Rust tests otherwise.
 
 ## Note sync in release builds
 
