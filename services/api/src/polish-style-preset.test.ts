@@ -1,7 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { MAX_STYLE_PRESET_CHARS, type AiProviders } from "./ai.js";
+import {
+  MAX_STYLE_PRESET_CHARS,
+  UnusablePolishError,
+  type AiProviders,
+} from "./ai.js";
 import { createAuthenticatedTestApp } from "./test-app.js";
 
 /**
@@ -156,6 +160,36 @@ describe("POST /v1/polish style presets", () => {
       assert.equal(response.statusCode, 502, response.body);
       assert.equal(response.json().error.code, "polish_empty");
       assert.ok(!response.body.includes("meeting moved"));
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("answers 502 when the model stops before the answer is complete", async () => {
+    const app = await createAuthenticatedTestApp({
+      logger: false,
+      aiProviders: {
+        configured: () => true,
+        polish: async () => {
+          throw new UnusablePolishError("polish_incomplete", "MAX_TOKENS");
+        },
+      },
+    });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/polish",
+        headers: { authorization: "Bearer user-a" },
+        payload: { transcript: "so the meeting moved to tuesday" },
+      });
+      assert.equal(response.statusCode, 502, response.body);
+      assert.deepEqual(response.json().error, {
+        code: "polish_incomplete",
+        message: "The model stopped before the answer was complete.",
+        retryable: false,
+      });
+      assert.ok(!response.body.includes("meeting moved"));
+      assert.ok(!response.body.includes("MAX_TOKENS"));
     } finally {
       await app.close();
     }

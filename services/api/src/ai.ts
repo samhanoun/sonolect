@@ -125,13 +125,56 @@ export async function polishTranscript(opts: {
     ],
   });
 
-  const polished = (result.response.candidates?.[0]?.content?.parts ?? [])
+  return { polished: polishedText(result.response), model: geminiModel };
+}
+
+/** The parts of a Vertex AI answer that polishTranscript reads. */
+export interface PolishModelResponse {
+  candidates?: ReadonlyArray<{
+    finishReason?: string;
+    content?: { parts?: ReadonlyArray<{ text?: string }> };
+  }>;
+}
+
+/** The model answered, but not with a complete text the route can return. */
+export class UnusablePolishError extends Error {
+  readonly code: "polish_empty" | "polish_incomplete";
+  /** The model's finish reason, for the log. Never sent to the client. */
+  readonly finishReason: string | undefined;
+
+  constructor(
+    code: "polish_empty" | "polish_incomplete",
+    finishReason?: string,
+  ) {
+    super(
+      code === "polish_empty"
+        ? "The model returned no text."
+        : "The model stopped before the answer was complete.",
+    );
+    this.name = "UnusablePolishError";
+    this.code = code;
+    this.finishReason = finishReason;
+  }
+}
+
+/**
+ * The polished text of a model answer. Only a first candidate that stopped
+ * normally (`STOP`) with some text counts. An answer cut off at the token
+ * limit, or stopped by a safety or other filter, is not a polished version of
+ * the dictation, so this throws UnusablePolishError and the route answers 502.
+ * It never falls back to the raw transcript.
+ */
+export function polishedText(response: PolishModelResponse): string {
+  const candidate = response.candidates?.[0];
+  if (!candidate) throw new UnusablePolishError("polish_empty");
+  if (candidate.finishReason !== "STOP")
+    throw new UnusablePolishError("polish_incomplete", candidate.finishReason);
+  const text = (candidate.content?.parts ?? [])
     .map((part) => part.text ?? "")
     .join("")
     .trim();
-
-  // Empty when the model returned no text; the route answers 502 then.
-  return { polished, model: geminiModel };
+  if (!text) throw new UnusablePolishError("polish_empty", "STOP");
+  return text;
 }
 
 const errorBody = (code: string, message: string, retryable: boolean) => ({
@@ -328,15 +371,26 @@ export function registerAiRoutes(
             : {}),
         });
         // Never hand the raw transcript back as if the model had polished it.
-        if (!result.polished.trim()) {
+        if (!result.polished.trim())
+          throw new UnusablePolishError("polish_empty");
+        return result;
+      } catch (error) {
+        if (error instanceof UnusablePolishError) {
+          request.log.warn(
+            { code: error.code, finishReason: error.finishReason },
+            "cloud polish gave no usable text",
+          );
+          // A cut-off or filtered answer would likely end the same way again.
           return reply
             .status(502)
             .send(
-              errorBody("polish_empty", "The model returned no text.", true),
+              errorBody(
+                error.code,
+                error.message,
+                error.code === "polish_empty",
+              ),
             );
         }
-        return result;
-      } catch (error) {
         request.log.error({ err: error }, "cloud polish failed");
         return reply
           .status(503)
