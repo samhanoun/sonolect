@@ -74,6 +74,50 @@ test.describe("recording this computer's sound", () => {
     expect(errors).toEqual([]);
   });
 
+  test("in high quality the computer's sound is recorded in high quality too", async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await installMockTauri(page, [], { systemAudio: true });
+    await page.goto("/");
+    await nav(page, "Settings").click();
+    await page
+      .locator("section", {
+        has: page.getByRole("heading", { name: "Privacy & retention" }),
+      })
+      .getByLabel("Save recordings as")
+      .selectOption("hq");
+    await page.getByLabel("Record from").selectOption("system");
+
+    await nav(page, "Transcribe").click();
+    await page.getByRole("button", { name: "Record to add text" }).click();
+    const dock = page.locator(".studio-recording-dock");
+    await expect(dock).toContainText("Recording computer sound…");
+    await expect(page.locator(".studio-live-text")).toContainText("Part 1.");
+    await page.getByRole("button", { name: "Stop recording" }).click();
+    await expect(dock).toContainText("Your words are ready");
+
+    // The recording was begun in high quality, and the native feed of the
+    // computer's sound went into that recording.
+    const begins = await nativeCalls(page, "capture_begin");
+    expect(begins).toHaveLength(1);
+    expect(begins[0]!.args).toMatchObject({ quality: "high" });
+    const [finish] = await nativeCalls(page, "capture_finish");
+    const { id } = finish!.args as { id: string };
+    expect(id).toMatch(/^\d+-\d+$/);
+    const starts = await nativeCalls(page, "start_system_audio_capture");
+    expect(starts.map((call) => call.args)).toEqual([{ id }]);
+    expect(await nativeCalls(page, "capture_append")).toEqual([]);
+
+    // It is kept as its Opus file, which Save audio gives.
+    await nav(page, "Library").click();
+    const saving = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Save audio" }).first().click();
+    expect((await saving).suggestedFilename()).toMatch(/\.opus$/);
+    expect(errors).toEqual([]);
+  });
+
   test("a feed that ends by itself keeps the recording and says why", async ({
     page,
   }) => {
