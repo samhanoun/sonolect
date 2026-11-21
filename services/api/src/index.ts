@@ -6,7 +6,11 @@ import Fastify, {
 import helmet from "@fastify/helmet";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
-import { registerAiRoutes, type AiRouteLimits } from "./ai.js";
+import {
+  registerAiRoutes,
+  type AiProviders,
+  type AiRouteLimits,
+} from "./ai.js";
 import { mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -353,6 +357,8 @@ export interface CreateAppOptions extends AuthOptions {
   logger?: boolean;
   /** Per-account request budget for the paid /v1 AI routes. */
   aiRouteLimits?: AiRouteLimits;
+  /** Replaces the Google calls behind the /v1 routes (tests only). */
+  aiProviders?: Partial<AiProviders>;
 }
 
 export async function createApp(
@@ -817,7 +823,7 @@ export async function createApp(
   // Only routes that opt in (the paid /v1 AI routes) are limited. Runs after
   // authentication so limits are keyed by the verified account.
   await app.register(rateLimit, { global: false, hook: "preHandler" });
-  registerAiRoutes(app, options.aiRouteLimits);
+  registerAiRoutes(app, options.aiRouteLimits, options.aiProviders);
 
   return app;
 }

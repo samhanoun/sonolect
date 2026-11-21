@@ -47,6 +47,14 @@ export const MAX_POLISH_CHARS = 20_000;
 export const MAX_DICTIONARY_ENTRIES = 200;
 const MAX_HINT_CHARS = 100;
 const MAX_OPTION_CHARS = 64;
+/**
+ * A style preset is a sentence of instructions the app sends with the text,
+ * such as "Turn this into a short, polite reply ready to send". The longest
+ * one the apps send today is 87 characters (apps/mobile/src/refine.ts). A
+ * longer or malformed preset gets a 422: dropping it would turn a Rewrite or a
+ * Reply into a plain polish without telling anyone.
+ */
+export const MAX_STYLE_PRESET_CHARS = 256;
 
 export async function transcribeAudio(
   audio: Buffer,
@@ -160,6 +168,28 @@ const rateLimitConfig = (limits: AiRouteLimits) => ({
 const isShortString = (value: unknown, max: number): value is string =>
   typeof value === "string" && value.length > 0 && value.length <= max;
 
+/** The trimmed preset, `undefined` when none was sent, or `null` when invalid. */
+const readStylePreset = (value: unknown): string | undefined | null => {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") return null;
+  const preset = value.trim();
+  if (preset.length > MAX_STYLE_PRESET_CHARS) return null;
+  return preset || undefined;
+};
+
+/** The Google calls behind the /v1 routes. Tests replace them. */
+export interface AiProviders {
+  configured: () => boolean;
+  transcribe: typeof transcribeAudio;
+  polish: typeof polishTranscript;
+}
+
+const googleProviders: AiProviders = {
+  configured: aiConfigured,
+  transcribe: transcribeAudio,
+  polish: polishTranscript,
+};
+
 /**
  * Registers POST /v1/transcribe and POST /v1/polish on an existing Fastify app.
  * Audio bodies are parsed by the app's audio content-type parser (Buffer).
@@ -168,13 +198,15 @@ const isShortString = (value: unknown, max: number): value is string =>
 export function registerAiRoutes(
   app: FastifyInstance,
   limits: AiRouteLimits = DEFAULT_AI_ROUTE_LIMITS,
+  providers: Partial<AiProviders> = {},
 ): void {
+  const ai = { ...googleProviders, ...providers };
   const config = rateLimitConfig(limits);
   app.post(
     "/v1/transcribe",
     { config },
     async (request, reply): Promise<unknown> => {
-      if (!aiConfigured()) {
+      if (!ai.configured()) {
         return reply
           .status(503)
           .send(
@@ -197,7 +229,7 @@ export function registerAiRoutes(
           );
       }
       try {
-        const result = await transcribeAudio(
+        const result = await ai.transcribe(
           request.body,
           getQueryLanguage(request),
         );
@@ -254,7 +286,19 @@ export function registerAiRoutes(
             ),
           );
       }
-      if (!aiConfigured()) {
+      const stylePreset = readStylePreset(body.stylePreset);
+      if (stylePreset === null) {
+        return reply
+          .status(422)
+          .send(
+            errorBody(
+              "invalid_style_preset",
+              `stylePreset must be text of at most ${MAX_STYLE_PRESET_CHARS} characters.`,
+              false,
+            ),
+          );
+      }
+      if (!ai.configured()) {
         return reply
           .status(503)
           .send(
@@ -274,11 +318,9 @@ export function registerAiRoutes(
                 isShortString(entry.written, MAX_HINT_CHARS),
             )
           : undefined;
-        const result = await polishTranscript({
+        const result = await ai.polish({
           transcript: body.transcript,
-          ...(isShortString(body.stylePreset, MAX_OPTION_CHARS)
-            ? { stylePreset: body.stylePreset }
-            : {}),
+          ...(stylePreset ? { stylePreset } : {}),
           ...(dictionary ? { dictionary } : {}),
           ...(isShortString(body.locale, MAX_OPTION_CHARS)
             ? { locale: body.locale }
