@@ -2,6 +2,7 @@ import Fastify, {
   type FastifyInstance,
   type FastifyReply,
   type FastifyRequest,
+  type FastifyServerOptions,
 } from "fastify";
 import helmet from "@fastify/helmet";
 import cors from "@fastify/cors";
@@ -71,6 +72,32 @@ const serviceName = "sonolect-api";
 const defaultLocalUserId = "local-user";
 const localNow = new Date().toISOString();
 const defaultAudioMaxBytes = 100 * 1024 * 1024;
+
+/**
+ * Routes that keep their data only in this process (memory, a temp dir or a
+ * local JSON file) or answer with made-up values: audio jobs that nothing
+ * transcribes, a command "executor" that runs nothing, a fixed quota, and a
+ * profile, transcripts and a sync manifest that a restart or a second instance
+ * loses. They serve local development and the local audio worker. Production
+ * does not register them unless SONOLECT_API_PREVIEW_ROUTES=1 is set.
+ */
+export const PREVIEW_ROUTES = [
+  "GET /users/profile",
+  "POST /audio/jobs",
+  "GET /audio/jobs/:id",
+  "POST /audio/jobs/:id/audio",
+  "GET /transcripts",
+  "POST /transcripts",
+  "GET /transcripts/:id",
+  "PATCH /transcripts/:id",
+  "DELETE /transcripts/:id",
+  "POST /commands/execute",
+  "GET /usage/quota",
+  "GET /sync/manifest",
+] as const;
+
+const previewRoutesFlag = (value: string | undefined): boolean =>
+  value === "1" || value === "true";
 
 type RouteContext = { userId: string; actor: AuthenticatedActor };
 
@@ -354,7 +381,13 @@ export interface CreateAppOptions extends AuthOptions {
   storePath?: string;
   audioDir?: string;
   audioMaxBytes?: number;
-  logger?: boolean;
+  logger?: FastifyServerOptions["logger"];
+  /**
+   * Registers PREVIEW_ROUTES in production too. Defaults to
+   * SONOLECT_API_PREVIEW_ROUTES=1 (or "true"). Outside production they are
+   * always registered.
+   */
+  previewRoutes?: boolean;
   /** Per-account request budget for the paid /v1 AI routes. */
   aiRouteLimits?: AiRouteLimits;
   /** Replaces the Google calls behind the /v1 routes (tests only). */
@@ -397,8 +430,14 @@ export async function createApp(
         "Allowed origins must be exact origins without paths, credentials, or wildcards",
       );
   }
+  const production = authConfig.nodeEnv === "production";
+  const previewRoutesOn =
+    !production ||
+    (options.previewRoutes ??
+      previewRoutesFlag(process.env.SONOLECT_API_PREVIEW_ROUTES));
   const storePath = options.storePath ?? process.env.SONOLECT_API_STORE_PATH;
-  const audioDir = await ensureAudioStorageRoot(getAudioDir(options.audioDir));
+  const audioDir = getAudioDir(options.audioDir);
+  if (previewRoutesOn) await ensureAudioStorageRoot(audioDir);
   const audioMaxBytes = getAudioMaxBytes(options.audioMaxBytes);
   const transcriptRepository =
     options.transcriptRepository ??
@@ -438,6 +477,20 @@ export async function createApp(
     });
   };
   const app = Fastify({ logger: options.logger ?? true });
+  if (production) {
+    if (previewRoutesOn)
+      app.log.warn(
+        { routes: PREVIEW_ROUTES },
+        "SONOLECT_API_PREVIEW_ROUTES is on in production. These routes keep data only in this process and lose it on restart.",
+      );
+    else
+      app.log.info(
+        { routes: PREVIEW_ROUTES },
+        "Preview routes are off in production and answer 404. Set SONOLECT_API_PREVIEW_ROUTES=1 to turn them on.",
+      );
+  }
+  // Routes registered on `preview` exist only when preview routes are on.
+  const preview = previewRoutesOn ? app : undefined;
 
   app.addContentTypeParser(
     /^audio\/[a-z0-9.+-]+$/i,
@@ -456,7 +509,7 @@ export async function createApp(
 
   app.get("/health", async () => ({ status: "ok", service: serviceName }));
 
-  app.get("/users/profile", async (request) => {
+  preview?.get("/users/profile", async (request) => {
     const { userId, actor } = getRouteContext(request);
     const now = new Date().toISOString();
     const user = stores.users.get(userId) ?? {
@@ -470,7 +523,7 @@ export async function createApp(
     return user;
   });
 
-  app.post(
+  preview?.post(
     "/audio/jobs",
     async (request, reply): Promise<AudioUploadJob | FastifyReply> => {
       try {
@@ -521,7 +574,7 @@ export async function createApp(
     },
   );
 
-  app.get<{ Params: { id: string } }>(
+  preview?.get<{ Params: { id: string } }>(
     "/audio/jobs/:id",
     async (request, reply): Promise<AudioUploadJob | FastifyReply> => {
       const { userId } = getRouteContext(request);
@@ -536,7 +589,7 @@ export async function createApp(
     },
   );
 
-  app.post<{ Params: { id: string } }>(
+  preview?.post<{ Params: { id: string } }>(
     "/audio/jobs/:id/audio",
     async (request, reply): Promise<AudioUploadJob | FastifyReply> => {
       const { userId } = getRouteContext(request);
@@ -610,7 +663,7 @@ export async function createApp(
     },
   );
 
-  app.get(
+  preview?.get(
     "/transcripts",
     async (
       request,
@@ -637,7 +690,7 @@ export async function createApp(
     },
   );
 
-  app.post(
+  preview?.post(
     "/transcripts",
     async (request, reply): Promise<Transcript | FastifyReply> => {
       try {
@@ -655,7 +708,7 @@ export async function createApp(
     },
   );
 
-  app.get<{ Params: { id: string } }>(
+  preview?.get<{ Params: { id: string } }>(
     "/transcripts/:id",
     async (request, reply) => {
       const { userId } = getRouteContext(request);
@@ -669,7 +722,7 @@ export async function createApp(
     },
   );
 
-  app.patch<{ Params: { id: string } }>(
+  preview?.patch<{ Params: { id: string } }>(
     "/transcripts/:id",
     async (request, reply): Promise<Transcript | FastifyReply> => {
       try {
@@ -697,7 +750,7 @@ export async function createApp(
     },
   );
 
-  app.delete<{ Params: { id: string } }>(
+  preview?.delete<{ Params: { id: string } }>(
     "/transcripts/:id",
     async (request, reply) => {
       const { userId } = getRouteContext(request);
@@ -717,7 +770,7 @@ export async function createApp(
     },
   );
 
-  app.post(
+  preview?.post(
     "/commands/execute",
     async (request, reply): Promise<CommandExecutionResult | FastifyReply> => {
       try {
@@ -764,7 +817,7 @@ export async function createApp(
     },
   );
 
-  app.get("/usage/quota", async (request): Promise<UsageQuotaSummary> => {
+  preview?.get("/usage/quota", async (request): Promise<UsageQuotaSummary> => {
     const { userId } = getRouteContext(request);
     const user =
       stores.users.get(userId) ?? stores.users.get(resolvedLocalUserId)!;
@@ -795,7 +848,7 @@ export async function createApp(
     };
   });
 
-  app.get(
+  preview?.get(
     "/sync/manifest",
     async (request, reply): Promise<SyncManifest | FastifyReply> => {
       try {
@@ -828,10 +881,20 @@ export async function createApp(
   return app;
 }
 
+/**
+ * The mode a direct run (`node dist/index.js`) starts in: production unless
+ * NODE_ENV names another mode. An unset or empty NODE_ENV is production, so a
+ * deployment that forgets it still requires sign-in and keeps the preview
+ * routes off.
+ */
+export const directRunNodeEnv = (
+  env: Record<string, string | undefined> = process.env,
+): string => env.NODE_ENV?.trim() || "production";
+
 const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isDirectRun) {
-  const nodeEnv = process.env.NODE_ENV ?? "production";
+  const nodeEnv = directRunNodeEnv();
   const app = await createApp({ nodeEnv });
   const port = Number(process.env.PORT ?? 8080);
   await app.listen({
