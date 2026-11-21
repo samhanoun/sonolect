@@ -52,6 +52,39 @@ Studio palette (forest `#1F3429`, lime `#DDF39A`), drawn as glass (see
   show no link; release builds fail without it (`config/release.cjs`, see
   [docs/mobile-release.md](../../docs/mobile-release.md)).
 
+## End-to-end encrypted sync
+
+Notes sync between the user's own devices through `packages/sync-core`, with
+no account: a random 32-byte key, shared by QR code or a typed code. The
+server stores only ciphertext. Recordings don't sync (the phone keeps none).
+
+- **Off unless the build sets a server**: `EXPO_PUBLIC_SONOLECT_SYNC_URL`
+  (`src/features.ts`, checked by `config/release.cjs`). It must be https;
+  development builds may also use `http://127.0.0.1`, `http://localhost` or,
+  from the Android emulator, `http://10.0.2.2`. Without it, and on the web,
+  the app shows no sync and makes no sync request. It does not depend on
+  `API_FEATURES_ENABLED`.
+- **Settings › Sync** turns sync on (QR code and the 56-character code),
+  joins with a code, shows the code again and turns sync off (keeping or
+  deleting the server copy). The camera app opens the QR code's link,
+  `sonolect://sync/join?v=1&k=…`, on `app/sync/join.tsx`, which asks first.
+  Every screen with a code says that joining shares every note with
+  whoever holds it.
+- **Code** (`src/sync/`): `keyStore.ts` keeps the key in SecureStore
+  (`WHEN_UNLOCKED_THIS_DEVICE_ONLY`); `noteStore.ts` and `noteMapping.ts`
+  map notes to note/1, keeping other devices' fields in
+  `sonolect.mobile.sync.note.<id>`; `transport.ts` is `fetch` with a 30 s
+  timeout and size caps; `controller.ts` syncs at launch, in the
+  foreground, about 5 s after a change and every 2 minutes, backing off on
+  errors. `src/store.ts` stamps each create, edit, refine and pin, and sends
+  a delete for a note's _Delete_ and _Clear history_; retention never does.
+  _Erase all data_ also forgets the key and the sync state, and offers to
+  delete the server copy first.
+- **Against a real server**: start `services/sync-service` with
+  `SONOLECT_SYNC_STORE=memory PORT=8713`, then run
+  `pnpm dlx tsx@4.19.2 src/sync/liveCheck.ts http://127.0.0.1:8713` here:
+  two phones in memory send a note, an edit and a delete to each other.
+
 ## Phone-only build
 
 This build runs entirely on the phone. The switch is `API_FEATURES_ENABLED`
@@ -60,7 +93,8 @@ in `src/features.ts`, and it is `false`.
 - **Works**: on-device dictation, the library on the phone, local clean-up,
   Summary, Tasks, the Reader, export (Markdown, plain text or JSON) and
   automatic deletion of old notes (Settings, _Keep notes for_).
-- **Hidden**: sync, _Rewrite_ and _Reply_ through the API, audio upload, and
+- **Hidden**: the API's plaintext sync, _Rewrite_ and _Reply_ through the
+  API, audio upload, and
   the Settings API section (URL, token, connection test). The library shows
   no LOCAL / QUEUED / SYNCED labels.
 - **Ignored**: a saved API URL and `EXPO_PUBLIC_SONOLECT_API_URL`. Every API
