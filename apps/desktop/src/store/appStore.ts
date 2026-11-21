@@ -117,6 +117,10 @@ export type TranscriptSession = TranscriptHistoryRow;
 
 export type Toast = { id: string; message: string };
 
+/** A saved recording's version for sync (sync-core's `Hlc`). */
+export type CaptureVersion = { t: number; c: number; d: string };
+export type OpenedVersion = { id: string; hlc: CaptureVersion | null };
+
 export type DesktopState = {
   commandOpen: boolean;
   recordingState: RecordingState;
@@ -125,6 +129,12 @@ export type DesktopState = {
   activeSessionId: string | null;
   transcript: string;
   transcriptSegments: TranscriptSegment[];
+  /**
+   * The version (sync HLC, or null for none) of the saved recording the
+   * editor opened, when known: a save then keeps a version that sync wrote
+   * meanwhile instead of overwriting it.
+   */
+  openedVersion: OpenedVersion | null;
   selectedSegmentIds: string[];
   canUndoTranscript: boolean;
   canRedoTranscript: boolean;
@@ -206,13 +216,19 @@ export type DesktopState = {
   /** Labels every selected segment with one speaker; empty clears the label. */
   setSpeakerForSelection: (speaker: string) => void;
   clearSegmentSelection: () => void;
-  /** Opens one saved recording in the editor, with its timings and audio. */
+  /**
+   * Opens one saved recording in the editor, with its timings and audio.
+   * `hlc`: its version, when the caller knows it (null: it has none).
+   */
   openCapture: (capture: {
     id: string;
     durationMs: number;
     transcript: string | null;
     segments?: SavedCaptureSegment[] | null;
+    hlc?: CaptureVersion | null;
   }) => void;
+  /** The saved recording `id` now has this version (after a save, say). */
+  setOpenedVersion: (id: string, hlc: CaptureVersion | null) => void;
   addToast: (message: string) => void;
   transformTranscript: () => void;
 };
@@ -597,6 +613,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
   activeSessionId: restoredDraft?.activeSessionId ?? null,
   transcript: initialTranscriptSnapshot.transcript,
   transcriptSegments: initialTranscriptSnapshot.transcriptSegments,
+  openedVersion: null,
   selectedSegmentIds: initialTranscriptSnapshot.selectedSegmentIds,
   canUndoTranscript: false,
   canRedoTranscript: false,
@@ -1434,11 +1451,16 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       return withUndoSnapshot(state, next);
     }),
   clearSegmentSelection: () => set({ selectedSegmentIds: [] }),
+  setOpenedVersion: (id, hlc) => set({ openedVersion: { id, hlc } }),
   openCapture: (capture) =>
     set((state) => {
       const next = syncSegments(segmentsFromCapture(capture), []);
       return {
         ...withUndoSnapshot(state, next),
+        openedVersion:
+          capture.hlc === undefined
+            ? null
+            : { id: capture.id, hlc: capture.hlc },
         activeSessionId: null,
         polishedPreview: polishedForState({
           ...state,

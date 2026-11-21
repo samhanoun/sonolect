@@ -202,6 +202,18 @@ export async function installMockTauri(
         __sonolectE2eReleaseReads: () => {
           for (const answer of heldReads.splice(0)) answer();
         },
+        // Sync writes another device's version of a recording.
+        __sonolectE2eSyncWrite: (
+          id: string,
+          transcript: string,
+          hlc: { t: number; c: number; d: string },
+        ) => {
+          const capture = library.find((item) => item.id === id);
+          if (!capture) throw new Error(`No recording ${id}`);
+          capture.transcript = transcript;
+          capture.segments = [];
+          capture.hlc = hlc;
+        },
         __sonolectE2eEmit: emit,
         __sonolectE2eListening: (event: string) =>
           [...listeners.values()].some((listener) => listener.event === event),
@@ -324,9 +336,36 @@ export async function installMockTauri(
                 const capture = library.find((item) => item.id === args.id);
                 if (!capture)
                   throw "This recording is no longer in your library.";
+                // As local_history.rs: a version the studio did not open is
+                // kept as a conflict copy, and the save is the note.
+                const base = args.base as
+                  { hlc: MockCapture["hlc"] | null } | undefined;
+                let conflictCopy: string | undefined;
+                if (
+                  base &&
+                  JSON.stringify(base.hlc ?? null) !==
+                    JSON.stringify(capture.hlc ?? null)
+                ) {
+                  conflictCopy = `${capture.id}-c${(capture.hlc?.t ?? 0).toString(36)}${capture.hlc?.d.slice(0, 4) ?? ""}`;
+                  library.unshift({
+                    ...structuredClone(capture),
+                    id: conflictCopy,
+                    conflictOf: capture.id,
+                    hasAudio: false,
+                  });
+                }
                 capture.transcript = args.transcript as string;
                 capture.segments = args.segments as typeof capture.segments;
-                return null;
+                if (capture.hlc)
+                  capture.hlc = {
+                    t: Math.max(Date.now(), capture.hlc.t + 1),
+                    c: 0,
+                    d: "desk",
+                  };
+                return {
+                  ...(capture.hlc ? { hlc: capture.hlc } : {}),
+                  ...(conflictCopy ? { conflictCopy } : {}),
+                };
               }
               case "purge_local_captures":
                 return 0;
@@ -506,6 +545,28 @@ export function releaseHeldReads(page: Page) {
     (
       window as typeof window & { __sonolectE2eReleaseReads: () => void }
     ).__sonolectE2eReleaseReads(),
+  );
+}
+
+/** Sync writes another device's version of a saved recording. */
+export function writeFromSync(
+  page: Page,
+  id: string,
+  transcript: string,
+  hlc: { t: number; c: number; d: string },
+) {
+  return page.evaluate(
+    ({ id, transcript, hlc }) =>
+      (
+        window as typeof window & {
+          __sonolectE2eSyncWrite: (
+            id: string,
+            transcript: string,
+            hlc: { t: number; c: number; d: string },
+          ) => void;
+        }
+      ).__sonolectE2eSyncWrite(id, transcript, hlc),
+    { id, transcript, hlc },
   );
 }
 

@@ -16,7 +16,11 @@ import {
   Upload,
   WandSparkles,
 } from "lucide-react";
-import { subscribeMicLevel, useDesktopStore } from "../store/appStore";
+import {
+  type CaptureVersion,
+  subscribeMicLevel,
+  useDesktopStore,
+} from "../store/appStore";
 import { isTauriRuntime } from "../desktopNative";
 import {
   nativeProviderCall,
@@ -181,6 +185,8 @@ export type SavedCapture = {
   /** On a conflict copy: the note it was copied from. */
   conflictOf?: string;
   updatedAtMs?: number;
+  /** Its version for sync, while sync is on. */
+  hlc?: CaptureVersion;
 };
 /**
  * A note that came through sync: it has no recording here (recordings do not
@@ -189,6 +195,28 @@ export type SavedCapture = {
  */
 function cameThroughSync(capture: SavedCapture): boolean {
   return capture.hasAudio === false && capture.origin !== undefined;
+}
+/**
+ * A recording just transcribed into the editor: reads the version it was
+ * saved with, so that a later save keeps a version that sync wrote
+ * meanwhile. Unknown until then (and when it cannot be read): the first
+ * save then overwrites as before.
+ */
+function learnOpenedVersion(id: string) {
+  void nativeProviderCall<{ hlc?: CaptureVersion } | null>("read_sync_note", {
+    id,
+  })
+    .then((note) => {
+      const { openedVersion, transcriptSegments, setOpenedVersion } =
+        useDesktopStore.getState();
+      if (
+        note &&
+        openedVersion === null &&
+        singleCaptureId(transcriptSegments) === id
+      )
+        setOpenedVersion(id, note.hlc ?? null);
+    })
+    .catch(() => undefined);
 }
 /** Lists the library, and remembers which notes have no audio here. */
 async function listSavedCaptures(): Promise<SavedCapture[]> {
@@ -437,6 +465,7 @@ export function StudioTranscribe({
             transcript: long.text,
             segments: long.segments,
           });
+          learnOpenedVersion(long.captureId!);
           setMessage(
             long.text
               ? t("studio.transcribe.saved")
@@ -483,14 +512,15 @@ export function StudioTranscribe({
       );
       if (result.status !== "completed")
         throw new Error(result.message || t("studio.transcribe.notReady"));
-      if (result.captureId)
+      if (result.captureId) {
         state.openCapture({
           id: result.captureId,
           durationMs: (wav.length - 44) / 32,
           transcript: result.transcript || "",
           segments: result.segments ?? [],
         });
-      else state.setTranscript(result.transcript || "");
+        learnOpenedVersion(result.captureId);
+      } else state.setTranscript(result.transcript || "");
       setMessage(
         result.transcript
           ? t("studio.transcribe.saved")
@@ -535,7 +565,17 @@ export function StudioTranscribe({
     if (!libraryCaptureId) return;
     setBusy(true);
     try {
-      await nativeProviderCall("update_local_capture", {
+      // The version the editor opened: if sync changed the recording since,
+      // the save keeps that version as a conflict copy.
+      const opened =
+        state.openedVersion?.id === libraryCaptureId
+          ? state.openedVersion
+          : null;
+      const saved = await nativeProviderCall<{
+        hlc?: CaptureVersion;
+        conflictCopy?: string;
+      } | null>("update_local_capture", {
+        ...(opened ? { base: { hlc: opened.hlc } } : {}),
         id: libraryCaptureId,
         transcript: state.transcript,
         segments: state.transcriptSegments
@@ -547,7 +587,12 @@ export function StudioTranscribe({
             ...(segment.speaker ? { speaker: segment.speaker } : {}),
           })),
       });
-      setMessage(t("studio.segments.saved"));
+      state.setOpenedVersion(libraryCaptureId, saved?.hlc ?? null);
+      setMessage(
+        saved?.conflictCopy
+          ? t("studio.segments.savedWithCopy")
+          : t("studio.segments.saved"),
+      );
       await onSaved();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -1174,7 +1219,7 @@ export function StudioLibrary({
                   className="studio-link"
                   disabled={!item.transcript}
                   onClick={() => {
-                    state.openCapture(item);
+                    state.openCapture({ ...item, hlc: item.hlc ?? null });
                     state.setActiveView("transcribe");
                   }}
                 >

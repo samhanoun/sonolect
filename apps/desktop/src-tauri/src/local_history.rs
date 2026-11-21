@@ -164,8 +164,37 @@ pub(super) fn write_record(app: &tauri::AppHandle, capture: &mut Capture) -> Res
     Ok(())
 }
 
-/// Changes a saved record, read again under the lock so that a synced change
-/// that arrived meanwhile (a long transcription, say) is kept.
+impl Library {
+    /// Changes a saved record, read again under the lock so that a synced
+    /// change that arrived meanwhile (a long transcription, say) is kept.
+    /// Returns whether the note changed: a change to the local-only error
+    /// alone (a Retry that failed) is saved as it is, with no new version,
+    /// so it neither reaches the other devices nor wins over their edits.
+    fn change<T>(
+        &self,
+        id: &str,
+        missing: impl FnOnce() -> Capture,
+        change: impl FnOnce(&mut Capture) -> T,
+    ) -> Result<(T, bool), String> {
+        let _records = lock();
+        let mut record = read_record(&self.captures, id).unwrap_or_else(missing);
+        let before = record.clone();
+        let outcome = change(&mut record);
+        let changed = Capture {
+            error: before.error.clone(),
+            ..record.clone()
+        } != before;
+        if changed {
+            record.updated_at_ms = Some(super::sync::now_ms());
+            self.save_local(&mut record)?;
+        } else {
+            store(&self.captures, &record)?;
+        }
+        Ok((outcome, changed))
+    }
+}
+
+/// Changes a saved record (see `Library::change`).
 pub(super) fn change_record<T>(
     app: &tauri::AppHandle,
     id: &str,
@@ -173,15 +202,10 @@ pub(super) fn change_record<T>(
     change: impl FnOnce(&mut Capture) -> T,
 ) -> Result<T, String> {
     let library = Library::open(app)?;
-    let outcome = {
-        let _records = lock();
-        let mut record = read_record(&library.captures, id).unwrap_or_else(missing);
-        let outcome = change(&mut record);
-        record.updated_at_ms = Some(super::sync::now_ms());
-        library.save_local(&mut record)?;
-        outcome
-    };
-    changed_here(app, &library);
+    let (outcome, changed) = library.change(id, missing, change)?;
+    if changed {
+        changed_here(app, &library);
+    }
     Ok(outcome)
 }
 
@@ -367,20 +391,118 @@ fn validated_edit(
     Ok((transcript, cleaned))
 }
 
+/// The version of a note the studio opened (its HLC then, or none).
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditBase {
+    #[serde(default)]
+    hlc: Option<Hlc>,
+}
+
+/// What a studio save did.
+#[derive(Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditSaved {
+    /// The note's version now: the studio's next base.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hlc: Option<Hlc>,
+    /// The version the studio never saw, kept as a conflict copy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    conflict_copy: Option<String>,
+}
+
+fn base36(mut value: u64) -> String {
+    let mut digits = vec![];
+    loop {
+        digits.push(char::from_digit((value % 36) as u32, 36).unwrap_or('0'));
+        value /= 36;
+        if value == 0 {
+            break;
+        }
+    }
+    digits.iter().rev().collect()
+}
+
+/// sync-core's `conflictCopyId`: the id of the copy of note `id` whose
+/// version `loser` lost, the same on every device.
+fn conflict_copy_id(id: &str, loser: &Hlc) -> String {
+    let counter = if loser.c > 0 {
+        format!("x{}", base36(loser.c))
+    } else {
+        String::new()
+    };
+    let device: String = loser.d.chars().take(4).collect();
+    let suffix = format!("-c{}{counter}{device}", base36(loser.t));
+    let keep = 64usize.saturating_sub(suffix.len()).max(1);
+    let mut copy: String = id.chars().take(keep).collect();
+    copy.push_str(&suffix);
+    copy.chars().take(64).collect()
+}
+
+/// Segments the studio sends back carry only what it edits. Fields it does
+/// not know (another version's, kept as `extra`) come back from the saved
+/// segment with the same timings.
+fn keep_segment_extras(saved: &[super::WhisperSegment], edited: &mut [super::WhisperSegment]) {
+    let mut used = vec![false; saved.len()];
+    for segment in edited {
+        let Some(index) = saved.iter().enumerate().position(|(index, old)| {
+            !used[index] && old.start_ms == segment.start_ms && old.end_ms == segment.end_ms
+        }) else {
+            continue;
+        };
+        used[index] = true;
+        for (key, value) in &saved[index].extra {
+            segment
+                .extra
+                .entry(key.clone())
+                .or_insert_with(|| value.clone());
+        }
+    }
+}
+
+/// Saves a studio edit. With a `base` (the version the studio opened), a
+/// note that sync changed meanwhile is not overwritten unseen: the edit
+/// becomes the note, as the latest change, and the version the studio never
+/// showed is kept as a conflict copy, as the sync engine keeps the losing
+/// side of two edits.
 fn update_record(
     library: &Library,
     id: &str,
     transcript: String,
     segments: Vec<super::WhisperSegment>,
-) -> Result<(), String> {
-    let (transcript, segments) = validated_edit(transcript, segments)?;
+    base: Option<&EditBase>,
+) -> Result<EditSaved, String> {
+    let (transcript, mut segments) = validated_edit(transcript, segments)?;
     let _records = lock();
     let mut record =
         read_record(&library.captures, id).ok_or("This recording is no longer in your library.")?;
+    let now = super::sync::now_ms();
+    let conflict_copy = match base {
+        Some(base) if base.hlc != record.hlc => {
+            let loser = record.hlc.clone().unwrap_or_else(|| Hlc {
+                t: record.updated_at_ms.unwrap_or(record.created_at_ms),
+                c: 0,
+                d: "here".into(),
+            });
+            let mut copy = record.clone();
+            copy.id = conflict_copy_id(id, &loser);
+            copy.conflict_of = Some(id.to_owned());
+            copy.error = None;
+            copy.updated_at_ms = Some(now);
+            library.save_local(&mut copy)?;
+            Some(copy.id)
+        }
+        _ => None,
+    };
+    keep_segment_extras(&record.segments, &mut segments);
     record.transcript = Some(transcript);
     record.segments = segments;
-    record.updated_at_ms = Some(super::sync::now_ms());
-    library.save_local(&mut record)
+    record.updated_at_ms = Some(now);
+    library.save_local(&mut record)?;
+    Ok(EditSaved {
+        hlc: record.hlc,
+        conflict_copy,
+    })
 }
 
 /// Saves the transcript and segments edited in the studio back to a recording.
@@ -390,12 +512,13 @@ pub fn update_local_capture(
     id: String,
     transcript: String,
     segments: Vec<super::WhisperSegment>,
-) -> Result<(), String> {
+    base: Option<EditBase>,
+) -> Result<EditSaved, String> {
     valid_id(&id)?;
     let library = Library::open(&app)?;
-    update_record(&library, &id, transcript, segments)?;
+    let saved = update_record(&library, &id, transcript, segments, base.as_ref())?;
     changed_here(&app, &library);
-    Ok(())
+    Ok(saved)
 }
 
 impl Library {
@@ -893,6 +1016,7 @@ mod tests {
                 segment(0, 900, "Hello there.", Some("  Obi-Wan ")),
                 segment(900, 2000, "General Kenobi.", Some(" ")),
             ],
+            None,
         )
         .unwrap();
 
@@ -916,11 +1040,18 @@ mod tests {
         record(directory, "4-1", 5);
 
         assert_eq!(
-            update_record(&library(directory), "9-9", "text".into(), vec![]).unwrap_err(),
+            update_record(&library(directory), "9-9", "text".into(), vec![], None).unwrap_err(),
             "This recording is no longer in your library."
         );
         assert_eq!(
-            update_record(&library(directory), "4-1", "x".repeat(2_000_001), vec![]).unwrap_err(),
+            update_record(
+                &library(directory),
+                "4-1",
+                "x".repeat(2_000_001),
+                vec![],
+                None
+            )
+            .unwrap_err(),
             "The edited transcript is too large to save."
         );
         assert_eq!(
@@ -928,7 +1059,8 @@ mod tests {
                 &library(directory),
                 "4-1",
                 "text".into(),
-                vec![segment(500, 100, "text", None)]
+                vec![segment(500, 100, "text", None)],
+                None,
             )
             .unwrap_err(),
             "A segment ends before it starts."
@@ -938,7 +1070,8 @@ mod tests {
                 &library(directory),
                 "4-1",
                 "text".into(),
-                vec![segment(0, 100, "text", Some(&"n".repeat(81)))]
+                vec![segment(0, 100, "text", Some(&"n".repeat(81)))],
+                None,
             )
             .unwrap_err(),
             "Speaker names can have up to 80 characters."
@@ -1305,17 +1438,17 @@ mod tests {
         let notes = synced_library(folder.path());
         record(&notes.captures, "3-1", 5);
         // Sync off: an edit carries no version.
-        update_record(&notes, "3-1", "first".into(), vec![]).unwrap();
+        update_record(&notes, "3-1", "first".into(), vec![], None).unwrap();
         let saved = read_record(&notes.captures, "3-1").unwrap();
         assert_eq!(saved.hlc, None);
         assert!(saved.updated_at_ms.is_some());
 
         sync_on(notes.sync.as_ref().unwrap(), "desk");
-        update_record(&notes, "3-1", "second".into(), vec![]).unwrap();
+        update_record(&notes, "3-1", "second".into(), vec![], None).unwrap();
         let first = read_record(&notes.captures, "3-1").unwrap().hlc.unwrap();
         assert_eq!(first.d, "desk");
         assert!(first.t > 1_700_000_000_000);
-        update_record(&notes, "3-1", "third".into(), vec![]).unwrap();
+        update_record(&notes, "3-1", "third".into(), vec![], None).unwrap();
         let second = read_record(&notes.captures, "3-1").unwrap().hlc.unwrap();
         assert_eq!(second.order(&first), std::cmp::Ordering::Greater);
 
@@ -1323,11 +1456,147 @@ mod tests {
         let mut ahead = read_record(&notes.captures, "3-1").unwrap();
         ahead.hlc = Some(hlc(u64::from(u32::MAX) * 1_000, 4, "phone"));
         store(&notes.captures, &ahead).unwrap();
-        update_record(&notes, "3-1", "fourth".into(), vec![]).unwrap();
+        update_record(&notes, "3-1", "fourth".into(), vec![], None).unwrap();
         assert_eq!(
             read_record(&notes.captures, "3-1").unwrap().hlc,
             Some(hlc(u64::from(u32::MAX) * 1_000, 5, "desk"))
         );
+    }
+
+    #[test]
+    fn a_studio_save_keeps_a_version_that_sync_wrote_meanwhile() {
+        let folder = tempfile::tempdir().unwrap();
+        let notes = synced_library(folder.path());
+        sync_on(notes.sync.as_ref().unwrap(), "desk");
+        record(&notes.captures, "3-1", 5);
+        let opened = update_record(&notes, "3-1", "opened".into(), vec![], None)
+            .unwrap()
+            .hlc;
+        // Saving what the studio opened: no copy.
+        let base = EditBase { hlc: opened };
+        let saved = update_record(&notes, "3-1", "mine".into(), vec![], Some(&base)).unwrap();
+        assert_eq!(saved.conflict_copy, None);
+        // The phone edits the note while the studio still shows it.
+        let mut remote = read_record(&notes.captures, "3-1").unwrap();
+        let theirs = hlc(u64::from(u32::MAX) * 1_000, 0, "phone");
+        remote.transcript = Some("edited on the phone".into());
+        remote.hlc = Some(theirs.clone());
+        store(&notes.captures, &remote).unwrap();
+        let base = EditBase { hlc: saved.hlc };
+        let saved =
+            update_record(&notes, "3-1", "mine, again".into(), vec![], Some(&base)).unwrap();
+        // The save is the note, newer than the phone's edit…
+        let note = read_record(&notes.captures, "3-1").unwrap();
+        assert_eq!(note.transcript.as_deref(), Some("mine, again"));
+        assert_eq!(note.hlc, saved.hlc);
+        assert_eq!(
+            note.hlc.as_ref().unwrap().order(&theirs),
+            std::cmp::Ordering::Greater
+        );
+        // …and the phone's edit is a conflict copy, named as the engine names it.
+        let copy_id = saved.conflict_copy.unwrap();
+        assert_eq!(copy_id, format!("3-1-c{}phon", base36(theirs.t)));
+        let copy = read_record(&notes.captures, &copy_id).unwrap();
+        assert_eq!(copy.transcript.as_deref(), Some("edited on the phone"));
+        assert_eq!(copy.conflict_of.as_deref(), Some("3-1"));
+        assert_eq!(
+            copy.hlc.as_ref().unwrap().order(&theirs),
+            std::cmp::Ordering::Greater
+        );
+        // Without a base (an editor that opened no saved version), as before.
+        let saved = update_record(&notes, "3-1", "plain".into(), vec![], None).unwrap();
+        assert_eq!(saved.conflict_copy, None);
+    }
+
+    #[test]
+    fn conflict_copy_ids_follow_sync_core() {
+        // The ids sync-core's conflictCopyId gives for the same versions.
+        assert_eq!(base36(0), "0");
+        assert_eq!(base36(35), "z");
+        assert_eq!(base36(36), "10");
+        assert_eq!(
+            conflict_copy_id("n1", &hlc(1_700_000_000_000, 0, "devA1")),
+            "n1-cloyw3v28devA"
+        );
+        assert_eq!(conflict_copy_id("n1", &hlc(36, 2, "ab")), "n1-c10x2ab");
+        let long = "x".repeat(64);
+        assert_eq!(
+            conflict_copy_id(&long, &hlc(1, 0, "dddd")),
+            format!("{}-c1dddd", "x".repeat(57))
+        );
+    }
+
+    #[test]
+    fn a_studio_save_keeps_segment_fields_it_does_not_know() {
+        let folder = tempfile::tempdir().unwrap();
+        let directory = folder.path();
+        record(directory, "3-1", 5);
+        let mut known = segment(0, 900, "Hello there.", None);
+        known
+            .extra
+            .insert("confidence".into(), serde_json::json!(0.9));
+        let mut moved = segment(900, 2000, "General Kenobi.", None);
+        moved
+            .extra
+            .insert("words".into(), serde_json::json!([1, 2]));
+        let mut saved = read_record(directory, "3-1").unwrap();
+        saved.segments = vec![known, moved];
+        store(directory, &saved).unwrap();
+        update_record(
+            &library(directory),
+            "3-1",
+            "Hello. General Kenobi.".into(),
+            vec![
+                segment(0, 900, "Hello.", Some("Obi-Wan")),
+                segment(1000, 2000, "General Kenobi.", None),
+            ],
+            None,
+        )
+        .unwrap();
+        let segments = read_record(directory, "3-1").unwrap().segments;
+        assert_eq!(segments[0].text, "Hello.");
+        assert_eq!(segments[0].speaker.as_deref(), Some("Obi-Wan"));
+        assert_eq!(
+            segments[0].extra.get("confidence"),
+            Some(&serde_json::json!(0.9))
+        );
+        // Its timings changed: what was known of it no longer applies.
+        assert!(segments[1].extra.is_empty());
+    }
+
+    #[test]
+    fn a_retry_that_fails_gives_the_note_no_new_version() {
+        let folder = tempfile::tempdir().unwrap();
+        let notes = synced_library(folder.path());
+        sync_on(notes.sync.as_ref().unwrap(), "desk");
+        record(&notes.captures, "3-1", 5);
+        let mut saved = read_record(&notes.captures, "3-1").unwrap();
+        saved.hlc = Some(hlc(9, 0, "phone"));
+        saved.updated_at_ms = Some(7);
+        store(&notes.captures, &saved).unwrap();
+        let missing = || unreachable!("the note is there");
+        // Only the local error changes: same version, same date.
+        let ((), changed) = notes
+            .change("3-1", missing, |record| {
+                record.error = Some("The model is missing.".into())
+            })
+            .unwrap();
+        assert!(!changed);
+        let failed = read_record(&notes.captures, "3-1").unwrap();
+        assert_eq!(failed.error.as_deref(), Some("The model is missing."));
+        assert_eq!(failed.hlc, Some(hlc(9, 0, "phone")));
+        assert_eq!(failed.updated_at_ms, Some(7));
+        // A new transcript is a change to sync.
+        let ((), changed) = notes
+            .change("3-1", missing, |record| {
+                record.error = None;
+                record.transcript = Some("transcribed again".into());
+            })
+            .unwrap();
+        assert!(changed);
+        let done = read_record(&notes.captures, "3-1").unwrap();
+        assert_eq!(done.hlc.unwrap().d, "desk");
+        assert_ne!(done.updated_at_ms, Some(7));
     }
 
     #[test]

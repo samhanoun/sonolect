@@ -842,6 +842,8 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.segments.approx": "Horodatage estimé",
   "studio.segments.saveToLibrary": "Enregistrer dans la bibliothèque",
   "studio.segments.saved": "Enregistré dans votre bibliothèque.",
+  "studio.segments.savedWithCopy":
+    "Enregistré. Cet enregistrement avait changé sur un autre appareil entre-temps : cette version est conservée comme copie de conflit dans votre bibliothèque.",
   "studio.library.listen": "Écouter",
   "studio.library.pause": "Pause",
   "studio.library.synced": "Synchronisé",

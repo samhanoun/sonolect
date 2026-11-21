@@ -794,6 +794,8 @@ export const en = {
   "studio.segments.approx": "Estimated time",
   "studio.segments.saveToLibrary": "Save to library",
   "studio.segments.saved": "Saved to your library.",
+  "studio.segments.savedWithCopy":
+    "Saved. This recording had changed on another device meanwhile: that version is kept as a conflict copy in your library.",
   "studio.library.listen": "Listen",
   "studio.library.pause": "Pause",
   "studio.library.synced": "Synced",
