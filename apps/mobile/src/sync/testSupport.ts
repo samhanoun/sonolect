@@ -3,9 +3,18 @@
  * imported by the app): an in-memory AsyncStorage, an in-memory SecureStore
  * and timers the test moves forward by hand.
  */
+import type { NoteStore as SyncNoteStore } from "@sonolect/sync-core";
+
 import type { TranscriptTurn } from "../domain";
-import type { KeyValueStore } from "../storageCore";
+import {
+  type KeyValueStore,
+  type NoteStore,
+  SYNC_COMPANION_PREFIX,
+  createNoteStore,
+} from "../storageCore";
+import { type Stamp, placeNotes, stampTurn } from "./edits";
 import type { SecretStore } from "./keyStore";
+import { createNotesHost, createSyncNoteStore } from "./noteStore";
 import type { Timers } from "./timers";
 
 export type KvOp =
@@ -169,4 +178,115 @@ export function makeTurn(patch: Partial<TranscriptTurn> = {}): TranscriptTurn {
     syncState: "local",
     ...patch,
   };
+}
+
+/** Random bytes from Node's Web Crypto. */
+export const testRandomBytes = (length: number): Uint8Array =>
+  globalThis.crypto.getRandomValues(new Uint8Array(length));
+
+/**
+ * The phone's notes as store.ts keeps them: a history in memory, saved
+ * through storageCore over an in-memory AsyncStorage, with sync's host and
+ * NoteStore adapter on top. Local changes go through the same steps as the
+ * store's: stamp, show, save.
+ */
+export class TestPhone {
+  readonly kv = new MemoryKv();
+  storage: NoteStore;
+  history: TranscriptTurn[] = [];
+  latest: TranscriptTurn | undefined;
+  /** False: history off, or notes that could not be read. */
+  writable = true;
+  /** Bumped by a wipe (dataEpoch in store.ts). */
+  epoch = 0;
+  readonly removedShown: string[] = [];
+  readonly notes: SyncNoteStore;
+
+  constructor(readonly now: () => number = Date.now) {
+    this.storage = this.newStorage();
+    const host = createNotesHost({
+      read: () => ({
+        history: this.history,
+        latest: this.latest,
+        writable: this.writable,
+      }),
+      update: (patch) => {
+        this.history = patch.history;
+        if ("latest" in patch) this.latest = patch.latest;
+      },
+      apply: (change) => this.storage.apply(change),
+      readCompanion: (id) => this.kv.getItem(`${SYNC_COMPANION_PREFIX}${id}`),
+      generation: () => this.epoch,
+      now: () => this.now(),
+      onRemoved: (ids) => {
+        this.removedShown.push(...ids);
+      },
+    });
+    this.notes = createSyncNoteStore(host);
+  }
+
+  private newStorage(): NoteStore {
+    return createNoteStore(this.kv, {
+      companionPrefix: SYNC_COMPANION_PREFIX,
+      now: () => this.now(),
+    });
+  }
+
+  /** Reads the notes from storage, as a launch does. */
+  async load(): Promise<void> {
+    this.storage = this.newStorage();
+    const read = await this.storage.load();
+    this.history = read.notes;
+    this.latest = read.notes[0];
+  }
+
+  /** A restart: memory is lost, storage stays. */
+  async restart(): Promise<void> {
+    this.history = [];
+    this.latest = undefined;
+    await this.load();
+  }
+
+  get(id: string): TranscriptTurn | undefined {
+    return this.history.find((turn) => turn.id === id);
+  }
+
+  private async save(history: TranscriptTurn[]): Promise<void> {
+    this.history = history;
+    await this.storage.save(this.history);
+  }
+
+  /** A capture or a typed note. */
+  async add(turn: TranscriptTurn, stamp: Stamp): Promise<TranscriptTurn> {
+    const stamped = stampTurn(turn, stamp);
+    this.latest = stamped;
+    await this.save([stamped, ...this.history]);
+    return stamped;
+  }
+
+  /** An edit (refine, pin). */
+  async edit(
+    id: string,
+    patch: Partial<TranscriptTurn>,
+    stamp: Stamp,
+  ): Promise<TranscriptTurn> {
+    const turn = this.get(id);
+    if (!turn) throw new Error(`no note ${id}`);
+    const edited = stampTurn({ ...turn, ...patch }, stamp);
+    await this.save(placeNotes(this.history, [edited]));
+    return edited;
+  }
+
+  /** Removes a note here (the caller records the delete for sync, or not for retention). */
+  async remove(id: string): Promise<void> {
+    await this.save(this.history.filter((turn) => turn.id !== id));
+  }
+
+  /** Clears every note here (history off), bumping the epoch. */
+  async wipe(): Promise<void> {
+    this.epoch += 1;
+    this.history = [];
+    this.latest = undefined;
+    await this.storage.clear();
+  }
 }
