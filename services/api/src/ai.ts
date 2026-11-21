@@ -212,12 +212,24 @@ const rateLimitConfig = (limits: AiRouteLimits) => ({
 const isShortString = (value: unknown, max: number): value is string =>
   typeof value === "string" && value.length > 0 && value.length <= max;
 
+/**
+ * Control characters, line breaks included. The style preset and the
+ * dictionary go into the prompt's instructions, ahead of the "Raw dictation:"
+ * marker, so a line break in them could fake that marker and add instructions.
+ */
+const CONTROL_CHARACTER = /[\p{Cc}\p{Zl}\p{Zp}]/u;
+
+const isOneLine = (value: string): boolean => !CONTROL_CHARACTER.test(value);
+
+const isHint = (value: unknown): value is string =>
+  isShortString(value, MAX_HINT_CHARS) && isOneLine(value);
+
 /** The trimmed preset, `undefined` when none was sent, or `null` when invalid. */
 const readStylePreset = (value: unknown): string | undefined | null => {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "string") return null;
   const preset = value.trim();
-  if (preset.length > MAX_STYLE_PRESET_CHARS) return null;
+  if (preset.length > MAX_STYLE_PRESET_CHARS || !isOneLine(preset)) return null;
   return preset || undefined;
 };
 
@@ -337,7 +349,7 @@ export function registerAiRoutes(
           .send(
             errorBody(
               "invalid_style_preset",
-              `stylePreset must be text of at most ${MAX_STYLE_PRESET_CHARS} characters.`,
+              `stylePreset must be one line of text of at most ${MAX_STYLE_PRESET_CHARS} characters.`,
               false,
             ),
           );
@@ -356,10 +368,7 @@ export function registerAiRoutes(
       try {
         const dictionary = Array.isArray(body.dictionary)
           ? (body.dictionary as DictionaryHint[]).filter(
-              (entry) =>
-                entry &&
-                isShortString(entry.spoken, MAX_HINT_CHARS) &&
-                isShortString(entry.written, MAX_HINT_CHARS),
+              (entry) => entry && isHint(entry.spoken) && isHint(entry.written),
             )
           : undefined;
         const result = await ai.polish({
