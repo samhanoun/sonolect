@@ -4,11 +4,11 @@ TODO: Expand this document from the approved Sonolect architecture specification
 
 ## What production serves
 
-In production the API and the agent, audio and worker services never answer with made-up results and never take data they would lose. Routes and endpoints that cannot meet that rule are off or fail with an error in production. Outside production they behave as before, for local development and tests.
+In production the API and the agent, audio, billing and worker services never answer with made-up results and never take data they would lose. Routes and endpoints that cannot meet that rule are off or fail with an error in production. Outside production they behave as before, for local development and tests.
 
 ### API (`services/api`)
 
-The API runs in production when `NODE_ENV` is `production`, unset or empty. The container image and the Cloud Run services in `infra/terraform` set `NODE_ENV=production`, and a plain `node dist/index.js` starts in production too. Every route except `GET /health` needs a Firebase ID token.
+The API runs in production unless `NODE_ENV` is `development` or `test`, in any case. Every other value is production: unset, empty, `production`, and also `Production`, `prod` or `staging`. The container image and the Cloud Run services in `infra/terraform` set `NODE_ENV=production`, and a plain `node dist/index.js` starts in production too. Every route except `GET /health` needs a Firebase ID token.
 
 | Route                                                                            | In production | Why                                                                                                                |
 | -------------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------ |
@@ -30,20 +30,20 @@ No shipped app calls an off route. Desktop release builds set no `VITE_SONOLECT_
 
 #### `POST /v1/polish` input
 
-| Field         | Rule                                                                                                                                      |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `transcript`  | Required, non-empty, at most 20,000 characters (413 above).                                                                               |
-| `stylePreset` | Optional text of at most 256 characters, sent to the model as an instruction. A longer or non-text value gets 422 `invalid_style_preset`. |
-| `dictionary`  | At most 200 entries (413 above). Entries with a `spoken` or `written` longer than 100 characters are skipped.                             |
-| `locale`      | Optional, at most 64 characters.                                                                                                          |
+| Field         | Rule                                                                                                                                                                                                       |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `transcript`  | Required, non-empty, at most 20,000 characters (413 above).                                                                                                                                                |
+| `stylePreset` | Optional, one line of text of at most 256 characters, sent to the model as an instruction. A longer value, a line break or another control character, or a non-text value gets 422 `invalid_style_preset`. |
+| `dictionary`  | At most 200 entries (413 above). Entries with a `spoken` or `written` longer than 100 characters, or with a line break or another control character, are skipped.                                          |
+| `locale`      | Optional, at most 64 characters.                                                                                                                                                                           |
 
-A model answer with no text gets 502 `polish_empty`; the API never returns the raw transcript as if it were polished.
+A model answer with no text gets 502 `polish_empty`, marked retryable. An answer the model did not finish, because it reached the token limit or a safety or other filter stopped it, gets 502 `polish_incomplete`, marked not retryable. The API never returns the raw transcript or a cut-off text as if it were polished.
 
 The mobile app sends one preset per mode (`stylePresetForMode` in `apps/mobile/src/refine.ts`, 57 to 87 characters). The desktop app sends no preset. A test in `services/api` reads the mobile presets and fails if one ever exceeds the cap.
 
 ### Internal services
 
-The agent, audio and worker services run in production only when `NODE_ENV=production`. For them an unset `NODE_ENV` means development; their images set `NODE_ENV=production`. The service token is checked first, so a caller without one gets 401. Each service logs its unavailable endpoints once at start.
+The agent, audio, billing and worker services run in production only when `NODE_ENV=production`. For them an unset `NODE_ENV` means development; their images set `NODE_ENV=production`. The service token is checked first, so a caller without one gets 401. The billing plan list and the Stripe webhook need no service token, so they answer 501 to any caller. Each service logs its unavailable endpoints once at start.
 
 | Service | Endpoint                                                                                                                    | In production                                                                                                                                                                                                                |
 | ------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -52,10 +52,11 @@ The agent, audio and worker services run in production only when `NODE_ENV=produ
 | agent   | `POST /agents`                                                                                                              | 501 `not_implemented`: custom agents are kept only in memory.                                                                                                                                                                |
 | agent   | `GET /agents`                                                                                                               | On. Lists the built-in agents.                                                                                                                                                                                               |
 | audio   | `POST /transcriptions`, `GET /transcriptions/:id`, `POST /transcriptions/:id/cancel`                                        | 501 `not_implemented`: the mock provider is off and Google Speech-to-Text runs in the API (`POST /v1/transcribe`).                                                                                                           |
-| audio   | `POST /refinements`                                                                                                         | `rewrite` and `translate` answer 501 `refinement_unavailable`. `clean` and `summarize` stay on, labelled `provider: "template"`.                                                                                             |
+| audio   | `POST /refinements`                                                                                                         | `rewrite`, `summarize` and `translate` answer 501 `refinement_unavailable`: their output would be a template. `clean` stays on, labelled `provider: "template"`: it only removes filler words and extra spaces.              |
+| billing | `GET /billing/plans`, `GET /billing/users/:userId/quota`, `POST /billing/usage`, `POST /webhooks/stripe`                    | 501 `not_implemented`: usage, plans and Stripe customer links are kept only in memory, and no plan can be bought yet. A 501 tells Stripe the event was not delivered, so Stripe sends it again later.                        |
 | worker  | `GET /tasks`, `POST /tasks`, `POST /events/audio`, `POST /events/agent`, `POST /events/billing`, `POST /tasks/:id/dispatch` | 501 `not_implemented`: the task handlers are placeholders and the queue lives in memory.                                                                                                                                     |
 
-This page does not cover the billing service. The sync service's protocol is in the next section.
+The sync service always runs in production; its protocol is in the next section.
 
 ## Note sync vault API
 
