@@ -1,10 +1,29 @@
 import type { CaptureStatus, DictationLanguage } from "./domain";
 import type { Strings } from "./i18n";
+import type { OnlineFailure } from "./onlineRefine";
 
 /**
  * Capture-screen notices. Pure: the text comes from the i18n strings passed
  * in, never from a native error message.
  */
+
+/**
+ * Rewrite and Reply with the user's own key (onlineRefine.ts). The note is
+ * never changed when one of these shows.
+ */
+export const ONLINE_NOTICE_KINDS = [
+  "onlineSetup",
+  "onlineKeyRejected",
+  "onlineNeedsCredits",
+  "onlineRateLimited",
+  "onlineModelUnavailable",
+  "onlineTimeout",
+  "onlineNetwork",
+  "onlineEmpty",
+  "onlineTooLong",
+  "onlineFailed",
+] as const;
+export type OnlineNoticeKind = (typeof ONLINE_NOTICE_KINDS)[number];
 
 export const NOTICE_KINDS = [
   "noSpeech",
@@ -38,6 +57,7 @@ export const NOTICE_KINDS = [
   // Notes and settings on the phone (WP4).
   "storageReadError",
   "storageWriteError",
+  ...ONLINE_NOTICE_KINDS,
 ] as const;
 export type NoticeKind = (typeof NOTICE_KINDS)[number];
 
@@ -56,6 +76,8 @@ export const NOTICE_ACTIONS = [
   "useServiceOnce",
   "alwaysAllow",
   "openSettings",
+  /** Sonolect's own Settings screen, at its online editing section. */
+  "openOnlineSettings",
   "typeInstead",
   "dismiss",
 ] as const;
@@ -106,6 +128,16 @@ const DEFAULT_ACTIONS: Record<NoticeKind, readonly NoticeAction[]> = {
   refineFailed: ["dismiss"],
   storageReadError: ["dismiss"],
   storageWriteError: ["dismiss"],
+  onlineSetup: ["openOnlineSettings", "dismiss"],
+  onlineKeyRejected: ["openOnlineSettings", "dismiss"],
+  onlineNeedsCredits: ["dismiss"],
+  onlineRateLimited: ["dismiss"],
+  onlineModelUnavailable: ["dismiss"],
+  onlineTimeout: ["dismiss"],
+  onlineNetwork: ["dismiss"],
+  onlineEmpty: ["dismiss"],
+  onlineTooLong: ["dismiss"],
+  onlineFailed: ["dismiss"],
 };
 
 /**
@@ -158,7 +190,34 @@ const TEXT: Record<NoticeKind, (t: Strings, language: string) => string> = {
   refineFailed: (t) => t.capture.notices.refineFailed,
   storageReadError: (t) => t.capture.notices.storageReadError,
   storageWriteError: (t) => t.capture.notices.storageWriteError,
+  onlineSetup: (t) => t.capture.notices.onlineSetup,
+  onlineKeyRejected: (t) => t.capture.notices.onlineKeyRejected,
+  onlineNeedsCredits: (t) => t.capture.notices.onlineNeedsCredits,
+  onlineRateLimited: (t) => t.capture.notices.onlineRateLimited,
+  onlineModelUnavailable: (t) => t.capture.notices.onlineModelUnavailable,
+  onlineTimeout: (t) => t.capture.notices.onlineTimeout,
+  onlineNetwork: (t) => t.capture.notices.onlineNetwork,
+  onlineEmpty: (t) => t.capture.notices.onlineEmpty,
+  onlineTooLong: (t) => t.capture.notices.onlineTooLong,
+  onlineFailed: (t) => t.capture.notices.onlineFailed,
 };
+
+/** The notice for each way an online edit can fail. */
+const ONLINE_FAILURE_NOTICES: Record<OnlineFailure, OnlineNoticeKind> = {
+  tooLong: "onlineTooLong",
+  rejectedKey: "onlineKeyRejected",
+  needsCredits: "onlineNeedsCredits",
+  rateLimited: "onlineRateLimited",
+  modelUnavailable: "onlineModelUnavailable",
+  timeout: "onlineTimeout",
+  network: "onlineNetwork",
+  empty: "onlineEmpty",
+  failed: "onlineFailed",
+};
+
+export function onlineFailureNotice(reason: OnlineFailure): OnlineNoticeKind {
+  return ONLINE_FAILURE_NOTICES[reason];
+}
 
 /**
  * The storage notice Library and Settings show. While some saved notes are
@@ -221,10 +280,11 @@ export function emptyEndOutcome(
 }
 
 /** The notices a refinement shows; it clears only these. */
-const REFINE_NOTICE_KINDS: readonly NoticeKind[] = [
+export const REFINE_NOTICE_KINDS = [
   "needsModel",
   "refineFailed",
-];
+  ...ONLINE_NOTICE_KINDS,
+] as const satisfies readonly NoticeKind[];
 
 /**
  * What a refinement does to the notice: it shows its own (`next`), or
@@ -237,7 +297,10 @@ export function refineNoticeChange(
   next: Notice | null,
 ): NoticeChange | null {
   if (next) return replaceNotice(status, next);
-  if (current && REFINE_NOTICE_KINDS.includes(current.kind)) {
+  if (
+    current &&
+    (REFINE_NOTICE_KINDS as readonly NoticeKind[]).includes(current.kind)
+  ) {
     return replaceNotice(status, null);
   }
   return null;
@@ -253,6 +316,7 @@ const ACTION_LABELS: Record<NoticeAction, (t: Strings) => string> = {
   useServiceOnce: (t) => t.capture.actions.useServiceOnce,
   alwaysAllow: (t) => t.capture.actions.alwaysAllow,
   openSettings: (t) => t.capture.actions.openSettings,
+  openOnlineSettings: (t) => t.capture.actions.openOnlineSettings,
   typeInstead: (t) => t.capture.typeInstead,
   dismiss: (t) => t.capture.actions.dismiss,
 };

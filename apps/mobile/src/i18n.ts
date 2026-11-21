@@ -110,12 +110,34 @@ const en = {
         "Sonolect couldn't read your saved notes. Nothing was deleted. Restart the app to try again.",
       storageWriteError:
         "Your latest change couldn't be saved on this phone. Free up some storage and try again.",
+      // Online editing (Rewrite and Reply with the user's own key). The
+      // note is never changed when one of these shows.
+      onlineSetup:
+        "Online editing isn't set up on this phone. Save your key and pick a model in Settings.",
+      onlineKeyRejected:
+        "Your API key was not accepted. Check it in Settings. Your note was not changed.",
+      onlineNeedsCredits:
+        "Your provider account needs credits. Add some with the provider, then try again. Your note was not changed.",
+      onlineRateLimited:
+        "The provider is limiting requests right now. Wait a moment and try again. Your note was not changed.",
+      onlineModelUnavailable:
+        "The provider couldn't use this model for the note. Try another model in Settings. Your note was not changed.",
+      onlineTimeout:
+        "The provider took too long to answer. Try again. Your note was not changed.",
+      onlineNetwork:
+        "The provider couldn't be reached. Check your connection and try again. Your note was not changed.",
+      onlineEmpty: "The model sent back no text. Your note was not changed.",
+      onlineTooLong:
+        "This note is too long to send (over 12,000 characters). Nothing was sent.",
+      onlineFailed:
+        "The provider request failed. Try again later. Your note was not changed.",
     },
     actions: {
       downloadModel: "Download language",
       useServiceOnce: "Use speech service this time",
       alwaysAllow: "Always allow",
       openSettings: "Open Settings",
+      openOnlineSettings: "Online editing settings",
       dismiss: "Dismiss",
     },
   },
@@ -288,6 +310,47 @@ const en = {
     eraseButton: "Erase",
     about: "Sonolect mobile · your notes stay on this phone",
     privacyPolicy: "Privacy policy",
+    /** Rewrite and Reply with the user's own key (onlineRefine.ts). */
+    onlineEditing: {
+      title: "ONLINE EDITING",
+      help: "Rewrite and Reply need a language model. Add your own OpenRouter or OpenCode Zen key to use one. Sonolect then sends the text of the note you pick to that provider, straight from this phone, and the provider bills your account. Nothing is sent until you add a key and pick a model, and Sonolect asks before sending each note.",
+      status: (provider: string, model: string) =>
+        `Rewrite and Reply use ${provider} (${model}).`,
+      notSetUp: "Not set up. Rewrite and Reply stay hidden.",
+      needsKey: (provider: string) =>
+        `Save your ${provider} key to turn it on.`,
+      provider: "Provider",
+      model: "Model",
+      modelPlaceholder: "A model id from the provider's list",
+      useModel: "Use this model",
+      invalidModel: "Enter a model id from the provider's list.",
+      loadModels: "Load models",
+      loadingModels: "Loading models…",
+      loadModelsHelp: "Loading the list sends no key and no note.",
+      loadModelsFailed:
+        "Couldn't load the list. Check your connection, or type a model id.",
+      pickModel: "Tap a model to use it. Type above to filter the list.",
+      noModelMatch: "No model matches.",
+      key: "API key",
+      keyPlaceholder: (provider: string) => `Paste your ${provider} key`,
+      keySaved: "Key saved",
+      keyNote:
+        "Kept in the iOS Keychain or the Android Keystore, on this phone only. It is not copied to another phone.",
+      saveKey: "Save key",
+      removeKey: "Remove key",
+      invalidKey: "Enter a valid key without spaces or line breaks.",
+      alwaysAllow: "Send without asking each time",
+      alwaysAllowHelp:
+        "Off: Sonolect asks before each note. Ephemeral always asks.",
+      previewOnly:
+        "Online editing needs the phone app. The browser preview keeps no keys.",
+      consentTitle: (provider: string) => `Send this note to ${provider}?`,
+      consentMessage: (mode: string, provider: string, model: string) =>
+        `${mode} sends the text of this note to ${provider} (${model}) with your API key. ${provider}'s terms apply. Nothing else leaves this phone.`,
+      send: "Send",
+      sending: (provider: string) => `Sending to ${provider}…`,
+      chipHint: (provider: string) => `Sends this note to ${provider}.`,
+    },
     /** The "Dictate in any app" card. */
     voiceKeyboard: {
       title: "Dictate in any app",
@@ -512,12 +575,33 @@ const fr: Strings = {
         "Sonolect n'a pas pu lire vos notes enregistrées. Rien n'a été supprimé. Redémarrez l'app pour réessayer.",
       storageWriteError:
         "Votre dernière modification n'a pas pu être enregistrée sur ce téléphone. Libérez de l'espace et réessayez.",
+      onlineSetup:
+        "L'édition en ligne n'est pas configurée sur ce téléphone. Enregistrez votre clé et choisissez un modèle dans Réglages.",
+      onlineKeyRejected:
+        "Votre clé d'API n'a pas été acceptée. Vérifiez-la dans Réglages. Votre note n'a pas changé.",
+      onlineNeedsCredits:
+        "Votre compte chez le fournisseur n'a plus de crédits. Ajoutez-en chez le fournisseur, puis réessayez. Votre note n'a pas changé.",
+      onlineRateLimited:
+        "Le fournisseur limite les requêtes pour le moment. Patientez un instant et réessayez. Votre note n'a pas changé.",
+      onlineModelUnavailable:
+        "Le fournisseur n'a pas pu utiliser ce modèle pour la note. Essayez un autre modèle dans Réglages. Votre note n'a pas changé.",
+      onlineTimeout:
+        "Le fournisseur a mis trop de temps à répondre. Réessayez. Votre note n'a pas changé.",
+      onlineNetwork:
+        "Le fournisseur est injoignable. Vérifiez votre connexion et réessayez. Votre note n'a pas changé.",
+      onlineEmpty:
+        "Le modèle n'a renvoyé aucun texte. Votre note n'a pas changé.",
+      onlineTooLong:
+        "Cette note est trop longue pour être envoyée (plus de 12\u00a0000 caractères). Rien n'a été envoyé.",
+      onlineFailed:
+        "La requête au fournisseur a échoué. Réessayez plus tard. Votre note n'a pas changé.",
     },
     actions: {
       downloadModel: "Télécharger la langue",
       useServiceOnce: "Utiliser le service vocal cette fois",
       alwaysAllow: "Toujours autoriser",
       openSettings: "Ouvrir les réglages",
+      openOnlineSettings: "Réglages de l'édition en ligne",
       dismiss: "Fermer",
     },
   },
@@ -688,6 +772,50 @@ const fr: Strings = {
     eraseButton: "Effacer",
     about: "Sonolect mobile · vos notes restent sur ce téléphone",
     privacyPolicy: "Politique de confidentialité",
+    /** Réécrire et Répondre avec la clé de l'utilisateur (onlineRefine.ts). */
+    onlineEditing: {
+      title: "ÉDITION EN LIGNE",
+      help: "Réécrire et Répondre ont besoin d'un modèle de langage. Ajoutez votre propre clé OpenRouter ou OpenCode Zen pour en utiliser un. Sonolect envoie alors le texte de la note choisie à ce fournisseur, directement depuis ce téléphone, et le fournisseur facture votre compte. Rien n'est envoyé tant que vous n'avez pas ajouté de clé ni choisi de modèle, et Sonolect demande avant d'envoyer chaque note.",
+      status: (provider: string, model: string) =>
+        `Réécrire et Répondre utilisent ${provider} (${model}).`,
+      notSetUp: "Non configurée. Réécrire et Répondre restent masqués.",
+      needsKey: (provider: string) =>
+        `Enregistrez votre clé ${provider} pour l'activer.`,
+      provider: "Fournisseur",
+      model: "Modèle",
+      modelPlaceholder: "Un identifiant de modèle de la liste du fournisseur",
+      useModel: "Utiliser ce modèle",
+      invalidModel:
+        "Saisissez un identifiant de modèle de la liste du fournisseur.",
+      loadModels: "Charger les modèles",
+      loadingModels: "Chargement des modèles…",
+      loadModelsHelp: "Charger la liste n'envoie ni clé ni note.",
+      loadModelsFailed:
+        "Impossible de charger la liste. Vérifiez votre connexion, ou saisissez un identifiant de modèle.",
+      pickModel:
+        "Touchez un modèle pour l'utiliser. Saisissez du texte ci-dessus pour filtrer la liste.",
+      noModelMatch: "Aucun modèle ne correspond.",
+      key: "Clé d'API",
+      keyPlaceholder: (provider: string) => `Collez votre clé ${provider}`,
+      keySaved: "Clé enregistrée",
+      keyNote:
+        "Conservée dans le trousseau iOS ou le Keystore Android, sur ce téléphone uniquement. Elle n'est pas copiée sur un autre téléphone.",
+      saveKey: "Enregistrer la clé",
+      removeKey: "Supprimer la clé",
+      invalidKey:
+        "Saisissez une clé valide, sans espaces ni retours à la ligne.",
+      alwaysAllow: "Envoyer sans demander à chaque fois",
+      alwaysAllowHelp:
+        "Désactivé : Sonolect demande avant chaque note. Le mode Éphémère demande toujours.",
+      previewOnly:
+        "L'édition en ligne nécessite l'app sur téléphone. L'aperçu dans le navigateur ne conserve aucune clé.",
+      consentTitle: (provider: string) => `Envoyer cette note à ${provider} ?`,
+      consentMessage: (mode: string, provider: string, model: string) =>
+        `${mode} envoie le texte de cette note à ${provider} (${model}) avec votre clé d'API. Les conditions de ${provider} s'appliquent. Rien d'autre ne quitte ce téléphone.`,
+      send: "Envoyer",
+      sending: (provider: string) => `Envoi à ${provider}…`,
+      chipHint: (provider: string) => `Envoie cette note à ${provider}.`,
+    },
     voiceKeyboard: {
       title: "Dicter dans toutes les apps",
       enable:
