@@ -142,8 +142,15 @@ describe("sync controller: turning on and joining", () => {
     const a = await w.phone();
     const b = await w.phone();
     await a.sync.turnOn();
+    const pairing = await a.sync.pairing();
+    assert.ok(pairing);
+    const root = parsePairingLink(pairing.link);
+    assert.equal(b.sync.joinOutcome(root), null, "off: it would join");
     await b.sync.turnOn();
+    assert.equal(b.sync.joinOutcome(root), "otherVaultOn");
+    assert.equal(a.sync.joinOutcome(root), "alreadyJoined");
     assert.equal(await pair(a, b), "otherVaultOn");
+    assert.equal(await a.sync.join(root), "alreadyJoined");
   });
 
   it("resumes after a restart with the saved key and state", async () => {
@@ -358,7 +365,9 @@ describe("sync controller: failures", () => {
     assert.equal(b.sync.view().problem, null);
     assert.equal(w.server.records(vaultId).length, 2);
     assert.equal(
-      [...a.notes.kv.data.keys()].some((key) => key.startsWith(SYNC_STATE_PREFIX)),
+      [...a.notes.kv.data.keys()].some((key) =>
+        key.startsWith(SYNC_STATE_PREFIX),
+      ),
       false,
       "the sync state is forgotten",
     );
@@ -431,7 +440,9 @@ describe("sync controller: local changes", () => {
     assert.equal(a.sync.view().status, "off");
     assert.equal(a.secrets.data.size, 0);
     assert.equal(
-      [...a.notes.kv.data.keys()].some((key) => key.startsWith(SYNC_STATE_PREFIX)),
+      [...a.notes.kv.data.keys()].some((key) =>
+        key.startsWith(SYNC_STATE_PREFIX),
+      ),
       false,
     );
     b.sync.setForeground(true);

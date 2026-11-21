@@ -45,3 +45,58 @@ export function confirm({
     );
   });
 }
+
+export interface ChooseOptions<T extends string> {
+  title: string;
+  message?: string | undefined;
+  /** One or two actions (Android shows three buttons at most, Cancel included). */
+  choices: readonly {
+    value: T;
+    label: string;
+    /** Shown as destructive (red on iOS). */
+    destructive?: boolean | undefined;
+  }[];
+  cancelLabel: string;
+}
+
+/**
+ * Asks the user to pick one action. Resolves its value, or null for
+ * Cancel, Android's back button or a tap outside the dialog. On web, each
+ * action is asked in turn with the browser's confirm.
+ */
+export function choose<T extends string>({
+  title,
+  message,
+  choices,
+  cancelLabel,
+}: ChooseOptions<T>): Promise<T | null> {
+  if (Platform.OS === "web") {
+    if (typeof window === "undefined" || typeof window.confirm !== "function") {
+      return Promise.resolve(null);
+    }
+    const intro = message ? `${title}\n\n${message}` : title;
+    for (const choice of choices) {
+      if (window.confirm(`${intro}\n\n${choice.label}?`)) {
+        return Promise.resolve(choice.value);
+      }
+    }
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    Alert.alert(
+      title,
+      message,
+      [
+        { text: cancelLabel, style: "cancel", onPress: () => resolve(null) },
+        ...choices.map((choice) => ({
+          text: choice.label,
+          style: choice.destructive
+            ? ("destructive" as const)
+            : ("default" as const),
+          onPress: () => resolve(choice.value),
+        })),
+      ],
+      { cancelable: true, onDismiss: () => resolve(null) },
+    );
+  });
+}

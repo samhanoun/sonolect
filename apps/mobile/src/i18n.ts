@@ -320,6 +320,7 @@ const en = {
     join: "Join with a code",
     codeLabel: "Sync code",
     codePlaceholder: "Paste or type the 56-character code",
+    codeNext: "Next",
     showCode: "Show sync code",
     hideCode: "Hide sync code",
     codeHelp:
@@ -331,6 +332,8 @@ const en = {
       "Your notes stay on this phone. Keep the server copy for your other devices, or delete it: they then stop syncing and keep their notes.",
     keepServerCopy: "Keep server copy",
     deleteServerCopy: "Delete server copy",
+    deleteFailed:
+      "The server copy could not be deleted. Check your connection and try again.",
     syncing: "Syncing…",
     never: "Not synced yet.",
     lastSync: (time: string) => `Last synced ${time}.`,
@@ -369,7 +372,6 @@ const en = {
     eraseThisPhone: "Erase this phone only",
     clearEverywhere: "They are deleted on your other devices too.",
     about: "Sonolect mobile · your notes sync end-to-end encrypted",
-    failedTitle: "Sync",
   },
   onboarding: {
     title: "Speak. Refine. Act.",
@@ -712,6 +714,7 @@ const fr: Strings = {
     join: "Rejoindre avec un code",
     codeLabel: "Code de synchronisation",
     codePlaceholder: "Collez ou saisissez le code de 56 caractères",
+    codeNext: "Suivant",
     showCode: "Afficher le code",
     hideCode: "Masquer le code",
     codeHelp:
@@ -723,6 +726,8 @@ const fr: Strings = {
       "Vos notes restent sur ce téléphone. Gardez la copie du serveur pour vos autres appareils, ou supprimez-la : ils arrêtent alors de synchroniser et gardent leurs notes.",
     keepServerCopy: "Garder la copie du serveur",
     deleteServerCopy: "Supprimer la copie du serveur",
+    deleteFailed:
+      "La copie du serveur n'a pas pu être supprimée. Vérifiez votre connexion et réessayez.",
     syncing: "Synchronisation…",
     never: "Pas encore synchronisé.",
     lastSync: (time: string) => `Dernière synchronisation : ${time}.`,
@@ -768,7 +773,6 @@ const fr: Strings = {
     clearEverywhere: "Elles sont aussi supprimées sur vos autres appareils.",
     about:
       "Sonolect mobile · vos notes se synchronisent chiffrées de bout en bout",
-    failedTitle: "Synchronisation",
   },
   onboarding: {
     title: "Parlez. Raffinez. Agissez.",

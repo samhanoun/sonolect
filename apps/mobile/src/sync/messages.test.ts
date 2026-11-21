@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { PairingError, parsePairing } from "@sonolect/sync-core";
+import { PairingError, SyncError, parsePairing } from "@sonolect/sync-core";
 
 import { STRINGS } from "../i18n";
 import type { SyncView } from "./controller";
-import { pairingErrorText, syncStatusLines } from "./messages";
+import { actionErrorText, pairingErrorText, syncStatusLines } from "./messages";
 
 const en = STRINGS.en;
 const on: SyncView = {
@@ -78,6 +78,27 @@ describe("sync messages", () => {
       pairingErrorText(en, new Error("other")),
       "This is not a Sonolect sync code.",
     );
+  });
+
+  it("says why turning on or joining failed", () => {
+    const text = (error: unknown) => actionErrorText(en, error);
+    assert.equal(
+      text(new SyncError("network", "offline")),
+      "Offline. Notes will sync when you're back online.",
+    );
+    assert.equal(
+      text(new SyncError("unauthorized", "refused", { status: 409 })),
+      "This sync key is not accepted by the server.",
+    );
+    assert.equal(
+      text(new SyncError("gone", "deleted", { code: "vault_deleted" })),
+      "This sync was deleted.",
+    );
+    assert.equal(
+      text(new SyncError("rateLimited", "slow down")),
+      "Sync is unavailable right now.",
+    );
+    assert.equal(text(new Error("keychain")), "Sync is unavailable right now.");
   });
 
   it("shows the last sync, a run in progress, or a pause", () => {

@@ -166,6 +166,7 @@ export default function LibraryScreen() {
             {API_FEATURES_ENABLED
               ? ` · ${t.library.sync[item.syncState]}`
               : null}
+            {item.conflictOf ? ` · ${t.library.conflictCopy}` : null}
           </Label>
         </View>
         <Text

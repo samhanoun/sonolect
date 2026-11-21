@@ -268,6 +268,15 @@ export class SyncController {
     });
   }
 
+  /** What joining with this key would answer now: null when it would join. */
+  joinOutcome(root: Uint8Array): Exclude<JoinResult, "joined"> | null {
+    const engine = this.engine;
+    if (!engine) return null;
+    return engine.vaultId === deriveVaultKeys(root).vaultId
+      ? "alreadyJoined"
+      : "otherVaultOn";
+  }
+
   /** The pairing link and code of this phone's vault, read from the key store. */
   async pairing(): Promise<Pairing | null> {
     const engine = this.engine;

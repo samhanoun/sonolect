@@ -1,4 +1,4 @@
-import { PairingError } from "@sonolect/sync-core";
+import { PairingError, isSyncError } from "@sonolect/sync-core";
 
 import type { Strings } from "../i18n";
 import type { SyncView } from "./controller";
@@ -45,4 +45,22 @@ export function syncStatusLines(
       ? t.sync.lastSync(formatTime(view.lastSyncAt))
       : t.sync.never;
   return { status, problem };
+}
+
+/** Why turning sync on or joining failed. */
+export function actionErrorText(t: Strings, error: unknown): string {
+  if (!isSyncError(error)) return t.sync.problems.server;
+  switch (error.kind) {
+    case "network":
+      return t.sync.problems.network;
+    case "unauthorized":
+      return t.sync.problems.unauthorized;
+    case "gone":
+      return t.sync.problems.deleted;
+    case "tooLarge":
+      return t.sync.problems.tooLarge;
+    default:
+      // server, rateLimited
+      return t.sync.problems.server;
+  }
 }
