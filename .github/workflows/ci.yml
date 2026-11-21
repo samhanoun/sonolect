@@ -296,6 +296,42 @@ jobs:
       - name: cargo test
         run: cargo test --locked
 
+      # The speaker model is pinned in src/speakers.rs (SPEAKER_MODEL); its URL
+      # and SHA-256 are read from there, so a mirror is a one-line change.
+      - name: Find the pinned speaker model
+        id: speaker-model
+        run: |
+          set -euo pipefail
+          url=$(sed -n 's/^ *url: "\(https:[^"]*\.onnx\)".*/\1/p' src/speakers.rs)
+          sha256=$(sed -n 's/^ *sha256: "\([0-9a-f]\{64\}\)".*/\1/p' src/speakers.rs)
+          # Exactly one of each.
+          [[ "$url" =~ ^https://[^[:space:]]+$ && "$sha256" =~ ^[0-9a-f]{64}$ ]]
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the speaker model
+        id: speaker-model-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/desktop/src-tauri/target/speaker-model/model.onnx
+          key: speaker-model-${{ runner.os }}-${{ steps.speaker-model.outputs.sha256 }}
+
+      - name: Download the speaker model
+        if: steps.speaker-model-cache.outputs.cache-hit != 'true'
+        env:
+          MODEL_URL: ${{ steps.speaker-model.outputs.url }}
+        run: curl -fL --retry 3 --create-dirs -o target/speaker-model/model.onnx "$MODEL_URL"
+
+      - name: Check the speaker model
+        env:
+          MODEL_SHA256: ${{ steps.speaker-model.outputs.sha256 }}
+        run: echo "$MODEL_SHA256  target/speaker-model/model.onnx" | sha256sum -c -
+
+      - name: cargo test with the speaker model
+        env:
+          SONOLECT_SPEAKER_MODEL: target/speaker-model/model.onnx
+        run: cargo test --locked -- --ignored speakers::tests::model_
+
   config-validation:
     name: Config validation
     runs-on: ubuntu-latest
@@ -374,6 +410,60 @@ jobs:
 
       - name: Build native installer bundle
         run: pnpm --filter @sonolect/desktop tauri build --bundles ${{ matrix.bundles }}
+
+      # Speaker detection on this platform: tract picks its SIMD code per CPU.
+      # The tests reuse the release build above instead of a separate job.
+      - name: Find the pinned speaker model
+        id: speaker-model
+        shell: bash
+        working-directory: apps/desktop/src-tauri
+        run: |
+          set -euo pipefail
+          url=$(sed -n 's/^ *url: "\(https:[^"]*\.onnx\)".*/\1/p' src/speakers.rs)
+          sha256=$(sed -n 's/^ *sha256: "\([0-9a-f]\{64\}\)".*/\1/p' src/speakers.rs)
+          # Exactly one of each.
+          [[ "$url" =~ ^https://[^[:space:]]+$ && "$sha256" =~ ^[0-9a-f]{64}$ ]]
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the speaker model
+        id: speaker-model-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/desktop/src-tauri/target/speaker-model/model.onnx
+          key: speaker-model-${{ runner.os }}-${{ steps.speaker-model.outputs.sha256 }}
+
+      - name: Download the speaker model
+        if: steps.speaker-model-cache.outputs.cache-hit != 'true'
+        shell: bash
+        working-directory: apps/desktop/src-tauri
+        env:
+          MODEL_URL: ${{ steps.speaker-model.outputs.url }}
+        run: curl -fL --retry 3 --create-dirs -o target/speaker-model/model.onnx "$MODEL_URL"
+
+      - name: Check the speaker model
+        shell: bash
+        working-directory: apps/desktop/src-tauri
+        env:
+          MODEL_SHA256: ${{ steps.speaker-model.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          # macOS has shasum but not always sha256sum.
+          if command -v sha256sum > /dev/null; then check="sha256sum -c -"; else check="shasum -a 256 -c -"; fi
+          echo "$MODEL_SHA256  target/speaker-model/model.onnx" | $check
+
+      - name: Test speaker detection
+        shell: bash
+        working-directory: apps/desktop/src-tauri
+        env:
+          SONOLECT_SPEAKER_MODEL: target/speaker-model/model.onnx
+        run: |
+          set -euo pipefail
+          # The profile, the feature and (on macOS) the deployment target of
+          # `tauri build`, so its compiled dependencies are reused.
+          if [ "$RUNNER_OS" = macOS ]; then export MACOSX_DEPLOYMENT_TARGET=10.15; fi
+          cargo test --release --locked --features tauri/custom-protocol -- \
+            --include-ignored --skip write_dialogue_fixture speakers:: fbank:: model_download::
 
       - name: Validate macOS bundle
         if: runner.os == 'macOS'
