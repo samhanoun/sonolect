@@ -4,7 +4,9 @@
 //! in memory whole:
 //!
 //! 1. The first pass measures the loudness of every 20 ms. Speech is what is
-//!    louder than the live chunker's pause level; pauses under 300 ms are
+//!    louder than the live chunker's pause level, taken relative to how loud
+//!    the speech is overall rather than to the loudest moment, so one bump of
+//!    the microphone cannot hide the quieter voices. Pauses under 300 ms are
 //!    bridged and blips under 200 ms dropped.
 //! 2. The second pass cuts the speech into 1.5 s windows every 0.75 s and
 //!    turns each window into a voice print: Kaldi filterbank features, then
@@ -99,6 +101,10 @@ const SHORTEST_TURN: usize = SAMPLE_RATE / 2;
 const MAX_THREADS: usize = 4;
 /// The share of the progress bar the first pass takes.
 const FIRST_PASS_PERCENT: u64 = 10;
+/// How loud the speech is: the level that this share of the frames above
+/// silence reach or pass. A few loud moments, up to that share, cannot move
+/// it.
+const SPEECH_LEVEL_SHARE: usize = 5;
 
 /// One stretch of speech by one speaker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -318,11 +324,31 @@ fn levels(
     Ok(levels)
 }
 
+/// How loud the speech in the recording is: the level that the loudest 5% of
+/// the frames above silence reach. The loudest frame itself would not do: one
+/// bump of the microphone, a cough into it or a door would raise the bar for
+/// the whole recording, and a quieter voice would no longer count as speech.
+fn speech_level(levels: &[f32]) -> f32 {
+    // Under the pause level's floor, a frame is silence however quiet the
+    // recording is.
+    let floor = streaming::quiet_level(0.0);
+    let mut heard: Vec<f32> = levels
+        .iter()
+        .copied()
+        .filter(|level| *level >= floor)
+        .collect();
+    if heard.is_empty() {
+        return 0.0;
+    }
+    let rank = (heard.len() - 1) * (100 - SPEECH_LEVEL_SHARE) / 100;
+    *heard.select_nth_unstable_by(rank, f32::total_cmp).1
+}
+
 /// Where the speech is, in samples: frames at least as loud as the live
-/// chunker's pause level, with short pauses bridged and short blips dropped.
+/// chunker's pause level, worked out from the speech level of the whole
+/// recording, with short pauses bridged and short blips dropped.
 fn speech_regions(levels: &[f32]) -> Vec<(usize, usize)> {
-    let loudest = levels.iter().copied().fold(0.0, f32::max);
-    let quiet = streaming::quiet_level(loudest);
+    let quiet = streaming::quiet_level(speech_level(levels));
     let mut regions: Vec<(usize, usize)> = Vec::new();
     let mut frame = 0;
     while frame < levels.len() {
@@ -1073,6 +1099,33 @@ mod tests {
             .all(|(s, e)| s % LEVEL_FRAME == 0 && e % LEVEL_FRAME == 0));
         // Silence has no speech at all.
         assert!(speech_regions(&streaming::frame_levels(&silence(3.0))).is_empty());
+    }
+
+    #[test]
+    fn one_loud_click_does_not_hide_quiet_speech() {
+        // Seven seconds of quiet speech, peaking at 1000 (about -33 dBFS)...
+        let mut audio = silence(1.0);
+        audio.extend(voice(7.0, 220.0).iter().map(|sample| sample / 9));
+        audio.extend(silence(2.0));
+        let speech = |audio: &[i16]| -> f32 {
+            let regions = speech_regions(&streaming::frame_levels(audio));
+            seconds(regions.iter().map(|(start, end)| end - start).sum())
+        };
+        assert!((speech(&audio) - 7.0).abs() < 0.05, "{}", speech(&audio));
+        // ...and one full-scale 20 ms click in the pause after it, as a bump
+        // of the microphone would be. The speech is still all found.
+        let at = 9 * SAMPLE_RATE;
+        for (index, sample) in audio[at..at + LEVEL_FRAME].iter_mut().enumerate() {
+            *sample = if index % 2 == 0 { i16::MAX } else { i16::MIN };
+        }
+        assert!(streaming::frame_levels(&audio)[at / LEVEL_FRAME] > 32_000.0);
+        assert!((speech(&audio) - 7.0).abs() < 0.05, "{}", speech(&audio));
+        // A few of them do not either.
+        for second in [0, 8] {
+            let at = second * SAMPLE_RATE + SAMPLE_RATE / 2;
+            audio[at..at + LEVEL_FRAME].fill(i16::MAX);
+        }
+        assert!((speech(&audio) - 7.0).abs() < 0.05, "{}", speech(&audio));
     }
 
     #[test]
