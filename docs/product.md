@@ -62,7 +62,15 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 - **No telemetry by default** — opt-in analytics only
 - Configurable audio retention (auto-delete after N days or manual purge)
 - One-click "Delete all my data" action
-- All processing local unless cloud sync is explicitly enabled
+- All processing local. Note sync, when the user turns it on, sends only end-to-end encrypted notes
+
+### Sync Between Your Devices
+
+- Notes sync between the user's own computers and phones, **end-to-end encrypted**: the server stores them but cannot read them. There is no account: a random key is created on the first device and given to the others by QR code or a 56-character code. Whoever holds the code can read every note, so every screen that shows or accepts it says so.
+- Notes only. Recordings stay on the device that made them, so a synced note may have no audio.
+- Off until the user turns it on. Turning it off keeps the notes and either keeps the server copy for the other devices or deletes it. **Delete all my data** also forgets the sync key, and offers to delete the server copy first.
+- Local retention (auto-delete after N days) stays local: it never deletes a note on the other devices, and a device does not bring in notes older than its own retention window. Deleting a note by hand deletes it everywhere.
+- **Status: built, hidden until hosted.** Both apps contain sync, but show none of it, and make no sync request, unless the build names a sync server. The server runs on Google Cloud (Cloud Run and Firestore); [sync-setup.md](sync-setup.md) is the owner's runbook, and [security.md](security.md#note-sync) the threat model.
 
 ### Export
 
@@ -90,7 +98,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 
 - Zero network calls on first launch
 - Audio and transcript data stored in user-local directories with OS-level permissions
-- Future cloud sync uses end-to-end encryption; server cannot read content
+- Note sync is end-to-end encrypted: the server cannot read content, and sees only ciphertext, sizes, times, IP addresses and opaque ids
 
 ### Reliability
 
@@ -105,7 +113,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 - **Frontend**: Vite, React 18, Zustand, TailwindCSS
 - **Backend services** (Phase 3+): Fastify on Cloud Run
 - **Infrastructure**: Terraform → GCP (Firestore, Cloud SQL, Cloud Storage, Pub/Sub)
-- **Shared packages**: `@sonolect/types`, `@sonolect/validation`, `@sonolect/config`, `@sonolect/sdk`, `@sonolect/ui`
+- **Shared packages**: `@sonolect/types`, `@sonolect/validation`, `@sonolect/config`, `@sonolect/sdk`, `@sonolect/sync-core`, `@sonolect/ui`
 
 ---
 
@@ -121,7 +129,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 | **Open architecture**  | Monorepo, pluggable STT engines    | Proprietary        | Proprietary    | Proprietary                          |
 | **Price**              | Free local tier; paid cloud add-on | Subscription       | Subscription   | Free (Apple only)                    |
 
-**Key differentiator:** Sonolect is the only tool that combines **production-grade transcription editing** with **complete offline operation** and **zero-trust privacy defaults** — no account required, no data leaves the device.
+**Key differentiator:** Sonolect is the only tool that combines **production-grade transcription editing** with **complete offline operation** and **zero-trust privacy defaults** — no account required, and nothing leaves the device unless the user turns on a cloud feature, such as end-to-end encrypted sync.
 
 ---
 

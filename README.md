@@ -81,6 +81,10 @@ pnpm --filter @sonolect/desktop tauri dev
 
 Supported placeholders: `{audioPath}`, `{mimeType}`, `{language}`, `{durationMs}`. The settings helper also accepts `{audio}` and `{model}` while building previews, but the native bridge currently expands `{audioPath}` for the recorded temp file. If the desktop command is unavailable, the app falls back to the configured local API path and then to offline retention.
 
+### Note sync
+
+Notes sync between a user's devices end-to-end encrypted, with no account: a random key shared by QR code or a typed code (`packages/sync-core`, `services/sync-service`). Both apps hide sync unless their build sets the sync server: `SONOLECT_SYNC_URL` for desktop, `EXPO_PUBLIC_SONOLECT_SYNC_URL` for mobile. [LOCAL-BUILD.md](LOCAL-BUILD.md#note-sync-against-a-local-server) runs it locally, and [docs/sync-setup.md](docs/sync-setup.md) hosts it on Cloud Run with `infra/terraform/sync`.
+
 ## Security Baseline
 
 Never log audio, full transcripts, selected text, private generated responses, tokens, API keys, payment data, signed URLs, or prompts containing sensitive user data.

@@ -423,13 +423,21 @@ jobs:
         with:
           terraform_version: 1.7.5
 
+      # Covers every directory below infra/terraform, the sync root included.
       - name: Terraform fmt
         run: terraform fmt -check -recursive
 
+      # Two standalone roots: the full platform (.) and the sync service
+      # alone (sync).
       - name: Terraform validate
         run: |
-          terraform init -backend=false -input=false
-          terraform validate -no-color
+          set -euo pipefail
+          for root in . sync; do
+            echo "::group::terraform validate infra/terraform/${root}"
+            terraform -chdir="${root}" init -backend=false -input=false
+            terraform -chdir="${root}" validate -no-color
+            echo "::endgroup::"
+          done
 
   service-images:
     name: Service image (${{ matrix.service }})

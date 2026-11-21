@@ -29,6 +29,12 @@ The jobs then perform installer sanity checks:
 
 Linux `.deb` and `.AppImage` are already covered by the existing desktop Tauri build path.
 
+## Note sync in release builds
+
+Sync is compiled in but hidden unless the build sets `SONOLECT_SYNC_URL`, the `https://` URL of the hosted sync server ([sync-setup.md](sync-setup.md)). Both the webview build (`apps/desktop/vite.config.ts`) and the Rust build (`option_env!` in `apps/desktop/src-tauri/src/sync.rs`) read it at build time, so set it in the environment of the whole `tauri build`. A release build ignores a URL that is not https and then has no sync. The URL is public, so a repository variable is enough: to ship sync from CI, add `SONOLECT_SYNC_URL: ${{ vars.SONOLECT_SYNC_URL }}` to the `env` of the release job. Today's `Release package validation` job builds without it, so its packages have no sync.
+
+The phone reads `EXPO_PUBLIC_SONOLECT_SYNC_URL` instead; see [mobile-release.md](mobile-release.md). All devices that should sync together need builds with the same server.
+
 ## Optional signing and updater readiness
 
 No secret is required for pull requests. PR package validation remains unsigned and the `Release readiness dry-run validation` step runs `pnpm release:dry-run` without exporting signing secrets. For signed release builds, define secrets only on protected environments/branches:
@@ -70,6 +76,7 @@ Before publishing a release:
 5. Confirm the voice capture button requests microphone permission and handles denial gracefully.
 6. If a local Whisper command is configured, record a short clip and confirm a local transcript is produced.
 7. If backend API is configured, confirm an audio job is created and the binary upload completes.
-8. Confirm app version shown by the installer/artifact matches the release tag.
-9. For signed releases, verify platform signature/notarization status before publication.
-10. For updater-enabled releases, publish update metadata only after installer smoke tests pass.
+8. Sync: in a build with `SONOLECT_SYNC_URL`, Settings shows **Sync between devices**; turn sync on, pair a second device with the code and confirm that a note, an edit and a delete reach it ([sync-setup.md](sync-setup.md#10-pair-two-devices)). In a build without it, Settings shows no sync section.
+9. Confirm app version shown by the installer/artifact matches the release tag.
+10. For signed releases, verify platform signature/notarization status before publication.
+11. For updater-enabled releases, publish update metadata only after installer smoke tests pass.
