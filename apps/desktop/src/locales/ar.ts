@@ -216,4 +216,76 @@ export const ar: Partial<Record<LocaleKeys, string>> = {
   "audio.recentCapture": "تسجيل حديث",
   "audio.playPause": "تشغيل أو إيقاف الصوت",
   "audio.waveform": "شكل الموجة الصوتية",
+
+  // Note sync between devices
+  "studio.sync.title": "المزامنة بين الأجهزة",
+  "studio.sync.subtitle":
+    "ملاحظاتك على كل أجهزتك، مشفّرة من طرف إلى طرف: يحتفظ بها خادم المزامنة لكنه لا يستطيع قراءتها.",
+  "studio.sync.server": "خادم المزامنة: {server}",
+  "studio.sync.audioStays":
+    "تبقى التسجيلات على الجهاز الذي سجّلها. تُزامَن الملاحظات فقط.",
+  "studio.sync.offState": "المزامنة متوقفة.",
+  "studio.sync.onState": "المزامنة مفعّلة.",
+  "studio.sync.turnOn": "تفعيل المزامنة",
+  "studio.sync.turningOn": "جارٍ التفعيل…",
+  "studio.sync.join": "الانضمام برمز",
+  "studio.sync.joinLabel": "رمز المزامنة أو رابطها من جهازك الآخر",
+  "studio.sync.joinSubmit": "انضمام",
+  "studio.sync.joining": "جارٍ الانضمام…",
+  "studio.sync.cancel": "إلغاء",
+  "studio.sync.warning": "الانضمام يشارك كل ملاحظة مع كل من يملك هذا الرمز.",
+  "studio.sync.lastSync": "آخر مزامنة: {time}.",
+  "studio.sync.neverSynced": "لم تتم المزامنة بعد.",
+  "studio.sync.syncing": "جارٍ المزامنة…",
+  "studio.sync.syncNow": "زامِن الآن",
+  "studio.sync.showCode": "إظهار الرمز",
+  "studio.sync.hideCode": "إخفاء الرمز",
+  "studio.sync.codeHint":
+    "على جهازك الآخر، اختر الانضمام إلى المزامنة، ثم امسح رمز QR هذا أو اكتب الرمز.",
+  "studio.sync.codeLabel": "رمز المزامنة",
+  "studio.sync.qrLabel": "رمز QR للانضمام إلى هذه المزامنة",
+  "studio.sync.turnOff": "إيقاف المزامنة",
+  "studio.sync.turnOffQuestion": "هل تريد إيقاف المزامنة على هذا الجهاز؟",
+  "studio.sync.keepServer": "الاحتفاظ بنسخة الخادم",
+  "studio.sync.keepServerHint":
+    "تواصل أجهزتك الأخرى المزامنة. ويمكن لهذا الجهاز الانضمام مجددًا بالرمز.",
+  "studio.sync.deleteServer": "حذف نسخة الخادم",
+  "studio.sync.deleteServerHint":
+    "سترى أجهزتك الأخرى «تم حذف هذه المزامنة» وستوقف المزامنة. يحتفظ كل جهاز بملاحظاته.",
+  "studio.sync.turningOff": "جارٍ الإيقاف…",
+  "studio.sync.notesKept": "تبقى ملاحظاتك على هذا الجهاز.",
+  "studio.sync.error.unauthorized": "لا يقبل الخادم مفتاح المزامنة هذا.",
+  "studio.sync.error.deleted": "تم حذف هذه المزامنة.",
+  "studio.sync.error.tooLarge": "إحدى الملاحظات أكبر من أن تُزامَن.",
+  "studio.sync.error.server": "المزامنة غير متاحة حاليًا.",
+  "studio.sync.error.offline":
+    "غير متصل. ستُزامَن الملاحظات عند عودتك إلى الاتصال.",
+  "studio.sync.notice.quota":
+    "مساحة المزامنة ممتلئة. احذف بعض الملاحظات لمزامنة الجديدة.",
+  "studio.sync.notice.newerSchema": "حدّث Sonolect لمزامنة كل الملاحظات.",
+  "studio.sync.pairing.invalid": "هذا ليس رمز مزامنة من Sonolect.",
+  "studio.sync.pairing.version": "حدّث Sonolect لاستخدام هذا الرمز.",
+  "studio.sync.pairing.length": "تحقّق من الرمز: يتكوّن من 56 حرفًا.",
+  "studio.sync.pairing.typo": "أحد الأحرف خاطئ.",
+  "studio.sync.preview": "تعمل المزامنة في التطبيق المثبّت.",
+  "studio.sync.deleteAllHint": "تتوقف المزامنة على هذا الجهاز أيضًا.",
+  "studio.sync.deleteAllServer":
+    "المزامنة مفعّلة. هل تريد أيضًا حذف نسخة ملاحظاتك على الخادم؟ «موافق» يحذفها: ستوقف أجهزتك الأخرى المزامنة وتحتفظ بملاحظاتها. «إلغاء» يُبقيها لها.",
+  "studio.privacy.problemSync": "المزامنة: {reason}",
+  "studio.library.synced": "متزامنة",
+  "studio.library.noAudio": "يبقى التسجيل على الجهاز الذي سجّله.",
+  "studio.library.conflictOf": "نسخة تعارض من ملاحظة {date}",
+  "studio.library.conflictCopy": "نسخة تعارض",
+  "native.syncNotAvailable": "المزامنة غير متاحة في هذا الإصدار من Sonolect.",
+  "native.syncKeychainLinux":
+    "المزامنة غير متاحة على هذا النظام: فهي تحفظ مفتاحها في سلسلة مفاتيح (Secret Service، مثل GNOME Keyring أو KWallet)، ولا تعمل أي واحدة منها.",
+  "native.syncKeychainUnavailable":
+    "المزامنة غير متاحة على هذا النظام: تعذّر فتح سلسلة المفاتيح.",
+  "native.syncKeychainFailed":
+    "تعذّرت قراءة مفتاح المزامنة أو حفظه في سلسلة المفاتيح.",
+  "native.syncInvalidKey": "هذا ليس مفتاح مزامنة صالحًا.",
+  "native.syncKeyExists": "المزامنة مفعّلة بالفعل بمفتاح آخر. أوقفها أولًا.",
+  "native.syncStateFailed": "تعذّر حفظ حالة المزامنة.",
+  "native.syncInterrupted": "انقطعت المزامنة.",
+  "native.syncInvalidNote": "ملاحظة متزامنة غير صالحة.",
 };

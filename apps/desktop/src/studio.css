@@ -1203,3 +1203,86 @@ body {
   background: #43663a;
   transition: width 80ms linear;
 }
+.studio-card.studio-sync {
+  margin: 20px 0;
+}
+.studio-sync-state {
+  font-size: 13px;
+  margin-top: 4px;
+}
+.studio-sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.studio-sync-join {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+  max-width: 560px;
+}
+.studio-sync-join input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.02em;
+}
+.studio-sync-warning {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a5a12;
+  margin-top: 8px;
+}
+.studio-sync-problem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.studio-sync-code {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 18px;
+  margin-top: 16px;
+}
+.studio-sync-qr {
+  width: 176px;
+  height: 176px;
+  flex: none;
+  border-radius: 6px;
+  border: 1px solid #e1e6d4;
+}
+.studio-sync-code > div {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.studio-sync-code-text {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+.studio-sync-code-text code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.studio-sync-off {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid #e1e6d4;
+  border-radius: 8px;
+}
+.studio-sync-choice p {
+  margin-top: 4px !important;
+}
+.studio-library-title {
+  font-size: 15px;
+  margin-top: 12px;
+}

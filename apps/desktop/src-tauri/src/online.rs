@@ -124,11 +124,17 @@ fn parse_models(provider: &str, payload: &Value) -> Result<Vec<ProviderModel>, S
         })
         .collect())
 }
-fn client() -> Result<reqwest::blocking::Client, String> {
+/// The HTTP client of every online request (model providers and sync): it
+/// never follows a redirect, which could carry a key or a recording to
+/// another host, and gives up after `timeout`.
+pub(crate) fn http_client(timeout: Duration) -> reqwest::Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(90))
+        .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none())
         .build()
+}
+fn client() -> Result<reqwest::blocking::Client, String> {
+    http_client(Duration::from_secs(90))
         .map_err(|_| "Could not initialize the provider connection.".into())
 }
 fn response_bytes(response: reqwest::blocking::Response) -> Result<Vec<u8>, String> {

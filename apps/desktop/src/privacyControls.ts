@@ -86,12 +86,26 @@ export type DeleteAllResult = {
  * Deletes everything Sonolect keeps about the user on this device: recordings
  * and transcripts, saved API keys, the dictionary, snippets, drafts and
  * preferences. Downloaded speech models are not personal data and are kept.
+ * In a build with sync, `forgetSync` forgets the sync key and the sync state
+ * first, so that nothing syncs to or from this device again.
  */
 export async function deleteAllLocalData(
   call: NativeCall,
   storage: StorageLike | undefined = browserStorage(),
+  options: { forgetSync?: () => Promise<void> } = {},
 ): Promise<DeleteAllResult> {
   const problems: string[] = [];
+  if (options.forgetSync) {
+    try {
+      await options.forgetSync();
+    } catch (error) {
+      problems.push(
+        getT()("studio.privacy.problemSync", {
+          reason: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  }
   let recordingsRemoved = 0;
   try {
     recordingsRemoved = await call<number>("purge_local_captures", {

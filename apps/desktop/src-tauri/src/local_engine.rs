@@ -314,7 +314,7 @@ fn run(
             start_ms: segment.start_timestamp().max(0) as u64 * 10,
             end_ms: segment.end_timestamp().max(0) as u64 * 10,
             text,
-            speaker: None,
+            ..Default::default()
         });
     }
     let text = segments
