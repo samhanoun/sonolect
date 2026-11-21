@@ -1586,7 +1586,7 @@ function PrivacyControls() {
             ))}
           </select>
         </label>
-        <label>
+        <label className="studio-storage-format">
           {t("studio.storage.format")}
           <select
             value={format}
