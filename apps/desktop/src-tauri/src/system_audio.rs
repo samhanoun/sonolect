@@ -6,7 +6,9 @@
 //! monitor of the default output (`parec`), on macOS from a BlackHole device
 //! (`ffmpeg`). The audio goes straight into the recording and never passes
 //! through the webview. The window chooses no path and no device, and only
-//! the recorder this app started is ever stopped.
+//! the recorder this app started is ever stopped. A high-quality recording
+//! asks the recorder for 48 kHz stereo instead of 16 kHz mono; on Windows the
+//! device's own format is kept either way and the recording converts it.
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -21,7 +23,8 @@ use tauri::Emitter;
 
 use super::{
     audio_feed::{self, Source},
-    streaming,
+    resample::{PcmFormat, HIGH_RATE},
+    streaming::{self, Quality},
 };
 
 /// Ends a source from outside its thread (a recorder process is told to quit).
@@ -108,9 +111,64 @@ fn available() -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn open(closing: &Arc<AtomicBool>) -> Result<(Box<dyn Source>, Option<Closer>), String> {
+fn open(
+    closing: &Arc<AtomicBool>,
+    _quality: Quality,
+) -> Result<(Box<dyn Source>, Option<Closer>), String> {
+    // The device's own format either way: the recording converts it.
     let source = super::system_loopback::open(Arc::clone(closing))?;
     Ok((Box::new(source), None))
+}
+
+/// What a recorder process is asked for: what the speech engine works with,
+/// or 48 kHz stereo for a high-quality copy.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
+fn recorder_format(quality: Quality) -> PcmFormat {
+    match quality {
+        Quality::Speech => PcmFormat::SPEECH,
+        Quality::High => PcmFormat {
+            rate: HIGH_RATE,
+            channels: 2,
+        },
+    }
+}
+
+/// The arguments of `parec` for recording `device` in `format`.
+#[cfg(any(test, target_os = "linux"))]
+fn parec_arguments(device: &str, format: PcmFormat) -> Vec<String> {
+    vec![
+        format!("--device={device}"),
+        "--raw".into(),
+        "--format=s16le".into(),
+        format!("--rate={}", format.rate),
+        format!("--channels={}", format.channels),
+    ]
+}
+
+/// The arguments of `ffmpeg` for recording BlackHole in `format`.
+#[cfg(any(test, target_os = "macos"))]
+fn ffmpeg_arguments(format: PcmFormat) -> Vec<String> {
+    [
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-f",
+        "avfoundation",
+        "-i",
+        ":BlackHole 2ch",
+        "-f",
+        "s16le",
+        "-acodec",
+        "pcm_s16le",
+        "-ar",
+        &format.rate.to_string(),
+        "-ac",
+        &format.channels.to_string(),
+        "-",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect()
 }
 
 /// The monitor of the default output: what is playing through it.
@@ -144,39 +202,28 @@ fn monitor_source() -> Result<String, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn recorder() -> Result<std::process::Command, String> {
+fn recorder(format: PcmFormat) -> Result<std::process::Command, String> {
     let mut command = std::process::Command::new("parec");
-    command
-        .arg(format!("--device={}", monitor_source()?))
-        .args(["--raw", "--format=s16le", "--rate=16000", "--channels=1"]);
+    command.args(parec_arguments(&monitor_source()?, format));
     Ok(command)
 }
 
 #[cfg(target_os = "macos")]
-fn recorder() -> Result<std::process::Command, String> {
+fn recorder(format: PcmFormat) -> Result<std::process::Command, String> {
     let mut command =
         std::process::Command::new(ffmpeg().ok_or("ffmpeg is needed to record system audio.")?);
-    command
-        .args(["-nostdin", "-loglevel", "error"])
-        .args(["-f", "avfoundation", "-i", ":BlackHole 2ch"])
-        .args([
-            "-f",
-            "s16le",
-            "-acodec",
-            "pcm_s16le",
-            "-ar",
-            "16000",
-            "-ac",
-            "1",
-            "-",
-        ]);
+    command.args(ffmpeg_arguments(format));
     Ok(command)
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn open(_closing: &Arc<AtomicBool>) -> Result<(Box<dyn Source>, Option<Closer>), String> {
+fn open(
+    _closing: &Arc<AtomicBool>,
+    quality: Quality,
+) -> Result<(Box<dyn Source>, Option<Closer>), String> {
     use std::process::Stdio;
-    let mut child = recorder()?
+    let format = recorder_format(quality);
+    let mut child = recorder(format)?
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -188,7 +235,7 @@ fn open(_closing: &Arc<AtomicBool>) -> Result<(Box<dyn Source>, Option<Closer>),
         return Err("Cannot read the system audio recorder.".into());
     };
     Ok((
-        Box::new(audio_feed::Piped::new(output)),
+        Box::new(audio_feed::Piped::new(output, format)),
         Some(Box::new(move || quit(child))),
     ))
 }
@@ -218,7 +265,10 @@ fn quit(mut child: std::process::Child) {
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
-fn open(_closing: &Arc<AtomicBool>) -> Result<(Box<dyn Source>, Option<Closer>), String> {
+fn open(
+    _closing: &Arc<AtomicBool>,
+    _quality: Quality,
+) -> Result<(Box<dyn Source>, Option<Closer>), String> {
     Err("System audio capture is not available on this platform.".into())
 }
 
@@ -237,9 +287,10 @@ fn ended_message(ended: Option<String>, asked: bool) -> Option<String> {
 /// `stop_system_audio_capture` or the end of the recording.
 #[tauri::command(async)]
 pub fn start_system_audio_capture(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    if streaming::live_id().as_deref() != Some(id.as_str()) {
+    // The recording says how it is kept: the window passes nothing more.
+    let Some(quality) = streaming::live_quality(&id) else {
         return Err(streaming::NOT_IN_PROGRESS.into());
-    }
+    };
     // A feed left over from a recording that was never stopped.
     stop();
     let closing = Arc::new(AtomicBool::new(false));
@@ -251,7 +302,7 @@ pub fn start_system_audio_capture(app: tauri::AppHandle, id: String) -> Result<(
             move || {
                 // Opened on this thread: a WASAPI stream stays on the thread
                 // that made it.
-                let mut source = match open(&closing) {
+                let mut source = match open(&closing, quality) {
                     Ok((source, close)) => {
                         if let Err(mpsc::SendError(unsent)) = opened.send(Ok(close)) {
                             // Nobody is waiting any more: end what was opened.
@@ -269,11 +320,12 @@ pub fn start_system_audio_capture(app: tauri::AppHandle, id: String) -> Result<(
                 };
                 let started = Instant::now();
                 let mut level_sent = Instant::now();
+                let format = source.format();
                 let ended = audio_feed::pump(
                     source.as_mut(),
                     || started.elapsed(),
                     |samples| {
-                        streaming::append_live(&id, samples)?;
+                        streaming::append_live(&id, format, samples)?;
                         if level_sent.elapsed() >= LEVEL_EVERY {
                             level_sent = Instant::now();
                             let _ = app.emit("system-audio-level", audio_feed::peak(samples));
@@ -356,6 +408,55 @@ mod tests {
         );
     }
 
+    #[test]
+    fn asks_the_recorder_for_the_recording_quality() {
+        assert_eq!(recorder_format(Quality::Speech), PcmFormat::SPEECH);
+        let high = recorder_format(Quality::High);
+        assert_eq!((high.rate, high.channels), (48_000, 2));
+        assert_eq!(
+            parec_arguments("alsa_output.pci.monitor", PcmFormat::SPEECH),
+            [
+                "--device=alsa_output.pci.monitor",
+                "--raw",
+                "--format=s16le",
+                "--rate=16000",
+                "--channels=1"
+            ]
+        );
+        assert_eq!(
+            parec_arguments("x.monitor", high)[3..],
+            ["--rate=48000", "--channels=2"]
+        );
+        let speech = ffmpeg_arguments(PcmFormat::SPEECH);
+        assert_eq!(
+            speech[..7],
+            [
+                "-nostdin",
+                "-loglevel",
+                "error",
+                "-f",
+                "avfoundation",
+                "-i",
+                ":BlackHole 2ch"
+            ]
+        );
+        assert_eq!(
+            speech[7..],
+            [
+                "-f",
+                "s16le",
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                "-"
+            ]
+        );
+        assert_eq!(ffmpeg_arguments(high)[11..15], ["-ar", "48000", "-ac", "2"]);
+    }
+
     /// The recorder is a real process here: a shell that writes samples and
     /// then waits, as `parec` does, until it is told to quit.
     #[cfg(target_os = "linux")]
@@ -371,7 +472,7 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = child.id();
-        let mut source = audio_feed::Piped::new(child.stdout.take().unwrap());
+        let mut source = audio_feed::Piped::new(child.stdout.take().unwrap(), PcmFormat::SPEECH);
         let mut read = Vec::new();
         while read.len() < 3 {
             match source.next() {

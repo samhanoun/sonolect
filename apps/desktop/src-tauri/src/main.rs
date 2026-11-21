@@ -14,6 +14,7 @@ mod local_engine;
 mod local_history;
 mod model_download;
 mod online;
+mod resample;
 mod speakers;
 mod streaming;
 mod sync;

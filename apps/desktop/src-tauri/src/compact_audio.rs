@@ -1,7 +1,9 @@
 //! Saved recordings as Ogg Opus: about a tenth of the size of WAV.
 //!
 //! A recording is always made as WAV, which survives a crash mid-recording.
-//! Once it is finished it can be compressed to `{id}.opus`. Everything that
+//! Once it is finished it can be compressed to `{id}.opus`. A high-quality
+//! recording writes its own 48 kHz Opus copy while it is made
+//! (`{id}.hq.opus`), which becomes `{id}.opus` when it ends. Everything that
 //! transcribes a recording decodes it back to the same 16 kHz mono samples,
 //! and playback can take the Opus file as it is.
 use std::{
@@ -558,6 +560,16 @@ pub fn read_for_playback(directory: &Path, id: &str, prefer_ogg: bool) -> Result
     }
 }
 
+/// A recording's audio as it is kept, to be saved elsewhere: its Opus file
+/// when it has one (a high-quality one, say), otherwise its WAV with every
+/// sample counted.
+pub fn read_saved_file(directory: &Path, id: &str) -> Result<Vec<u8>, String> {
+    if let Ok(bytes) = fs::read(directory.join(format!("{id}.opus"))) {
+        return Ok(bytes);
+    }
+    read_for_playback(directory, id, true)
+}
+
 fn compressed_for_playback(path: &Path, prefer_ogg: bool) -> Result<Vec<u8>, String> {
     if prefer_ogg {
         fs::read(path).map_err(|_| GONE.into())
@@ -584,8 +596,11 @@ fn decoded_wav(path: &Path) -> Result<Vec<u8>, String> {
 /// A recording that already has its Opus file is never encoded again: that
 /// file can hold more than the WAV (a high-quality copy, say), and the WAV
 /// is only what an interruption left behind. The WAV is removed once the
-/// Opus file is known to hold all of its audio, and kept otherwise.
+/// Opus file is known to hold all of its audio, and kept otherwise. A
+/// high-quality copy that a crash left beside the WAV becomes the Opus file
+/// first (see `promote`).
 pub fn compress(directory: &Path, id: &str) -> Result<u64, String> {
+    promote(directory, id)?;
     let wav = directory.join(format!("{id}.wav"));
     if !wav.is_file() {
         return Ok(0);
@@ -640,6 +655,28 @@ pub fn compress(directory: &Path, id: &str) -> Result<u64, String> {
     Ok(before.saturating_sub(after))
 }
 
+/// Takes up the high-quality copy (`{id}.hq.opus`) of a recording that was
+/// cut off before it ended, by a crash or a reload: the copy becomes the
+/// recording's Opus file, unless it has one already. `compress` then keeps
+/// the WAV unless the copy holds all of its audio. A copy without any audio
+/// in it (the app stopped before its first page) is removed while the WAV
+/// has the recording. A recording in progress is left alone.
+fn promote(directory: &Path, id: &str) -> Result<(), String> {
+    let high = directory.join(format!("{id}.hq.opus"));
+    let opus = directory.join(format!("{id}.opus"));
+    if held(id) || !high.is_file() || opus.exists() {
+        return Ok(());
+    }
+    let holds_audio = open(&high).is_ok_and(|mut samples| matches!(samples.next(), Some(Ok(_))));
+    if holds_audio {
+        fs::rename(&high, &opus).map_err(io_error)
+    } else if directory.join(format!("{id}.wav")).is_file() {
+        fs::remove_file(&high).map_err(io_error)
+    } else {
+        Ok(())
+    }
+}
+
 /// What compressing the saved recordings did.
 #[derive(Debug, Default, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -685,25 +722,35 @@ pub fn held(id: &str) -> bool {
         .any(|held| held == id)
 }
 
-/// Compresses every finished recording that is still a WAV.
+/// Compresses every finished recording that is still a WAV, and takes up
+/// the high-quality copies that recordings cut off before they ended left.
 pub fn compress_all(directory: &Path) -> Result<Compressed, String> {
     let _one_at_a_time = COMPRESSING
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut done = Compressed::default();
+    let mut ids = Vec::new();
     for entry in fs::read_dir(directory).map_err(|e| e.to_string())? {
-        let path = entry.map_err(|e| e.to_string())?.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("wav") {
+        let name = entry.map_err(|e| e.to_string())?.file_name();
+        let Some(name) = name.to_str() else {
             continue;
-        }
-        let Some(id) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        };
+        let Some(id) = name
+            .strip_suffix(".wav")
+            .or_else(|| name.strip_suffix(".hq.opus"))
+        else {
             continue;
         };
         // Only the app's own recordings: system-audio files keep their format.
         if id.is_empty() || !id.chars().all(|c| c.is_ascii_digit() || c == '-') || held(id) {
             continue;
         }
-        match compress(directory, id) {
+        ids.push(id.to_owned());
+    }
+    ids.sort();
+    ids.dedup();
+    for id in ids {
+        match compress(directory, &id) {
             Ok(0) => {}
             Ok(freed) => {
                 done.recordings += 1;
@@ -1372,6 +1419,111 @@ mod tests {
         // In a pass over every recording, it counts as not compressed.
         let done = compress_all(folder.path()).unwrap();
         assert_eq!((done.recordings, done.failed), (0, 1));
+    }
+
+    /// A high-quality copy of `frames` frames of 48 kHz stereo, as a
+    /// recording writes it. Unless `ended`, the stream is left as a crash
+    /// leaves it: up to its last whole page.
+    fn high_copy(path: &Path, frames: usize, ended: bool) {
+        let mut writer =
+            OpusWriter::create(path, 48_000, 2, 96_000, opus::Application::Audio).unwrap();
+        for piece in sweeps(48_000, 2, frames).chunks(48_000) {
+            writer.write(piece).unwrap();
+        }
+        if ended {
+            writer.finish().unwrap();
+        }
+    }
+
+    fn channels_of(path: &Path) -> u8 {
+        fs::read(path).unwrap()[28 + 9]
+    }
+
+    #[test]
+    fn a_high_quality_copy_left_by_a_crash_becomes_the_recording() {
+        let folder = tempfile::tempdir().unwrap();
+        let dir = folder.path();
+        let wav = crate::streaming::wav_bytes(&sweeps(16_000, 1, 16_000 * 3));
+
+        // Complete, as a reload leaves it: it takes the WAV's place.
+        high_copy(&dir.join("781-1.hq.opus"), 48_000 * 3, true);
+        fs::write(dir.join("781-1.wav"), &wav).unwrap();
+        assert_eq!(compress(dir, "781-1").unwrap(), wav.len() as u64);
+        assert!(!dir.join("781-1.hq.opus").exists());
+        assert!(!dir.join("781-1.wav").exists());
+        assert_eq!(channels_of(&dir.join("781-1.opus")), 2);
+        assert_eq!(open(&dir.join("781-1.opus")).unwrap().count(), 3 * 16_000);
+
+        // Cut off by a crash, it lacks the last second: it is kept as the
+        // recording's Opus file, and so is the WAV, which has all of it.
+        high_copy(&dir.join("782-1.hq.opus"), 48_000 * 3, false);
+        fs::write(dir.join("782-1.wav"), &wav).unwrap();
+        assert!(compress(dir, "782-1").is_err());
+        assert!(!dir.join("782-1.hq.opus").exists());
+        assert_eq!(channels_of(&dir.join("782-1.opus")), 2);
+        assert!(fs::read(dir.join("782-1.wav")).unwrap() == wav);
+        assert_eq!(audio_file(dir, "782-1").unwrap(), dir.join("782-1.wav"));
+
+        // Cut off before its first page of audio: nothing to keep. The WAV is
+        // compressed as any other.
+        let empty = dir.join("783-1.hq.opus");
+        high_copy(&empty, 4_800, false);
+        assert!(open(&empty).unwrap().next().is_none());
+        fs::write(dir.join("783-1.wav"), &wav).unwrap();
+        assert!(compress(dir, "783-1").unwrap() > 0);
+        assert!(!empty.exists());
+        assert!(!dir.join("783-1.wav").exists());
+        assert_eq!(channels_of(&dir.join("783-1.opus")), 1);
+
+        // An Opus file the recording already has is never replaced.
+        fs::write(dir.join("784-1.opus"), b"kept").unwrap();
+        high_copy(&dir.join("784-1.hq.opus"), 48_000, true);
+        assert_eq!(compress(dir, "784-1").unwrap(), 0);
+        assert!(fs::read(dir.join("784-1.opus")).unwrap() == b"kept");
+        assert!(dir.join("784-1.hq.opus").exists());
+    }
+
+    #[test]
+    fn every_copy_left_behind_is_taken_up_but_not_the_one_being_written() {
+        let folder = tempfile::tempdir().unwrap();
+        let dir = folder.path();
+        let wav = crate::streaming::wav_bytes(&sweeps(16_000, 1, 16_000 * 2));
+        for id in ["791-1", "792-1"] {
+            high_copy(&dir.join(format!("{id}.hq.opus")), 48_000 * 2, true);
+            fs::write(dir.join(format!("{id}.wav")), &wav).unwrap();
+        }
+        // Only the copy, its WAV gone already.
+        high_copy(&dir.join("793-1.hq.opus"), 48_000, true);
+        let recording = hold("792-1");
+        let done = compress_all(dir).unwrap();
+        assert_eq!((done.recordings, done.failed), (1, 0));
+        assert!(dir.join("791-1.opus").exists() && !dir.join("791-1.wav").exists());
+        assert!(dir.join("793-1.opus").exists() && !dir.join("793-1.hq.opus").exists());
+        // The recording in progress keeps both of its files as they are.
+        assert!(dir.join("792-1.hq.opus").exists() && dir.join("792-1.wav").exists());
+        assert!(!dir.join("792-1.opus").exists());
+        drop(recording);
+        assert_eq!(compress_all(dir).unwrap().recordings, 1);
+        assert!(dir.join("792-1.opus").exists() && !dir.join("792-1.wav").exists());
+    }
+
+    #[test]
+    fn a_saved_recording_is_saved_as_its_opus_file_or_its_wav() {
+        let folder = tempfile::tempdir().unwrap();
+        let dir = folder.path();
+        let samples = speech(1.0);
+        let wav = crate::streaming::wav_bytes(&samples);
+        // A WAV recording, with what a crash left uncounted counted.
+        interrupted_wav(&dir.join("801-1.wav"), 0, &samples);
+        let saved = read_saved_file(dir, "801-1").unwrap();
+        assert!(saved == wav);
+        // A compressed one, or one with both files: the Opus file itself.
+        high_copy(&dir.join("802-1.opus"), 48_000, true);
+        fs::write(dir.join("802-1.wav"), &wav).unwrap();
+        assert!(
+            read_saved_file(dir, "802-1").unwrap() == fs::read(dir.join("802-1.opus")).unwrap()
+        );
+        assert_eq!(read_saved_file(dir, "803-1").unwrap_err(), GONE);
     }
 
     #[test]
