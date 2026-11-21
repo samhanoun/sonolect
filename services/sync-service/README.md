@@ -184,3 +184,12 @@ The image runs Node 26 as the `node` user. `pnpm deploy --prod` copies the
 production dependencies, including the Firestore client. On Cloud Run, set
 `SONOLECT_SYNC_STORE=firestore`; a SQLite file there would live on the
 instance's memory-backed disk and be lost.
+
+## Hosting
+
+`infra/terraform/sync` deploys the image to Cloud Run with Firestore, a
+generated service token in Secret Manager and public invocation, at most 2
+instances. [docs/sync-setup.md](../../docs/sync-setup.md) is the runbook,
+with a `gcloud run deploy` fallback, and
+[LOCAL-BUILD.md](../../LOCAL-BUILD.md#note-sync-against-a-local-server) points
+development builds of the apps at a local service.
