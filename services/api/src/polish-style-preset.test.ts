@@ -137,4 +137,27 @@ describe("POST /v1/polish style presets", () => {
       await app.close();
     }
   });
+
+  it("answers 502 instead of the raw transcript when the model returns no text", async () => {
+    const app = await createAuthenticatedTestApp({
+      logger: false,
+      aiProviders: {
+        configured: () => true,
+        polish: async () => ({ polished: "  ", model: "test" }),
+      },
+    });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/polish",
+        headers: { authorization: "Bearer user-a" },
+        payload: { transcript: "so the meeting moved to tuesday" },
+      });
+      assert.equal(response.statusCode, 502, response.body);
+      assert.equal(response.json().error.code, "polish_empty");
+      assert.ok(!response.body.includes("meeting moved"));
+    } finally {
+      await app.close();
+    }
+  });
 });

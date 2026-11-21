@@ -130,7 +130,8 @@ export async function polishTranscript(opts: {
     .join("")
     .trim();
 
-  return { polished: polished || opts.transcript, model: geminiModel };
+  // Empty when the model returned no text; the route answers 502 then.
+  return { polished, model: geminiModel };
 }
 
 const errorBody = (code: string, message: string, retryable: boolean) => ({
@@ -326,6 +327,14 @@ export function registerAiRoutes(
             ? { locale: body.locale }
             : {}),
         });
+        // Never hand the raw transcript back as if the model had polished it.
+        if (!result.polished.trim()) {
+          return reply
+            .status(502)
+            .send(
+              errorBody("polish_empty", "The model returned no text.", true),
+            );
+        }
         return result;
       } catch (error) {
         request.log.error({ err: error }, "cloud polish failed");
