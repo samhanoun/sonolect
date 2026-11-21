@@ -18,7 +18,7 @@
     "@sonolect/types": "workspace:*",
     "@supabase/supabase-js": "^2.119.0",
     "@tailwindcss/vite": "^4",
-    "@tauri-apps/api": "^2.12.0",
+    "@tauri-apps/api": "^2.12.5",
     "@tauri-apps/plugin-global-shortcut": "^2.4.1",
     "lucide-react": "^1.74",
     "react": "^19.3.0",

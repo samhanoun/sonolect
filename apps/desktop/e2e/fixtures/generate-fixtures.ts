@@ -6,6 +6,10 @@
  * Produces:
  *   - silence.wav  — 1 second of silence (16 kHz, 16-bit, mono)
  *   - tone.wav     — 1 second 440 Hz sine wave (16 kHz, 16-bit, mono)
+ *
+ * tone.opus is tone.wav compressed by the app itself. It is written by a Rust
+ * test: in apps/desktop/src-tauri run
+ * `SONOLECT_WRITE_FIXTURES=1 cargo test the_e2e_opus_fixture`.
  */
 
 import { writeFileSync } from "node:fs";

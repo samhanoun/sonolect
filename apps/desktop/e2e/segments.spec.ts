@@ -4,6 +4,7 @@ import {
   nativeCalls,
   type MockCapture,
 } from "./support/mockTauri";
+import { played, watchPlayback } from "./support/playback";
 
 /** A navigation entry; its label may be followed by a description. */
 function nav(page: Page, name: string) {
@@ -115,12 +116,16 @@ test.describe("segment editor", () => {
     await nav(page, "Library").click();
     await expect(page.getByText(meeting.transcript!)).toBeVisible();
 
-    // Listening from the library reads the saved audio once.
+    // Listening from the library reads the saved audio once, as Opus when
+    // the webview can play it.
     await page.getByRole("button", { name: /^Listen/ }).click();
     await expect
       .poll(() => nativeCalls(page, "read_local_capture_audio"))
       .toEqual([
-        { command: "read_local_capture_audio", args: { id: meeting.id } },
+        {
+          command: "read_local_capture_audio",
+          args: { id: meeting.id, format: "ogg" },
+        },
       ]);
 
     await page.getByRole("button", { name: /^Open editor/ }).click();
@@ -176,6 +181,43 @@ test.describe("segment editor", () => {
 
     await nav(page, "Library").click();
     await expect(page.getByText("Shall we begin?")).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test("a compressed recording plays from the segment that is clicked", async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await installMockTauri(page, [meeting], { compressed: [meeting.id] });
+    await watchPlayback(page);
+    await page.goto("/");
+    await nav(page, "Library").click();
+    await page.getByRole("button", { name: /^Open editor/ }).click();
+    await page.getByRole("button", { name: "Segments", exact: true }).click();
+    const items = segmentList(page).getByRole("listitem");
+    await expect(items).toHaveCount(3);
+
+    // The third segment starts 600 ms in.
+    await items.nth(2).getByRole("button", { name: "Play from 0:00" }).click();
+    await expect(items.nth(2)).toHaveClass(/active/);
+    // It plays to the end of the one-second fixture.
+    await expect
+      .poll(async () => Math.max(0, ...(await played(page)).times))
+      .toBeGreaterThanOrEqual(0.95);
+    await expect(
+      items.nth(2).getByRole("button", { name: "Play from 0:00" }),
+    ).toBeVisible();
+    // From the Opus file, and from where the segment starts.
+    expect(await nativeCalls(page, "read_local_capture_audio")).toEqual([
+      {
+        command: "read_local_capture_audio",
+        args: { id: meeting.id, format: "ogg" },
+      },
+    ]);
+    const { types, times } = await played(page);
+    expect(types).toEqual(["audio/ogg"]);
+    expect(Math.min(...times)).toBeGreaterThanOrEqual(0.55);
     expect(errors).toEqual([]);
   });
 

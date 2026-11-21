@@ -38,11 +38,16 @@ export type MockTauriCall = { command: string; args: unknown };
 const toneWav = readFileSync(
   new URL("../fixtures/tone.wav", import.meta.url),
 ).toString("base64");
+/** The same tone as the app compresses it. */
+const toneOpus = readFileSync(
+  new URL("../fixtures/tone.opus", import.meta.url),
+).toString("base64");
 
 /**
  * Makes the page believe it runs inside the desktop app: native commands are
  * answered from an in-page library of saved recordings, and every recording
- * plays the one-second tone fixture.
+ * plays the one-second tone fixture. A compressed recording sends it as Ogg
+ * Opus when the page asks for Ogg, as the app does, and as WAV otherwise.
  *
  * Live recordings are imitated too: audio sent with `capture_append` is
  * counted, and every three seconds of it produces one segment of live text
@@ -52,7 +57,12 @@ const toneWav = readFileSync(
  * refuses more, as the real one does after four hours.
  *
  * `compress_local_captures` compresses each saved recording once and reports
- * what that freed. Pasting into another app always succeeds.
+ * what that freed; `compressed` lists recordings that already are. With
+ * `unplayableOpus`, the Ogg Opus audio sent is damaged, so the page cannot
+ * play it, as in a webview without Opus. With `holdWavReads`, audio asked for
+ * as WAV is only sent once `releaseHeldReads` is called, as a long compressed
+ * recording takes a while to decode. Pasting into another app always
+ * succeeds.
  *
  * With `systemAudio`, the computer's sound can be recorded: once started it
  * adds a second of audio to the live recording every 100 ms, with a level.
@@ -75,17 +85,27 @@ export async function installMockTauri(
     systemAudio?: boolean;
     /** true: this build syncs notes (see above). */
     sync?: boolean;
+    /** Recordings already kept as Opus. */
+    compressed?: string[];
+    /** true: the Ogg Opus audio sent cannot be played. */
+    unplayableOpus?: boolean;
+    /** true: audio asked for as WAV waits for `releaseHeldReads`. */
+    holdWavReads?: boolean;
   } = {},
 ) {
   await page.addInitScript(
     ({
       captures,
       toneWav,
+      toneOpus,
       recorder,
       recorderLimitMs,
       systemAudio,
       sync,
       syncHook,
+      compressedIds,
+      unplayableOpus,
+      holdWavReads,
     }) => {
       window.localStorage.clear();
       const library = structuredClone(captures);
@@ -107,10 +127,22 @@ export async function installMockTauri(
           ? !expected.exists
           : expected.exists && sameHlc(local.hlc, expected.hlc);
       /** Recordings already turned into Opus. */
-      const compressed = new Set<string>();
+      const compressed = new Set<string>(compressedIds);
       const calls: { command: string; args: unknown }[] = [];
-      const audio = () =>
-        Uint8Array.from(atob(toneWav), (char) => char.charCodeAt(0)).buffer;
+      /** WAV reads waiting to be answered, with `holdWavReads`. */
+      const heldReads: (() => void)[] = [];
+      const bytes = (base64: string) =>
+        Uint8Array.from(atob(base64), (char) => char.charCodeAt(0)).buffer;
+      const audio = (id: unknown, format: unknown) => {
+        format ??= "wav";
+        if (format !== "wav" && format !== "ogg") throw "Invalid audio format.";
+        if (format === "wav" || !compressed.has(id as string))
+          return bytes(toneWav);
+        // Ogg's signature and nothing a decoder can use.
+        if (unplayableOpus)
+          return new TextEncoder().encode("OggS" + "\0".repeat(60)).buffer;
+        return bytes(toneOpus);
+      };
       // Event plumbing, as @tauri-apps/api/event expects it.
       const callbacks = new Map<number, (message: unknown) => void>();
       const listeners = new Map<number, { event: string; handler: number }>();
@@ -142,6 +174,9 @@ export async function installMockTauri(
       let systemFeed: ReturnType<typeof setInterval> | undefined;
       Object.assign(window, {
         __sonolectE2eNativeCalls: calls,
+        __sonolectE2eReleaseReads: () => {
+          for (const answer of heldReads.splice(0)) answer();
+        },
         __sonolectE2eEmit: emit,
         __sonolectE2eListening: (event: string) =>
           [...listeners.values()].some((listener) => listener.event === event),
@@ -252,8 +287,14 @@ export async function installMockTauri(
                 };
               case "list_local_captures":
                 return structuredClone(library);
-              case "read_local_capture_audio":
-                return audio();
+              case "read_local_capture_audio": {
+                const sent = audio(args.id, args.format);
+                if (!holdWavReads || (args.format ?? "wav") !== "wav")
+                  return sent;
+                return new Promise((resolve) =>
+                  heldReads.push(() => resolve(sent)),
+                );
+              }
               case "update_local_capture": {
                 const capture = library.find((item) => item.id === args.id);
                 if (!capture)
@@ -415,12 +456,25 @@ export async function installMockTauri(
     {
       captures,
       toneWav,
+      toneOpus,
       recorder: options.recorder ?? true,
       recorderLimitMs: options.recorderLimitMs,
       systemAudio: options.systemAudio ?? false,
       sync: options.sync ?? false,
       syncHook: SYNC_REQUEST_HOOK,
+      compressedIds: options.compressed ?? [],
+      unplayableOpus: options.unplayableOpus ?? false,
+      holdWavReads: options.holdWavReads ?? false,
     },
+  );
+}
+
+/** Sends the audio of every WAV read held back with `holdWavReads`. */
+export function releaseHeldReads(page: Page) {
+  return page.evaluate(() =>
+    (
+      window as typeof window & { __sonolectE2eReleaseReads: () => void }
+    ).__sonolectE2eReleaseReads(),
   );
 }
 
