@@ -561,6 +561,21 @@ importers:
         specifier: ^0.28.2
         version: 0.28.2
 
+  tooling/sync-e2e:
+    devDependencies:
+      '@sonolect/sync-core':
+        specifier: workspace:*
+        version: link:../../packages/sync-core
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
 packages:
 
   2g@1.0.1:

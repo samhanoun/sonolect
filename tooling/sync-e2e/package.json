@@ -1,0 +1,18 @@
+{
+  "name": "@sonolect/sync-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cross-client sync tests: the desktop's and the phone's own sync code against the real sync service, in one process.",
+  "scripts": {
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test \"src/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@sonolect/sync-core": "workspace:*",
+    "@types/node": "^22.20.5",
+    "tsx": "4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
