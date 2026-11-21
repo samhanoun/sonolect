@@ -131,7 +131,9 @@ export type SpeakerDetectionResult =
   | { status: "labelled"; speakers: number }
   /** The recording has no speech in it, so nothing changed. */
   | { status: "silent" }
-  /** The transcript no longer belongs to that recording; nothing changed. */
+  /** Cancelled before the turns were used; nothing changed. */
+  | { status: "cancelled" }
+  /** The transcript open is not of that recording; nothing changed. */
   | { status: "stale" };
 
 export type DesktopState = {
@@ -234,10 +236,17 @@ export type DesktopState = {
    * kept unless `replaceTyped` is set; see applySpeakerTurns.
    */
   detectSpeakers: (options?: {
+    /**
+     * The recording to detect in. Nothing is done unless its transcript is
+     * the one open; by default, it is the open transcript's recording.
+     */
+    captureId?: string;
     /** How many people speak, 2 to 8; counted when left out. */
     speakers?: number | undefined;
     replaceTyped?: boolean;
     onProgress?: (percent: number) => void;
+    /** Asked when the turns come back: true leaves the segments as they are. */
+    cancelled?: () => boolean;
   }) => Promise<SpeakerDetectionResult>;
   /** Renames a speaker on every segment, as one undo step. */
   renameSpeakerEverywhere: (from: string, to: string) => void;
@@ -1496,17 +1505,21 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       return withUndoSnapshot(state, next);
     }),
   detectSpeakers: async ({
+    captureId,
     speakers,
     replaceTyped = false,
     onProgress,
+    cancelled,
   } = {}) => {
-    const captureId = singleCaptureId(get().transcriptSegments);
-    if (!captureId) return { status: "stale" };
-    const turns = await detectSpeakerTurns(captureId, speakers, onProgress);
+    const open = () => singleCaptureId(get().transcriptSegments);
+    const id = captureId ?? open();
+    if (!id || open() !== id) return { status: "stale" };
+    const turns = await detectSpeakerTurns(id, speakers, onProgress);
+    // Cancel can come after the last of the audio was read.
+    if (cancelled?.()) return { status: "cancelled" };
     if (!turns.length) return { status: "silent" };
     // Another recording may have been opened while the audio was read.
-    if (singleCaptureId(get().transcriptSegments) !== captureId)
-      return { status: "stale" };
+    if (open() !== id) return { status: "stale" };
     const t = getT();
     set((state) => {
       const labelled = applySpeakerTurns(

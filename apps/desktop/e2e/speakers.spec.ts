@@ -55,11 +55,32 @@ const hostAndGuest: MockSpeakerTurn[] = [
   { startMs: 6100, endMs: 8000, speaker: 2 },
 ];
 
-async function openInterview(page: Page) {
+/** A talk of two sentences, nobody named yet. */
+const talk: MockCapture = {
+  id: "1700000000000-8",
+  createdAtMs: Date.UTC(2026, 10, 19, 11, 0),
+  durationMs: 4000,
+  transcript: "Good morning.\n\nLet us begin.",
+  error: null,
+  language: "en",
+  segments: [
+    { startMs: 0, endMs: 2000, text: "Good morning." },
+    { startMs: 2000, endMs: 4000, text: "Let us begin." },
+  ],
+};
+
+/** Opens the saved recording whose transcript starts with `text`. */
+async function openRecording(page: Page, text: string) {
   await nav(page, "Library").click();
-  await page.getByRole("button", { name: /^Open editor/ }).click();
+  await page
+    .locator(".studio-card", { hasText: text })
+    .getByRole("button", { name: /^Open editor/ })
+    .click();
   await page.getByRole("button", { name: "Segments", exact: true }).click();
 }
+
+const openInterview = (page: Page) =>
+  openRecording(page, "Welcome to the show.");
 
 /** Typed text, seen as segments: it has no recording behind it. */
 async function typeText(page: Page) {
@@ -224,6 +245,41 @@ test.describe("speaker detection", () => {
       { id: interview.id, speakers: 2 },
       { id: interview.id, speakers: 2 },
     ]);
+  });
+
+  test("a question about one recording is dropped when another is opened", async ({
+    page,
+  }) => {
+    await installMockTauri(page, [interview, talk], {
+      speakerTurns: {
+        [interview.id]: hostAndGuest,
+        [talk.id]: [
+          { startMs: 0, endMs: 1900, speaker: 1 },
+          { startMs: 2100, endMs: 4000, speaker: 2 },
+        ],
+      },
+    });
+    await page.goto("/");
+    await openInterview(page);
+    await detectButton(page).click();
+    await expect(status(page)).toContainText(
+      "Some segments already have names. Keep them or replace them?",
+    );
+
+    // The question was about the interview: the talk does not see it.
+    await openRecording(page, "Good morning.");
+    await expect(status(page)).not.toContainText("Keep them or replace them?");
+    await expect(detectButton(page)).toBeEnabled();
+    await detectButton(page).click();
+    await expect(status(page)).toHaveText("2 speakers found.");
+    await expect.poll(() => speakers(page)).toEqual(["Speaker 1", "Speaker 2"]);
+    expect(
+      (await nativeCalls(page, "detect_speakers")).map((call) => call.args),
+    ).toEqual([{ id: talk.id, speakers: null }]);
+
+    // The interview is as it was.
+    await openInterview(page);
+    await expect.poll(() => speakers(page)).toEqual(["", "", "", "Ana"]);
   });
 
   test("the speaker model can be downloaded from Settings", async ({

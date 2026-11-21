@@ -3,11 +3,15 @@
  * first model download, asking whether typed names stay, then progress and
  * Cancel. They live outside the editor, so a detection that is running is
  * still shown after leaving the page and coming back.
+ *
+ * Each attempt is about the recording whose transcript was open when it
+ * started. A question still waiting for an answer is dropped when another
+ * recording is opened, and nothing is ever labelled but that recording.
  */
 import { create } from "zustand";
 import { getT } from "./i18n";
 import { singleCaptureId, typedSpeakerNames } from "./segmentEditor";
-import { useDesktopStore } from "./store/appStore";
+import { useDesktopStore, type SpeakerDetectionResult } from "./store/appStore";
 import {
   cancelSpeakerDetection,
   downloadSpeakerModel,
@@ -47,11 +51,53 @@ export const speakerLabel = (number: number) =>
 const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
+function resultMessage(result: SpeakerDetectionResult) {
+  const t = getT();
+  switch (result.status) {
+    case "labelled":
+      return t.count("studio.speakers.found", result.speakers);
+    case "silent":
+      return t("studio.speakers.noSpeech");
+    case "cancelled":
+      return t("native.speakersCancelled");
+    case "stale":
+      return t("studio.speakers.stale");
+  }
+}
+
+const isQuestion = (step: SpeakerStep["step"]) =>
+  step === "consent" || step === "choose";
+
 export const useSpeakerDetection = create<SpeakerDetectionState>((set, get) => {
+  /** The recording the current or last attempt is about. */
   let captureId = "";
+
+  /** Whether the transcript open in the editor is of that recording. */
+  const stillOpen = (
+    segments = useDesktopStore.getState().transcriptSegments,
+  ) => singleCaptureId(segments) === captureId;
+
+  // A question is about the recording it was asked for. Opening another one
+  // drops it, so the other recording's own detection can start at once.
+  useDesktopStore.subscribe((state, previous) => {
+    if (
+      state.transcriptSegments !== previous.transcriptSegments &&
+      isQuestion(get().current.step) &&
+      !stillOpen(state.transcriptSegments)
+    )
+      set({ current: { step: "idle" } });
+  });
 
   const finish = (message: string) =>
     set({ current: { step: "idle" }, outcome: { captureId, message } });
+  /** Nothing was labelled: another recording is open now. */
+  const finishStale = () => finish(getT()("studio.speakers.stale"));
+
+  /** Cancel was pressed during the detection that is running. */
+  const cancelling = () => {
+    const { current } = get();
+    return current.step === "detecting" && current.cancelling;
+  };
 
   const detect = async (replaceTyped: boolean) => {
     set({
@@ -60,30 +106,26 @@ export const useSpeakerDetection = create<SpeakerDetectionState>((set, get) => {
     });
     try {
       const result = await useDesktopStore.getState().detectSpeakers({
+        captureId,
         speakers: get().speakers,
         replaceTyped,
-        onProgress: (progress) =>
-          set((state) =>
-            state.current.step === "detecting"
-              ? { current: { ...state.current, progress } }
-              : state,
-          ),
+        onProgress: (progress) => {
+          const { current } = get();
+          if (current.step !== "detecting") return;
+          // Still running after Cancel. The app clears a cancel when a run
+          // begins, so one sent just before is lost: send it again.
+          if (current.cancelling)
+            void cancelSpeakerDetection().catch(() => undefined);
+          set({ current: { ...current, progress } });
+        },
+        cancelled: cancelling,
       });
-      const t = getT();
-      finish(
-        result.status === "labelled"
-          ? t.count("studio.speakers.found", result.speakers)
-          : result.status === "silent"
-            ? t("studio.speakers.noSpeech")
-            : t("studio.speakers.stale"),
-      );
+      finish(resultMessage(result));
     } catch (error) {
-      const { current } = get();
-      if (current.step === "detecting" && current.cancelling)
-        return finish(messageOf(error));
+      if (cancelling()) return finish(messageOf(error));
       // A model that went missing or was damaged is offered again.
       const status = await speakerModelStatus().catch(() => undefined);
-      if (status && !status.ready) {
+      if (status && !status.ready && stillOpen()) {
         set({
           current: { step: "consent", sizeBytes: status.sizeBytes },
           outcome: { captureId, message: messageOf(error) },
@@ -96,6 +138,8 @@ export const useSpeakerDetection = create<SpeakerDetectionState>((set, get) => {
 
   /** Once the model is here: ask about typed names, or detect at once. */
   const proceed = async () => {
+    // A download takes a while: another recording may be open by now.
+    if (!stillOpen()) return finishStale();
     const segments = useDesktopStore.getState().transcriptSegments;
     if (typedSpeakerNames(segments, speakerLabel).length)
       set({ current: { step: "choose" } });
@@ -116,6 +160,7 @@ export const useSpeakerDetection = create<SpeakerDetectionState>((set, get) => {
       try {
         const status = await speakerModelStatus();
         if (!status.ready) {
+          if (!stillOpen()) return finishStale();
           set({ current: { step: "consent", sizeBytes: status.sizeBytes } });
           return;
         }
@@ -149,7 +194,7 @@ export const useSpeakerDetection = create<SpeakerDetectionState>((set, get) => {
     },
     cancel: async () => {
       const { current } = get();
-      if (current.step === "consent" || current.step === "choose") {
+      if (isQuestion(current.step)) {
         set({ current: { step: "idle" }, outcome: undefined });
         return;
       }

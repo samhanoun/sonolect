@@ -8,7 +8,8 @@ import { useDesktopStore } from "./store/appStore";
 /**
  * The desktop app's side, as a stand-in: the speaker model can be missing,
  * detection reports progress and can be held, as a long recording would
- * hold it, until it finishes or is cancelled.
+ * hold it, until it finishes or is cancelled. Like the app, it clears a
+ * cancel when a run begins.
  */
 type Invocation = { cmd: string; args: Record<string, unknown> };
 const invocations: Invocation[] = [];
@@ -16,21 +17,32 @@ const callbacks = new Map<number, (message: unknown) => void>();
 const listeners = new Map<number, { event: string; handler: number }>();
 let nextId = 1;
 
+type Hold = { promise: Promise<void>; release: () => void };
+
+function held(): Hold {
+  let release = () => {};
+  const promise = new Promise<void>((resolve) => (release = resolve));
+  return { promise, release };
+}
+
 const native = {
   modelReady: true,
   turns: [] as SpeakerTurn[],
-  /** Set to hold detection until `release` is called. */
-  hold: undefined as
-    { promise: Promise<void>; release: () => void } | undefined,
+  /** Set to hold the download halfway until it is released. */
+  downloading: undefined as Hold | undefined,
+  /** Set to hold detection before its run begins. */
+  starting: undefined as Hold | undefined,
+  /** Set to hold detection halfway until it is released or cancelled. */
+  hold: undefined as Hold | undefined,
   cancelled: false,
+  /** The run is past its last check, so a cancel no longer stops it. */
+  pastLastCheck: false,
   /** What the next detection fails with, if anything. */
   failure: undefined as string | undefined,
 };
 
 function holdDetection() {
-  let release = () => {};
-  const promise = new Promise<void>((resolve) => (release = resolve));
-  native.hold = { promise, release };
+  native.hold = held();
 }
 
 function emit(event: string, payload: unknown) {
@@ -66,15 +78,18 @@ const tauri = {
         return { ready: native.modelReady, sizeBytes: 28_281_165 };
       case "download_speaker_model":
         emit("speaker-model-progress", 50);
+        await native.downloading?.promise;
         emit("speaker-model-progress", 100);
         native.modelReady = true;
         return { ready: true, sizeBytes: 28_281_165 };
       case "detect_speakers": {
+        await native.starting?.promise;
         native.cancelled = false;
         emit("speaker-progress", 0);
         emit("speaker-progress", 40);
         await native.hold?.promise;
-        if (native.cancelled) throw "Speaker detection was cancelled.";
+        if (native.cancelled && !native.pastLastCheck)
+          throw "Speaker detection was cancelled.";
         if (native.failure) throw native.failure;
         emit("speaker-progress", 100);
         return native.turns;
@@ -140,8 +155,11 @@ describe("speaker detection", () => {
     Object.assign(native, {
       modelReady: true,
       turns: twoVoices,
+      downloading: undefined,
+      starting: undefined,
       hold: undefined,
       cancelled: false,
+      pastLastCheck: false,
       failure: undefined,
     });
     useSpeakerDetection.setState({
@@ -202,6 +220,17 @@ describe("speaker detection", () => {
     assert.deepEqual(await running, { status: "stale" });
     assert.deepEqual(speakers(), [undefined, undefined, undefined, undefined]);
     assert.equal(store().transcriptSegments[0]?.captureId, "41-1");
+    // Asked for a recording that is not open, it does not even start.
+    assert.deepEqual(await store().detectSpeakers({ captureId: "40-1" }), {
+      status: "stale",
+    });
+    assert.equal(called("detect_speakers").length, 1);
+  });
+
+  it("changes nothing when the turns come back cancelled", async () => {
+    const result = await store().detectSpeakers({ cancelled: () => true });
+    assert.deepEqual(result, { status: "cancelled" });
+    assert.deepEqual(speakers(), [undefined, undefined, undefined, undefined]);
   });
 
   it("asks before the first download, then detects with progress", async () => {
@@ -300,6 +329,98 @@ describe("speaker detection", () => {
     assert.deepEqual(flow().current, { step: "idle" });
     assert.equal(flow().outcome?.message, "Speaker detection was cancelled.");
     assert.deepEqual(speakers(), [undefined, undefined, undefined, undefined]);
+  });
+
+  it("changes nothing when Cancel comes after the last window", async () => {
+    // Grouping the voice prints of a long recording takes a while: Cancel
+    // can come once the app has read the last of the audio.
+    holdDetection();
+    native.pastLastCheck = true;
+    const segments = store().transcriptSegments;
+    const running = flow().start();
+    await waitFor(
+      "detection to start",
+      () => flow().current.step === "detecting",
+    );
+    await flow().cancel();
+    await running;
+    assert.deepEqual(flow().current, { step: "idle" });
+    assert.deepEqual(flow().outcome, {
+      captureId: "40-1",
+      message: "Speaker detection was cancelled.",
+    });
+    assert.equal(store().transcriptSegments, segments);
+  });
+
+  it("sends Cancel again when the run began after it", async () => {
+    const starting = held();
+    native.starting = starting;
+    const running = flow().start();
+    await waitFor("detection to be asked for", () =>
+      Boolean(called("detect_speakers").length),
+    );
+    await flow().cancel();
+    // The run begins after the cancel, and clears it...
+    holdDetection();
+    starting.release();
+    // ...so the next progress event sends it again.
+    try {
+      await waitFor(
+        "Cancel to be sent again",
+        () => called("cancel_speaker_detection").length > 1,
+      );
+    } finally {
+      native.hold?.release();
+    }
+    await running;
+    assert.equal(flow().outcome?.message, "Speaker detection was cancelled.");
+    assert.deepEqual(speakers(), [undefined, undefined, undefined, undefined]);
+  });
+
+  it("drops its question when another recording is opened", async () => {
+    open(["Ana", undefined, undefined, undefined], "40-1");
+    await flow().start();
+    assert.deepEqual(flow().current, { step: "choose" });
+    open(["Zoe", "Zoe", "Max", "Max"], "41-1");
+    assert.deepEqual(flow().current, { step: "idle" });
+    await flow().choose(true);
+    assert.equal(called("detect_speakers").length, 0);
+    assert.deepEqual(speakers(), ["Zoe", "Zoe", "Max", "Max"]);
+
+    // So does the question about the download.
+    native.modelReady = false;
+    await flow().start();
+    assert.equal(flow().current.step, "consent");
+    open([], "40-1");
+    assert.deepEqual(flow().current, { step: "idle" });
+    await flow().download();
+    assert.equal(called("download_speaker_model").length, 0);
+
+    // The same recording opened again keeps the question.
+    await flow().start();
+    open([], "40-1");
+    assert.equal(flow().current.step, "consent");
+  });
+
+  it("does not detect in a recording opened during the download", async () => {
+    native.modelReady = false;
+    const downloading = held();
+    native.downloading = downloading;
+    await flow().start();
+    const download = flow().download();
+    await waitFor("the download to start", () =>
+      Boolean(called("download_speaker_model").length),
+    );
+    open(["Zoe", "Zoe", "Max", "Max"], "41-1");
+    downloading.release();
+    await download;
+    assert.equal(called("detect_speakers").length, 0);
+    assert.deepEqual(flow().current, { step: "idle" });
+    assert.deepEqual(flow().outcome, {
+      captureId: "40-1",
+      message: "Another transcript was opened, so no names were changed.",
+    });
+    assert.deepEqual(speakers(), ["Zoe", "Zoe", "Max", "Max"]);
   });
 
   it("reports in the interface language", async () => {
