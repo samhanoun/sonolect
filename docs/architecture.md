@@ -28,6 +28,7 @@ Sync is independent of the API, the account and the other services. Its parts:
 - **The apps.** Each one keeps the vault's root key in the OS keychain (desktop, on the Rust side) or `expo-secure-store` (mobile), runs the engine over its own note store, and calls the server fixed at build time: `SONOLECT_SYNC_URL` (desktop, through the Rust HTTP client, so the webview's CSP is unchanged) or `EXPO_PUBLIC_SONOLECT_SYNC_URL` (mobile, through `fetch`). Without the URL, sync stays hidden and the app makes no sync request.
 - **`services/sync-service`**: Fastify, open to the apps (each vault checks its own bearer token), storing one sealed record per note in Firestore on Cloud Run, or in SQLite or memory for self-hosting and tests. See its [README](../services/sync-service/README.md).
 - **`infra/terraform/sync`**: the standalone Terraform root that hosts it; [sync-setup.md](sync-setup.md) is the runbook.
+- **`tooling/sync-e2e`**: tests that run in `pnpm test`. The desktop's and the phone's own sync code sync with each other through the real service, in one process. See its [README](../tooling/sync-e2e/README.md).
 
 One sync run, from a device:
 
