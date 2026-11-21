@@ -291,20 +291,29 @@ export class SyncController {
 
   /**
    * For "Delete all local data": forgets the sync key and the sync state
-   * (the server copy stays unless `turnOff` deleted it first).
+   * (the server copy stays unless `turnOff` deleted it first). The key is
+   * forgotten even when the state could not be, and sync is off here even
+   * when the keychain could not delete the key; the first failure is thrown.
    */
   forgetLocal(): Promise<void> {
     return this.exclusive(async () => {
       if (!this.view.available) return;
       this.stopping = true;
       this.cancelTimer();
+      let failure: Error | undefined;
       try {
         await this.forgetState();
-        await this.call("sync_key_forget");
-      } finally {
-        this.stopping = false;
-        this.switchedOff(undefined);
+      } catch (error) {
+        failure = nativeError(error);
       }
+      try {
+        await this.call("sync_key_forget");
+      } catch (error) {
+        failure ??= nativeError(error);
+      }
+      this.stopping = false;
+      this.switchedOff(undefined);
+      if (failure) throw failure;
     });
   }
 

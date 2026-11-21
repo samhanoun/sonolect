@@ -50,6 +50,13 @@ export class FakeNative {
   readonly deletes = new Map<string, Hlc | null>();
   /** The sync key in the keychain. */
   key: string | null = null;
+  /**
+   * sync.rs's `key-saved` marker: sync is on with the key in the keychain.
+   * Without it a key still in the keychain is a leftover that is never read.
+   */
+  keyInUse = false;
+  /** The next keychain call fails with this message (a locked keychain, say). */
+  failNextKeychain: string | undefined;
   /** Every command called, in order (never with its arguments' secrets checked). */
   readonly calls: string[] = [];
   /** The native "a note changed here" event (sent only while sync is on). */
@@ -170,6 +177,14 @@ export class FakeNative {
     return copy(await this.answer(command, copy(args))) as T;
   };
 
+  /** A keychain call: fails once after `failNextKeychain`. */
+  private keychain() {
+    const failure = this.failNextKeychain;
+    if (failure === undefined) return;
+    this.failNextKeychain = undefined;
+    throw failure;
+  }
+
   private syncable(capture: FakeCapture | undefined) {
     return capture && capture.transcript !== null && capture.id !== this.live
       ? capture
@@ -193,24 +208,39 @@ export class FakeNative {
           ? { available: true, server: this.options.server ?? "sync.test" }
           : { available: false };
       case "sync_key_status":
-        return sync && this.key !== null;
+        if (!sync || !this.keyInUse) return false;
+        this.keychain();
+        return this.key !== null;
       case "sync_key_create": {
         const key = String(args.key);
         if (!ROOT_KEY.test(key)) throw "This is not a valid sync key.";
-        if (this.key !== null && this.key !== key)
-          throw "Sync is already on with another key. Turn it off first.";
+        if (this.keyInUse) {
+          this.keychain();
+          if (this.key === key) return null;
+          if (this.key !== null)
+            throw "Sync is already on with another key. Turn it off first.";
+        }
+        this.keychain();
         this.key = key;
+        this.keyInUse = true;
         return null;
       }
       case "sync_key_import": {
         const key = String(args.key);
         if (!ROOT_KEY.test(key)) throw "This is not a valid sync key.";
+        this.keychain();
         this.key = key;
+        this.keyInUse = true;
         return null;
       }
       case "sync_key_load":
+        if (!this.keyInUse) return null;
+        this.keychain();
         return this.key;
       case "sync_key_forget":
+        // Off first, whatever the keychain then says.
+        this.keyInUse = false;
+        this.keychain();
         this.key = null;
         return null;
       case "sync_state_load":

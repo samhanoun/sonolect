@@ -502,6 +502,60 @@ describe("the sync controller", () => {
     assert.equal(w.server.log.length, log);
   });
 
+  it("stays off after a restart when the keychain could not forget the key", async () => {
+    const w = world();
+    const desk = await syncedDesktop(w);
+    desk.native.failNextKeychain =
+      "The sync key could not be read or saved in the keychain.";
+    await desk.controller.turnOff({ deleteServerCopy: false });
+    assert.equal(desk.view().phase, "off");
+    assert.equal(desk.view().problem?.kind, "device");
+    // The key is still in the keychain, but nothing reads it any more.
+    assert.ok(desk.native.key);
+    const again = new SyncController({
+      platform: fakePlatform(desk.native.invoke, w.clock),
+      retentionDays: () => 0,
+    });
+    await again.start();
+    assert.equal(again.getView().phase, "off");
+    const log = w.server.log.length;
+    await w.clock.advance(10 * 60_000);
+    assert.equal(w.server.log.length, log);
+    // Turning sync on again makes a new vault with a new key.
+    const before = desk.native.key;
+    await again.turnOn();
+    assert.notEqual(desk.native.key, before);
+  });
+
+  it("“Delete all local data” forgets the key even when the state cannot be", async () => {
+    const w = world();
+    const desk = await syncedDesktop(w);
+    await desk.controller.close();
+    const invoke = desk.native.invoke;
+    const controller = new SyncController({
+      platform: fakePlatform(
+        async <T>(command: string, args?: Record<string, unknown>) => {
+          if (command === "sync_state_clear")
+            throw "The sync state could not be saved.";
+          return invoke<T>(command, args);
+        },
+        w.clock,
+      ),
+      retentionDays: () => 0,
+    });
+    await controller.start();
+    await assert.rejects(
+      controller.forgetLocal(),
+      /The sync state could not be saved\./,
+    );
+    assert.equal(controller.getView().phase, "off");
+    assert.equal(desk.native.key, null);
+    assert.equal(desk.native.keyInUse, false);
+    const log = w.server.log.length;
+    await w.clock.advance(10 * 60_000);
+    assert.equal(w.server.log.length, log);
+  });
+
   it("turning off while a sync runs waits for it, then forgets", async () => {
     const w = world();
     const desk = await syncedDesktop(w);

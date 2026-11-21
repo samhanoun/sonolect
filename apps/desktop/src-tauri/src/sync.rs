@@ -216,66 +216,124 @@ fn read_root(entry: &keyring::Entry) -> Result<Option<String>, String> {
     }
 }
 
-/// Saves the root of a vault this device creates; never replaces another key.
-fn create_root(entry: &keyring::Entry, key: &str) -> Result<(), String> {
-    let key = checked_root(key)?;
-    match read_root(entry)? {
-        Some(saved) if saved == key => Ok(()),
-        Some(_) => Err(KEY_EXISTS.into()),
-        None => entry.set_password(&key).map_err(keychain_error),
+/// The file that says sync is on with the key in the keychain. It is written
+/// once the key is saved and removed before the key is forgotten. Without it
+/// a key still in the keychain is a leftover (the keychain could not delete
+/// it): nothing reads it, and a new key replaces it, so sync never comes
+/// back on by itself. It also keeps the keychain untouched at launch on a
+/// device where sync was never turned on.
+fn key_marker(sync: &Path) -> PathBuf {
+    sync.join("key-saved")
+}
+
+fn key_in_use(sync: &Path) -> bool {
+    key_marker(sync).is_file()
+}
+
+fn mark_key_saved(sync: &Path) -> Result<(), String> {
+    let _files = files_lock();
+    fs::create_dir_all(sync).map_err(io_failed)?;
+    write_atomically(&key_marker(sync), b"")
+}
+
+fn unmark_key(sync: &Path) -> Result<(), String> {
+    let _files = files_lock();
+    match fs::remove_file(key_marker(sync)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(io_failed(error)),
     }
+}
+
+/// The root key sync uses, if sync is on here.
+fn saved_root(entry: &keyring::Entry, sync: &Path) -> Result<Option<String>, String> {
+    if !key_in_use(sync) {
+        return Ok(None);
+    }
+    read_root(entry)
+}
+
+/// Saves the root of a vault this device creates; never replaces the key
+/// sync uses (a leftover one, yes).
+fn create_root(entry: &keyring::Entry, sync: &Path, key: &str) -> Result<(), String> {
+    let key = checked_root(key)?;
+    match saved_root(entry, sync)? {
+        Some(saved) if saved == key => return Ok(()),
+        Some(_) => return Err(KEY_EXISTS.into()),
+        None => {}
+    }
+    entry.set_password(&key).map_err(keychain_error)?;
+    mark_key_saved(sync)
 }
 
 /// Saves the root read from a pairing code: joining replaces the saved key.
-fn import_root(entry: &keyring::Entry, key: &str) -> Result<(), String> {
+fn import_root(entry: &keyring::Entry, sync: &Path, key: &str) -> Result<(), String> {
     let key = checked_root(key)?;
-    entry.set_password(&key).map_err(keychain_error)
+    entry.set_password(&key).map_err(keychain_error)?;
+    mark_key_saved(sync)
 }
 
-fn forget_root(entry: &keyring::Entry) -> Result<(), String> {
-    match entry.delete_credential() {
+/// Turns sync off here first (the marker), then deletes the key. Should the
+/// keychain fail, sync stays off all the same, and the error says why.
+fn forget_root(entry: &keyring::Entry, sync: &Path) -> Result<(), String> {
+    let unmarked = unmark_key(sync);
+    let deleted = match entry.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(error) => Err(keychain_error(error)),
-    }
+    };
+    unmarked.and(deleted)
 }
 
-/// Whether a sync key is saved on this device.
+/// Whether sync is on here with a key in the keychain.
 #[tauri::command]
-pub async fn sync_key_status() -> Result<bool, String> {
-    if base_url().is_none() {
+pub async fn sync_key_status(app: tauri::AppHandle) -> Result<bool, String> {
+    let Some(sync) = folder(&app) else {
         return Ok(false);
-    }
-    blocking(|| read_root(&keychain()?).map(|root| root.is_some())).await
+    };
+    blocking(move || {
+        if !key_in_use(&sync) {
+            return Ok(false);
+        }
+        saved_root(&keychain()?, &sync).map(|root| root.is_some())
+    })
+    .await
 }
 
 /// Saves the root key of a new vault (generated in the webview).
 #[tauri::command]
-pub async fn sync_key_create(key: String) -> Result<(), String> {
-    base_url().ok_or(NOT_AVAILABLE)?;
-    blocking(move || create_root(&keychain()?, &key)).await
+pub async fn sync_key_create(app: tauri::AppHandle, key: String) -> Result<(), String> {
+    let sync = require_folder(&app)?;
+    blocking(move || create_root(&keychain()?, &sync, &key)).await
 }
 
 /// Saves the root key read from another device's pairing code.
 #[tauri::command]
-pub async fn sync_key_import(key: String) -> Result<(), String> {
-    base_url().ok_or(NOT_AVAILABLE)?;
-    blocking(move || import_root(&keychain()?, &key)).await
+pub async fn sync_key_import(app: tauri::AppHandle, key: String) -> Result<(), String> {
+    let sync = require_folder(&app)?;
+    blocking(move || import_root(&keychain()?, &sync, &key)).await
 }
 
 /// The saved root key, for the webview's engine to derive the vault keys
 /// (and to show the pairing code on request). It never leaves this device.
+/// None while sync is off, without asking the keychain.
 #[tauri::command]
-pub async fn sync_key_load() -> Result<Option<String>, String> {
-    base_url().ok_or(NOT_AVAILABLE)?;
-    blocking(|| read_root(&keychain()?)).await
+pub async fn sync_key_load(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let sync = require_folder(&app)?;
+    blocking(move || {
+        if !key_in_use(&sync) {
+            return Ok(None);
+        }
+        saved_root(&keychain()?, &sync)
+    })
+    .await
 }
 
 #[tauri::command]
-pub async fn sync_key_forget() -> Result<(), String> {
-    if base_url().is_none() {
+pub async fn sync_key_forget(app: tauri::AppHandle) -> Result<(), String> {
+    let Some(sync) = folder(&app) else {
         return Ok(());
-    }
-    blocking(|| forget_root(&keychain()?)).await
+    };
+    blocking(move || forget_root(&keychain()?, &sync)).await
 }
 
 // ── Sync state on disk ─────────────────────────────────────────────────
@@ -319,8 +377,9 @@ fn files_lock() -> MutexGuard<'static, ()> {
 }
 
 /// The sync folder in the app's data folder, when this build syncs. It holds
-/// `state/` (the engine's state, which exists while sync is on) and
-/// `deletes.json` (deletes made on this device, until the engine has them).
+/// `key-saved` (sync is on with the key in the keychain), `state/` (the
+/// engine's state) and `deletes.json` (deletes made on this device, until
+/// the engine has them).
 pub(super) fn folder(app: &tauri::AppHandle) -> Option<PathBuf> {
     base_url()?;
     app.path()
@@ -436,12 +495,15 @@ fn save_state(
     Ok(())
 }
 
+/// Forgets the engine's state and the deletes waiting for it. The key and
+/// its marker are `sync_key_forget`'s.
 fn clear_state(sync: &Path) -> Result<(), String> {
-    match fs::remove_dir_all(sync) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(io_failed(error)),
+    match fs::remove_dir_all(sync.join("state")) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(io_failed(error)),
     }
+    write_deletes(sync, &BTreeMap::new())
 }
 
 /// The engine's saved state: every key and its text.
@@ -1095,27 +1157,63 @@ mod tests {
     /// Bytes 0 to 31 as base64url.
     const ROOT: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 
+    const SECOND: &str = "HyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4";
+
     #[test]
     fn the_key_lives_in_the_keychain_until_forgotten() {
+        let folder = tempfile::tempdir().unwrap();
+        let sync = folder.path().join("sync");
         let entry = mock_entry();
-        assert_eq!(read_root(&entry), Ok(None));
-        create_root(&entry, ROOT).unwrap();
-        assert_eq!(read_root(&entry), Ok(Some(ROOT.into())));
+        assert_eq!(saved_root(&entry, &sync), Ok(None));
+        create_root(&entry, &sync, ROOT).unwrap();
+        assert!(key_in_use(&sync));
+        assert_eq!(saved_root(&entry, &sync), Ok(Some(ROOT.into())));
         // Saving the same key again is harmless; another key is refused.
-        create_root(&entry, &format!(" {ROOT}\n")).unwrap();
-        let second = "HyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4";
-        assert_eq!(create_root(&entry, second), Err(KEY_EXISTS.into()));
-        assert_eq!(read_root(&entry), Ok(Some(ROOT.into())));
+        create_root(&entry, &sync, &format!(" {ROOT}\n")).unwrap();
+        assert_eq!(create_root(&entry, &sync, SECOND), Err(KEY_EXISTS.into()));
+        assert_eq!(saved_root(&entry, &sync), Ok(Some(ROOT.into())));
         // Joining another vault replaces it.
-        import_root(&entry, second).unwrap();
-        assert_eq!(read_root(&entry), Ok(Some(second.into())));
-        forget_root(&entry).unwrap();
+        import_root(&entry, &sync, SECOND).unwrap();
+        assert_eq!(saved_root(&entry, &sync), Ok(Some(SECOND.into())));
+        // Forgetting the sync state keeps the key: turning sync on clears
+        // the state of an earlier vault before it saves the new key.
+        save_state(&sync, &map(&[("meta", "{}")]), &[]).unwrap();
+        clear_state(&sync).unwrap();
+        assert_eq!(saved_root(&entry, &sync), Ok(Some(SECOND.into())));
+        forget_root(&entry, &sync).unwrap();
+        assert!(!key_in_use(&sync));
         assert_eq!(read_root(&entry), Ok(None));
-        forget_root(&entry).unwrap();
+        assert_eq!(saved_root(&entry, &sync), Ok(None));
+        forget_root(&entry, &sync).unwrap();
+    }
+
+    #[test]
+    fn a_key_the_keychain_could_not_forget_never_turns_sync_on_again() {
+        let folder = tempfile::tempdir().unwrap();
+        let sync = folder.path().join("sync");
+        let entry = mock_entry();
+        create_root(&entry, &sync, ROOT).unwrap();
+        mock(&entry).set_error(keyring::Error::NoStorageAccess(Box::new(
+            std::io::Error::other("locked"),
+        )));
+        assert_eq!(forget_root(&entry, &sync), Err(KEYCHAIN_UNAVAILABLE.into()));
+        // The key is still in the keychain, but sync is off here: it is not
+        // read, so the app does not sync with it when it starts again.
+        assert_eq!(read_root(&entry), Ok(Some(ROOT.into())));
+        assert_eq!(saved_root(&entry, &sync), Ok(None));
+        // Turning sync on again replaces the leftover key.
+        create_root(&entry, &sync, SECOND).unwrap();
+        assert_eq!(saved_root(&entry, &sync), Ok(Some(SECOND.into())));
+        // A key saved by another means (no marker) is a leftover too.
+        let other = tempfile::tempdir().unwrap();
+        let fresh = other.path().join("sync");
+        assert_eq!(saved_root(&entry, &fresh), Ok(None));
     }
 
     #[test]
     fn only_32_byte_keys_are_saved() {
+        let folder = tempfile::tempdir().unwrap();
+        let sync = folder.path().join("sync");
         let entry = mock_entry();
         for key in [
             "",
@@ -1125,19 +1223,31 @@ mod tests {
             "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh+",
             "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwd Hh",
         ] {
-            assert_eq!(create_root(&entry, key), Err(INVALID_KEY.into()), "{key}");
-            assert_eq!(import_root(&entry, key), Err(INVALID_KEY.into()), "{key}");
+            assert_eq!(
+                create_root(&entry, &sync, key),
+                Err(INVALID_KEY.into()),
+                "{key}"
+            );
+            assert_eq!(
+                import_root(&entry, &sync, key),
+                Err(INVALID_KEY.into()),
+                "{key}"
+            );
         }
         assert_eq!(read_root(&entry), Ok(None));
+        assert!(!key_in_use(&sync));
         // A damaged entry counts as none, and a new key replaces it.
         entry.set_password("not a key").unwrap();
-        assert_eq!(read_root(&entry), Ok(None));
-        create_root(&entry, ROOT).unwrap();
-        assert_eq!(read_root(&entry), Ok(Some(ROOT.into())));
+        mark_key_saved(&sync).unwrap();
+        assert_eq!(saved_root(&entry, &sync), Ok(None));
+        create_root(&entry, &sync, ROOT).unwrap();
+        assert_eq!(saved_root(&entry, &sync), Ok(Some(ROOT.into())));
     }
 
     #[test]
     fn a_missing_keychain_says_sync_is_unavailable() {
+        let folder = tempfile::tempdir().unwrap();
+        let sync = folder.path().join("sync");
         let entry = mock_entry();
         let no_service = || {
             keyring::Error::PlatformFailure(Box::new(std::io::Error::other(
@@ -1149,15 +1259,27 @@ mod tests {
         mock(&entry).set_error(keyring::Error::NoStorageAccess(Box::new(
             std::io::Error::other("locked"),
         )));
-        assert_eq!(create_root(&entry, ROOT), Err(KEYCHAIN_UNAVAILABLE.into()));
+        assert_eq!(
+            create_root(&entry, &sync, ROOT),
+            Err(KEYCHAIN_UNAVAILABLE.into())
+        );
+        assert!(!key_in_use(&sync));
         mock(&entry).set_error(no_service());
-        assert_eq!(forget_root(&entry), Err(KEYCHAIN_UNAVAILABLE.into()));
+        assert_eq!(forget_root(&entry, &sync), Err(KEYCHAIN_UNAVAILABLE.into()));
         mock(&entry).set_error(keyring::Error::TooLong("user".into(), 8));
-        assert_eq!(import_root(&entry, ROOT), Err(KEYCHAIN_FAILED.into()));
+        assert_eq!(
+            import_root(&entry, &sync, ROOT),
+            Err(KEYCHAIN_FAILED.into())
+        );
+        assert!(!key_in_use(&sync));
         assert!(KEYCHAIN_UNAVAILABLE.starts_with("Sync is unavailable on this system"));
         // Once the keychain answers again, the key works as usual.
-        import_root(&entry, ROOT).unwrap();
-        assert_eq!(read_root(&entry), Ok(Some(ROOT.into())));
+        import_root(&entry, &sync, ROOT).unwrap();
+        assert_eq!(saved_root(&entry, &sync), Ok(Some(ROOT.into())));
+        // While sync is off the keychain is not even asked.
+        forget_root(&entry, &sync).unwrap();
+        mock(&entry).set_error(no_service());
+        assert_eq!(saved_root(&entry, &sync), Ok(None));
     }
 
     fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
@@ -1210,7 +1332,8 @@ mod tests {
         // Removing what is not there is fine.
         save_state(&sync, &BTreeMap::new(), &["r.z".into()]).unwrap();
         clear_state(&sync).unwrap();
-        assert!(!sync.exists());
+        assert!(!sync.join("state").exists());
+        assert_eq!(load_state(&sync), Ok(BTreeMap::new()));
         assert!(!is_on(&sync));
         clear_state(&sync).unwrap();
     }
