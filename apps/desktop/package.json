@@ -10,7 +10,8 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test src/*.test.ts src/sync/*.test.ts",
-    "e2e": "playwright test -c playwright.config.ts"
+    "e2e": "playwright test -c playwright.config.ts",
+    "sync:two-desktops": "tsx src/sync/testing/twoDesktops.ts"
   },
   "dependencies": {
     "@sonolect/sync-core": "workspace:*",
