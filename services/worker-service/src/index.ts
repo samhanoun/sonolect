@@ -15,9 +15,12 @@ import {
 } from "@sonolect/validation";
 import {
   BoundedMap,
+  disableEndpoints,
+  isProduction,
   registerServiceSecurity,
   resolveListenOptions,
   type ServiceEnv,
+  type UnavailableEndpoint,
 } from "@sonolect/service-kit";
 
 const serviceName = "sonolect-worker-service";
@@ -49,6 +52,26 @@ const sendValidationError = (reply: FastifyReply, error: unknown) => {
   }
   throw error;
 };
+
+/**
+ * The task queue lives in memory and every handler below only says
+ * "Placeholder for ...". Production refuses the queue instead of accepting
+ * tasks it never runs and loses on restart.
+ */
+const PRODUCTION_UNAVAILABLE: readonly UnavailableEndpoint[] = [
+  "GET /tasks",
+  "POST /tasks",
+  "POST /events/audio",
+  "POST /events/agent",
+  "POST /events/billing",
+  "POST /tasks/:id/dispatch",
+].map((route) => ({
+  route,
+  statusCode: 501,
+  error: "not_implemented",
+  message:
+    "The worker has no task handlers yet, so it does not accept or run tasks in production.",
+}));
 
 const createDispatcher = (): Record<
   EnqueueWorkerTaskRequest["kind"],
@@ -141,11 +164,13 @@ export async function createApp(
 ): Promise<FastifyInstance> {
   const stores = options.stores ?? createStores();
   const dispatcher = createDispatcher();
+  const env = options.env ?? process.env;
   const app = Fastify({ logger: options.logger ?? true });
 
   await app.register(helmet);
   await app.register(cors, { origin: false });
-  registerServiceSecurity(app, { serviceName, env: options.env });
+  registerServiceSecurity(app, { serviceName, env });
+  if (isProduction(env)) disableEndpoints(app, PRODUCTION_UNAVAILABLE);
 
   app.get("/health", async () => ({ status: "ok", service: serviceName }));
 
