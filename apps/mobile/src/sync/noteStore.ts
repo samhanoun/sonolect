@@ -14,12 +14,16 @@ import { noteToTurn, parseCompanion, turnToNote } from "./noteMapping";
  * the app shows and writes remote changes through the app's storage.
  *
  * A remote change is written to storage first, then shown, and only if
- * the note is still the one the engine compared against: a note the user
- * changed meanwhile keeps the user's version (its own save comes after this
- * write), and the engine tries again on its next run.
+ * the notes did not change meanwhile. A save the app started during the
+ * write comes after it and writes the notes the app shows, so a note the
+ * user edited keeps the user's version; the engine then tries again on its
+ * next run.
  */
 export interface SyncNotesHost {
-  /** The notes that sync: what the phone shows, or none while history is off. */
+  /**
+   * The notes that sync: what the phone shows, or none while history is
+   * off. A new array whenever a note changes, never changed in place.
+   */
   notes(): readonly TranscriptTurn[];
   /** A note's companion value (storageCore SYNC_COMPANION_PREFIX). */
   readCompanion(id: string): Promise<string | null>;
@@ -38,7 +42,7 @@ export interface SyncNotesHost {
   now(): number;
 }
 
-/** The notes were wiped while sync wrote one: the engine tries again on its next run. */
+/** The notes changed or were wiped while sync wrote one: the engine tries again on its next run. */
 export class NotesChangedError extends Error {
   constructor() {
     super("the notes changed while sync was writing");
@@ -80,10 +84,11 @@ export function createSyncNoteStore(host: SyncNotesHost): NoteStore {
     },
 
     async applyRemote(change) {
+      const shown = host.notes();
       const before = find(change.id);
       if (!localMatches(before, change.expected)) return false;
       const generation = host.generation();
-      let shown: TranscriptTurn | null = null;
+      let written: TranscriptTurn | null = null;
       if (change.note === null) {
         await host.write({ remove: [change.id] });
       } else {
@@ -95,16 +100,18 @@ export function createSyncNoteStore(host: SyncNotesHost): NoteStore {
           before,
         );
         await host.write({ put: [{ note: turn, companion }] });
-        shown = turn;
+        written = turn;
       }
-      // Changed or wiped while writing: the user's version stays.
-      if (find(change.id) !== before || host.generation() !== generation)
+      // Changed or wiped while writing: what the app shows stays, and its
+      // save (queued after this write) puts it back in storage.
+      if (host.notes() !== shown || host.generation() !== generation)
         return false;
-      host.show(shown ? { put: [shown] } : { remove: [change.id] });
+      host.show(written ? { put: [written] } : { remove: [change.id] });
       return true;
     },
 
     async saveConflictCopy(id, note, hlc) {
+      const shown = host.notes();
       const generation = host.generation();
       const { turn, companion } = noteToTurn(
         id,
@@ -114,7 +121,9 @@ export function createSyncNoteStore(host: SyncNotesHost): NoteStore {
         find(id),
       );
       await host.write({ put: [{ note: turn, companion }] });
-      if (host.generation() !== generation) throw new NotesChangedError();
+      // A save queued meanwhile removes the copy again: the next run saves it.
+      if (host.notes() !== shown || host.generation() !== generation)
+        throw new NotesChangedError();
       host.show({ put: [turn] });
     },
   };
@@ -148,12 +157,14 @@ export interface NotesHostOptions {
   onRemoved?(ids: readonly string[]): void;
 }
 
+const NO_NOTES: readonly TranscriptTurn[] = [];
+
 /** The SyncNotesHost of the app's store. */
 export function createNotesHost(options: NotesHostOptions): SyncNotesHost {
   return {
     notes: () => {
       const state = options.read();
-      return state.writable ? state.history : [];
+      return state.writable ? state.history : NO_NOTES;
     },
     readCompanion: (id) => options.readCompanion(id),
     async write(change) {

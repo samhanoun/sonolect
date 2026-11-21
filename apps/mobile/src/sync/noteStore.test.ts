@@ -309,6 +309,60 @@ describe("sync note store: writes that race the user", () => {
     }
   });
 
+  it("tries again when another note changes while a remote version is being written", async () => {
+    const v = await vault();
+    const a = await v.device();
+    const b = await v.device();
+    const note = await a.phone.add(makeTurn(), a.stamp);
+    await a.engine.sync();
+    await b.engine.sync();
+    v.tick();
+    await a.phone.edit(note.id, { refinedText: "From A." }, a.stamp);
+    await a.engine.sync();
+
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let holding = true;
+    b.phone.kv.gate = async (op) => {
+      if (holding && op === "multiSet") {
+        holding = false;
+        await held;
+      }
+    };
+    const run = b.engine.sync();
+    await settle();
+    // A new note on B: its save, queued behind the held write, still holds
+    // the version of the note B showed.
+    const adding = b.phone.add(
+      makeTurn({ refinedText: "New on B." }),
+      b.stamp,
+    );
+    release();
+    const added = await adding;
+    const report = await run;
+    assert.equal(report.deferred, true);
+    assert.equal(b.phone.get(note.id)?.refinedText, note.refinedText);
+    await b.phone.restart();
+    assert.equal(
+      b.phone.get(note.id)?.refinedText,
+      note.refinedText,
+      "storage holds what B showed",
+    );
+
+    await b.engine.sync();
+    assert.equal(b.phone.get(note.id)?.refinedText, "From A.");
+    await b.phone.restart();
+    assert.equal(b.phone.get(note.id)?.refinedText, "From A.");
+    assert.equal(b.phone.get(added.id)?.refinedText, "New on B.");
+    assert.equal(
+      b.phone.history.filter((turn) => turn.conflictOf).length,
+      0,
+      "no conflict: B never changed the note",
+    );
+  });
+
   it("does not show a note written while the notes were wiped", async () => {
     const v = await vault();
     const a = await v.device();
