@@ -257,5 +257,27 @@ describe("direct run", () => {
     assert.equal(directRunNodeEnv({ NODE_ENV: "  " }), "production");
     assert.equal(directRunNodeEnv({ NODE_ENV: "production" }), "production");
     assert.equal(directRunNodeEnv({ NODE_ENV: "development" }), "development");
+    assert.equal(directRunNodeEnv({ NODE_ENV: "test" }), "test");
+  });
+
+  it("treats every value but development and test as production", () => {
+    for (const value of [
+      "Production",
+      "PRODUCTION",
+      " production ",
+      "prod",
+      "staging",
+      "dev",
+    ])
+      assert.equal(directRunNodeEnv({ NODE_ENV: value }), "production", value);
+  });
+
+  it("reads development and test in any case", () => {
+    assert.equal(directRunNodeEnv({ NODE_ENV: "Development" }), "development");
+    assert.equal(
+      directRunNodeEnv({ NODE_ENV: " DEVELOPMENT " }),
+      "development",
+    );
+    assert.equal(directRunNodeEnv({ NODE_ENV: "Test" }), "test");
   });
 });

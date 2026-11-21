@@ -882,14 +882,18 @@ export async function createApp(
 }
 
 /**
- * The mode a direct run (`node dist/index.js`) starts in: production unless
- * NODE_ENV names another mode. An unset or empty NODE_ENV is production, so a
- * deployment that forgets it still requires sign-in and keeps the preview
- * routes off.
+ * The mode a direct run (`node dist/index.js`) starts in. Only `development`
+ * and `test` start outside production, in any case and with spaces trimmed.
+ * Every other value is production, unset and empty included, so a deployment
+ * that forgets NODE_ENV or spells it `Production` or `prod` still requires
+ * sign-in and keeps the preview routes off.
  */
 export const directRunNodeEnv = (
   env: Record<string, string | undefined> = process.env,
-): string => env.NODE_ENV?.trim() || "production";
+): "development" | "test" | "production" => {
+  const mode = env.NODE_ENV?.trim().toLowerCase();
+  return mode === "development" || mode === "test" ? mode : "production";
+};
 
 const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
 
