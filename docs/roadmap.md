@@ -53,7 +53,7 @@ Optional cloud layer for sync, collaboration, and enhanced transcription accurac
 - **GCP infrastructure** — Cloud Run API + Worker services, Firestore, Cloud SQL, Cloud Storage, Pub/Sub (Terraform-managed across dev/staging/prod)
 - **Auth & identity** — Firebase Auth or OAuth 2.0, tenant-scoped data isolation
 - **Cloud STT fallback** — optional server-side transcription for higher accuracy or unsupported languages
-- **Session sync** — end-to-end encrypted upload/download of sessions and audio artifacts
+- **Note sync** — end-to-end encrypted sync of notes between a user's devices, with no account (QR code or typed code). Built in both apps and hidden until a sync server is hosted ([sync-setup.md](sync-setup.md)). Recordings (audio artifacts) are a later step: encrypted desktop-to-desktop upload, pending a cost decision
 - **Agent framework** — async agent actions pipeline via Pub/Sub for summarisation, action-item extraction, keyword tagging
 - **Billing integration** — usage metering, Stripe webhooks, plan enforcement
 - **Monitoring** — Cloud Monitoring dashboards, SLO alerts, structured logging
@@ -82,6 +82,6 @@ Multi-user collaboration, administration, and compliance features for organisati
 ## Guiding Principles
 
 1. **Offline-first** — every core feature must work without a network connection.
-2. **Privacy by default** — audio and transcripts never leave the device unless the user opts in.
+2. **Privacy by default** — audio and transcripts never leave the device unless the user opts in, and synced notes leave it only end-to-end encrypted.
 3. **Incremental cloud** — cloud features enhance but never gate the local experience.
 4. **Ship small, ship often** — two-week release cadence with feature flags for progressive rollout.
