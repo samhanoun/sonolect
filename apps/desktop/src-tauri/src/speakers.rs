@@ -18,6 +18,9 @@
 //! speech takes the speaker of the nearest window, and the result becomes
 //! turns numbered by first appearance.
 //!
+//! A cancel is honoured at every step, the grouping included: a cancelled run
+//! returns an error, never turns.
+//!
 //! Nothing leaves the device. The model is downloaded only when the user asks
 //! for it, and its size and SHA-256 are checked before every load, so the
 //! ONNX parser only ever reads the pinned file.
@@ -293,6 +296,7 @@ fn levels(
     cancel: &AtomicBool,
     mut progress: impl FnMut(),
 ) -> Result<Vec<f32>, String> {
+    let cancelled = || cancel.load(Ordering::Relaxed);
     let mut levels = Vec::new();
     // A second at a time: a whole number of 20 ms frames.
     let mut block = Vec::with_capacity(SAMPLE_RATE);
@@ -301,11 +305,14 @@ fn levels(
         if block.len() == SAMPLE_RATE {
             levels.extend(streaming::frame_levels(&block));
             block.clear();
-            if cancel.load(Ordering::Relaxed) {
+            if cancelled() {
                 return Err(CANCELLED.into());
             }
             progress();
         }
+    }
+    if cancelled() {
+        return Err(CANCELLED.into());
     }
     levels.extend(streaming::frame_levels(&block));
     Ok(levels)
@@ -753,10 +760,32 @@ fn detect<P: VoicePrint>(
             progress(FIRST_PASS_PERCENT + done as u64 * (99 - FIRST_PASS_PERCENT) / total);
         },
     )?;
-    let labels = cluster(&prints, &windows, speakers);
-    let mut turns = turns(&regions, &windows, &labels);
-    smooth(&mut turns);
+    let turns = speaker_turns(&regions, &windows, &prints, speakers, cancel)?;
     progress(100);
+    Ok(turns)
+}
+
+/// Groups the voice prints into speakers, and the speech into their turns.
+/// Grouping the prints of a long recording takes a while after the last
+/// window, so a cancel that comes meanwhile still wins: it returns an error,
+/// never turns.
+fn speaker_turns(
+    regions: &[(usize, usize)],
+    windows: &[(usize, usize)],
+    prints: &[Embedding],
+    speakers: Option<usize>,
+    cancel: &AtomicBool,
+) -> Result<Vec<SpeakerTurn>, String> {
+    let cancelled = || cancel.load(Ordering::Relaxed);
+    let labels = cluster(prints, windows, speakers);
+    if cancelled() {
+        return Err(CANCELLED.into());
+    }
+    let mut turns = turns(regions, windows, &labels);
+    smooth(&mut turns);
+    if cancelled() {
+        return Err(CANCELLED.into());
+    }
     Ok(numbered(&turns))
 }
 
@@ -790,7 +819,11 @@ fn speaker_count(speakers: Option<u8>) -> Result<Option<usize>, String> {
 
 /// One detection at a time: each one already uses every thread it may.
 static RUNNING: Mutex<()> = Mutex::new(());
-/// Set by `cancel_speaker_detection`, checked before every window.
+/// Set by `cancel_speaker_detection` and cleared when a run begins. A run
+/// checks it every second of the first pass, before every window and after
+/// grouping the voice prints. A cancel that comes before the run begins is
+/// cleared with it, so the interface sends it again on the run's next
+/// progress event.
 static CANCEL: AtomicBool = AtomicBool::new(false);
 
 fn model_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -874,7 +907,8 @@ pub async fn detect_speakers(
     .map_err(|e| e.to_string())?
 }
 
-/// Stops the detection that is running, before its next window.
+/// Stops the detection that is running at its next check, and makes it fail
+/// with `CANCELLED` instead of returning turns.
 #[tauri::command]
 pub fn cancel_speaker_detection() {
     CANCEL.store(true, Ordering::SeqCst);
@@ -1394,6 +1428,37 @@ mod tests {
         );
         assert_eq!(result.unwrap_err(), CANCELLED);
         assert_eq!(print.calls.load(Ordering::SeqCst), 0);
+        // Even a recording shorter than a second.
+        let short = Box::new(voice(0.5, 220.0).into_iter().map(Ok));
+        assert_eq!(
+            levels(short, &AtomicBool::new(true), || {}).unwrap_err(),
+            CANCELLED
+        );
+    }
+
+    #[test]
+    fn a_cancel_while_grouping_returns_no_turns() {
+        let (audio, _) = dialogue(6);
+        let regions = speech_regions(&streaming::frame_levels(&audio));
+        let windows = windows(&regions);
+        let print = ByPitch::default();
+        let prints: Vec<Embedding> = windows
+            .iter()
+            .map(|&(start, end)| {
+                let window: Vec<f32> = audio[start..end]
+                    .iter()
+                    .map(|sample| f32::from(*sample) / 32768.0)
+                    .collect();
+                print.embed(&mut (), &window).unwrap()
+            })
+            .collect();
+        let group = |cancel: bool| {
+            speaker_turns(&regions, &windows, &prints, None, &AtomicBool::new(cancel))
+        };
+        assert_eq!(group(false).unwrap().len(), 6);
+        // Cancelled after the last window, while the prints are grouped:
+        // the turns are thrown away.
+        assert_eq!(group(true).unwrap_err(), CANCELLED);
     }
 
     #[test]
