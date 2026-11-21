@@ -298,10 +298,7 @@ describe("sync note store: writes that race the user", () => {
     await settle();
     // A new note on B: its save, queued behind the held write, still holds
     // the version of the note B showed.
-    const adding = b.phone.add(
-      makeTurn({ refinedText: "New on B." }),
-      b.stamp,
-    );
+    const adding = b.phone.add(makeTurn({ refinedText: "New on B." }), b.stamp);
     release();
     const added = await adding;
     const report = await run;

@@ -269,8 +269,8 @@ export const mobileStorage = {
     await attempt(() => this.saveApiToken(undefined));
     if (Platform.OS !== "web") {
       await Promise.all(
-        [KEYS.settings, LEGACY_V1_KEY, LEGACY_AUTH_KEY, SYNC_KEY_ITEM].map((key) =>
-          SecureStore.deleteItemAsync(key).catch(() => undefined),
+        [KEYS.settings, LEGACY_V1_KEY, LEGACY_AUTH_KEY, SYNC_KEY_ITEM].map(
+          (key) => SecureStore.deleteItemAsync(key).catch(() => undefined),
         ),
       );
     }
