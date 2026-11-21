@@ -90,17 +90,20 @@ export function historyOffPrompt(
 
 /**
  * Clear history: null when there is nothing to delete (the button is then
- * disabled), otherwise the confirmation to show.
+ * disabled), otherwise the confirmation to show. With sync on, the notes
+ * are deleted on the other devices too, and the message says so.
  */
 export function clearHistoryPrompt(
   t: Strings,
   noteCount: number,
   notesUnread = false,
+  syncOn = false,
 ): ConfirmPrompt | null {
   if (noteCount <= 0 && !notesUnread) return null;
+  const message = deletionMessage(t, noteCount, notesUnread);
   return {
     title: t.settings.clearHistoryTitle,
-    message: deletionMessage(t, noteCount, notesUnread),
+    message: syncOn ? `${message} ${t.sync.clearEverywhere}` : message,
   };
 }
 

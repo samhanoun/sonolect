@@ -8,10 +8,11 @@ import { ROOT_KEY_BYTES, assertRootKey } from "./keys";
  * the server URL is fixed at build time. Whoever holds the link or the code
  * can read and change every synced note.
  *
- * - Link (QR code): sonolect://sync/join#v=1&k=<base64url root>. The key is in
- *   the fragment; parsers also accept it as a query string (?v=1&k=), since
- *   Expo Router passes query parameters to a screen but may drop fragments,
- *   and they ignore parameters they do not know.
+ * - Link (QR code): sonolect://sync/join?v=1&k=<base64url root>. The key is in
+ *   the query string because Expo Router (SDK 58) hands a native deep link's
+ *   query parameters to the screen and drops its fragment. Parsers also
+ *   accept the fragment form (#v=1&k=), which earlier builds of the link
+ *   used, and ignore parameters they do not know.
  * - Typed code: Crockford base32 of the root and a 3-byte SHA-256 checksum,
  *   56 characters shown in 14 groups of 4. Spaces, dashes and lower case
  *   are accepted; I and L read as 1, O as 0.
@@ -46,7 +47,7 @@ export class PairingError extends Error {
 /** The link for the QR code. */
 export function pairingLink(root: Uint8Array): string {
   assertRootKey(root);
-  return `${PAIRING_LINK_PREFIX}#v=${PAIRING_VERSION}&k=${base64urlEncode(root)}`;
+  return `${PAIRING_LINK_PREFIX}?v=${PAIRING_VERSION}&k=${base64urlEncode(root)}`;
 }
 
 function decodeComponent(value: string): string {

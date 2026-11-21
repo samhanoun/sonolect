@@ -1,6 +1,8 @@
 import * as assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { checkSyncServerUrl } from "@sonolect/sync-core";
+
 import type { CompanionSettings, TranscriptTurn } from "./domain";
 import { DEFAULT_SETTINGS, REFINEMENT_MODES } from "./domain";
 import {
@@ -8,8 +10,14 @@ import {
   availableRefinementModesFor,
   effectiveSettingsFor,
   phoneOnlyMigration,
+  syncServerUrlFor,
 } from "./features";
 import { resolveMobileLocalApiConfig } from "./localApi";
+
+// The build-time check (plain JS, run by app.config.js).
+const releaseConfig = require("../config/release.cjs") as {
+  syncServerUrlFrom: (env: Record<string, string>) => string | null;
+};
 
 const settings: CompanionSettings = {
   ...DEFAULT_SETTINGS,
@@ -136,5 +144,88 @@ describe("phone-only switch", () => {
     assert.equal(second.changed, false);
     assert.equal(second.settings, first.settings);
     assert.equal(second.history, first.history);
+  });
+});
+
+describe("sync server URL", () => {
+  const dev = { dev: true, platform: "ios" };
+  const release = { dev: false, platform: "android" };
+
+  it("hides sync without a URL", () => {
+    for (const raw of [undefined, "", "   "]) {
+      assert.equal(syncServerUrlFor(raw, dev), null);
+      assert.equal(syncServerUrlFor(raw, release), null);
+    }
+  });
+
+  it("takes an https URL in every build, without its trailing slash", () => {
+    for (const build of [dev, release, { dev: false, platform: undefined }]) {
+      assert.equal(
+        syncServerUrlFor(" https://Sync.Example.org/ ", build),
+        "https://sync.example.org",
+      );
+    }
+  });
+
+  it("allows plain http to this machine or the emulator host in development only", () => {
+    for (const url of [
+      "http://127.0.0.1:8713",
+      "http://localhost:8713",
+      "http://10.0.2.2:8713",
+    ]) {
+      assert.equal(syncServerUrlFor(url, dev), url);
+      assert.equal(syncServerUrlFor(url, release), null);
+    }
+    assert.equal(syncServerUrlFor("http://192.168.1.2:8713", dev), null);
+    assert.equal(syncServerUrlFor("http://sync.example.org", dev), null);
+  });
+
+  it("is never offered on web", () => {
+    for (const build of [
+      { dev: true, platform: "web" },
+      { dev: false, platform: "web" },
+    ]) {
+      assert.equal(syncServerUrlFor("https://sync.example.org", build), null);
+    }
+  });
+
+  it("does not depend on the API switch", () => {
+    // No Sonolect API URL and the API off: sync still has its own server.
+    assert.deepEqual(apiConfigFor(false, settings), {});
+    assert.equal(
+      syncServerUrlFor("https://sync.example.org", release),
+      "https://sync.example.org",
+    );
+  });
+
+  it("agrees with the build-time check in config/release.cjs", () => {
+    for (const raw of [
+      "https://sync.example.org",
+      "https://Sync.Example.org/",
+      "https://example.org:8443/sync/",
+      "https://[::1]:8443",
+      "http://127.0.0.1:8713",
+      "http://localhost",
+      "http://10.0.2.2:8713/",
+      "http://sync.example.org",
+      "ftp://sync.example.org",
+      "https://user@sync.example.org",
+      "https://sync.example.org/?a=1",
+      "https://sync.example.org/#k",
+      "https://sync.example.org:0",
+      "https://sync..example.org",
+      "not a url",
+    ]) {
+      let built: string | null | "refused";
+      try {
+        built = releaseConfig.syncServerUrlFrom({
+          EXPO_PUBLIC_SONOLECT_SYNC_URL: raw,
+        });
+      } catch {
+        built = "refused";
+      }
+      const checked = checkSyncServerUrl(raw, { allowLocalHttp: true });
+      assert.equal(built, checked.ok ? checked.url : "refused", raw);
+    }
   });
 });

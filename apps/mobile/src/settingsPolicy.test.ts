@@ -156,6 +156,15 @@ describe("confirmation prompts", () => {
       message: "This deletes 42 notes saved on this phone.",
     });
   });
+
+  it("says the notes go on the other devices too while sync is on", () => {
+    assert.deepEqual(clearHistoryPrompt(STRINGS.en, 2, false, true), {
+      title: "Clear history?",
+      message:
+        "This deletes 2 notes saved on this phone. They are deleted on your other devices too.",
+    });
+    assert.equal(clearHistoryPrompt(STRINGS.en, 0, false, true), null);
+  });
 });
 
 describe("retention confirmation", () => {

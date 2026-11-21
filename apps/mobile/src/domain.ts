@@ -1,3 +1,4 @@
+import type { Hlc } from "@sonolect/sync-core";
 import type { SonolectMode } from "@sonolect/types";
 
 export type CaptureStatus =
@@ -27,8 +28,17 @@ export interface TranscriptTurn {
   createdAt: string;
   durationMs: number;
   source: "microphone" | "typed" | "remote";
+  /** The dormant Sonolect API sync (features.ts); never set by sync. */
   syncState: "local" | "queued" | "synced";
   pinned?: boolean;
+  /**
+   * When sync last saw this note change (sync-core's clock), stored with the
+   * note so the two are always written together. Only builds with a sync
+   * server set it (src/sync/edits.ts).
+   */
+  hlc?: Hlc;
+  /** A conflict copy made by sync: the id of the note it was copied from. */
+  conflictOf?: string;
 }
 
 export interface CaptureSession {

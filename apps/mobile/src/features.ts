@@ -1,3 +1,5 @@
+import { checkSyncServerUrl } from "@sonolect/sync-core";
+
 import type {
   CompanionSettings,
   RefinementMode,
@@ -18,6 +20,38 @@ import { resolveMobileLocalApiConfig } from "./localApi";
  * on both sides of the switch.
  */
 export const API_FEATURES_ENABLED: boolean = false;
+
+/**
+ * End-to-end encrypted sync between the user's own devices (packages/
+ * sync-core) goes through the sync server fixed at build time by
+ * EXPO_PUBLIC_SONOLECT_SYNC_URL (config/release.cjs fails a build with a bad
+ * one). Without a valid URL, and on web, sync is invisible and the app makes
+ * no sync request. It does not depend on API_FEATURES_ENABLED: the sync
+ * server only stores ciphertext, and the plaintext API sync stays off.
+ *
+ * `platform` is Platform.OS (Expo inlines it as process.env.EXPO_OS, which
+ * keeps this module free of react-native for the Node tests). `dev` is a
+ * development build, which may use plain http to this machine or, from the
+ * Android emulator, to its host.
+ */
+export function syncServerUrlFor(
+  raw: string | undefined,
+  build: { dev: boolean; platform: string | undefined },
+): string | null {
+  if (build.platform === "web") return null;
+  const check = checkSyncServerUrl(raw, { allowLocalHttp: build.dev });
+  return check.ok ? check.url : null;
+}
+
+/** The sync server of this build, or null: then the app has no sync. */
+export const SYNC_URL: string | null = syncServerUrlFor(
+  // Read as written: Expo replaces these expressions when it bundles.
+  process.env.EXPO_PUBLIC_SONOLECT_SYNC_URL,
+  {
+    dev: typeof __DEV__ !== "undefined" && __DEV__,
+    platform: process.env.EXPO_OS,
+  },
+);
 
 /** Refinement modes that need a model on the Sonolect API. */
 export const API_ONLY_MODES = [

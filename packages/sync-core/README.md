@@ -254,9 +254,10 @@ back unchanged.
 Pairing gives another device only the root key. The server URL comes from the
 build.
 
-- **Link (QR code)**: `sonolect://sync/join#v=1&k=<base64url root>`.
-  - The parsers also accept the query form `?v=1&k=…`. Expo Router passes
-    query parameters to a screen and may drop fragments.
+- **Link (QR code)**: `sonolect://sync/join?v=1&k=<base64url root>`.
+  - The key is in the query string: Expo Router (SDK 58) passes a native
+    deep link's query parameters to the screen and drops its fragment.
+  - The parsers also accept the fragment form `#v=1&k=…`.
   - They also accept `sonolect:///sync/join`, any letter case, and unknown
     parameters, which they ignore.
   - `parsePairingParams(useLocalSearchParams())` reads a deep-link screen's

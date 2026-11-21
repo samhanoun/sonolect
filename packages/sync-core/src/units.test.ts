@@ -101,18 +101,19 @@ describe("hlc", () => {
 describe("pairing", () => {
   const root = generateRootKey(randomBytes);
 
-  it("puts only the key in the link, in the fragment", () => {
+  it("puts only the key in the link, in the query string", () => {
     const link = pairingLink(VECTOR_ROOT);
     assert.equal(
       link,
-      "sonolect://sync/join#v=1&k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "sonolect://sync/join?v=1&k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
     );
     assert.deepEqual(parsePairingLink(pairingLink(root)), root);
   });
 
-  it("accepts the query form, three slashes and parameters it does not know", () => {
+  it("accepts the fragment form, three slashes and parameters it does not know", () => {
     const k = base64urlEncode(root);
     for (const link of [
+      `sonolect://sync/join#v=1&k=${k}`,
       `sonolect://sync/join?v=1&k=${k}`,
       `sonolect:///sync/join?v=1&k=${k}`,
       `SONOLECT://sync/join/#v=1&k=${k}&s=https://example.org`,
