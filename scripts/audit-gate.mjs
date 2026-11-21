@@ -16,61 +16,21 @@ import { evaluateAudit, MalformedReportError } from "./audit-gate-core.mjs";
 
 const TRIAGE_DOC = new URL("../docs/security-scan-triage.md", import.meta.url);
 
-const BUILD_TIME_ONLY =
-  "build-time only: runs in the Expo/Metro CLI on a developer machine or CI, not in the app bundle";
-const REVIEW_BY = "Expo SDK 59 upgrade";
-
-function buildTimeOnly(id, via) {
-  return {
-    id,
-    importer: "apps/mobile",
-    via,
-    reason: BUILD_TIME_ONLY,
-    reviewBy: REVIEW_BY,
-  };
-}
-
 // Each entry accepts one advisory on the dependency paths that go through
-// `via` (package names, ">" between them; see coversPath). Filled from a
-// live `pnpm audit --json` on 2026-11-12: every high advisory then reached
-// only the Expo and Metro tooling of apps/mobile. The release bundles'
-// source maps (expo export --source-maps) contain none of these packages.
-export const ACCEPTED = [
-  // ws 7.5.10: memory exhaustion in the WebSocket servers of the dev tools.
-  buildTimeOnly("GHSA-96hv-2xvq-fx4p", "metro>ws"),
-  buildTimeOnly("GHSA-96hv-2xvq-fx4p", "@react-native/dev-middleware>ws"),
-  {
-    id: "GHSA-96hv-2xvq-fx4p",
-    importer: "apps/mobile",
-    via: "react-devtools-core>ws",
-    reason:
-      "dev tooling only: the standalone React DevTools server uses ws; release bundles contain no react-devtools-core",
-    reviewBy: REVIEW_BY,
-  },
-  {
-    id: "GHSA-96hv-2xvq-fx4p",
-    importer: "apps/mobile",
-    via: "react-native>ws",
-    reason:
-      "not in the app bundle: react-native declares ws for its dev tooling, no react-native file requires it, and the release bundles contain no ws",
-    reviewBy: REVIEW_BY,
-  },
-  // js-yaml 4.1.1 in @expo/xcpretty (formats Xcode build logs).
-  buildTimeOnly("GHSA-52cp-r559-cp3m", "@expo/cli>@expo/xcpretty"),
-  buildTimeOnly("GHSA-5p4m-2wfm-xmqj", "@expo/cli>@expo/xcpretty"),
-  buildTimeOnly("GHSA-2883-xcg3-v3hh", "@expo/cli>@expo/xcpretty"),
-  // node-forge 1.4.0 in the Expo CLI (code signing certificates, dev HTTPS).
-  buildTimeOnly("GHSA-86w9-cpqp-85rv", "@expo/cli"),
-  buildTimeOnly("GHSA-7wch-p9px-956x", "@expo/cli"),
-  buildTimeOnly("GHSA-jc66-7q78-782g", "@expo/cli"),
-  buildTimeOnly("GHSA-8hrf-8g6f-7xwp", "@expo/cli"),
-  buildTimeOnly("GHSA-hqq3-7jhf-c5jx", "@expo/cli"),
-  buildTimeOnly("GHSA-5x38-2vff-x55p", "@expo/cli"),
-  buildTimeOnly("GHSA-rhr8-3pm8-cq29", "@expo/cli"),
-  buildTimeOnly("GHSA-6qrw-m8cv-hcxf", "@expo/cli"),
-  // compression 1.8.1 in the Expo CLI dev server.
-  buildTimeOnly("GHSA-vc2v-76pw-4v95", "@expo/cli"),
-];
+// `via` (package names, ">" between them; see coversPath):
+//
+//   {
+//     id: "GHSA-xxxx-xxxx-xxxx",
+//     importer: "apps/mobile",
+//     via: "@expo/cli>node-forge",
+//     reason: "why this path cannot reach users",
+//     reviewBy: "when to look again, e.g. the next Expo SDK upgrade",
+//   }
+//
+// Empty since 2026-11-21: the high advisories accepted on 2026-11-12 (ws,
+// js-yaml, node-forge and compression in the Expo and Metro tooling) are
+// fixed by the overrides in package.json. See docs/security-scan-triage.md.
+export const ACCEPTED = [];
 
 function runAudit() {
   try {
