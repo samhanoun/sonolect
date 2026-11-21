@@ -108,8 +108,21 @@ const PRODUCTION_UNAVAILABLE: readonly UnavailableEndpoint[] = [
   message: TRANSCRIPTION_UNAVAILABLE_MESSAGE,
 }));
 const PRODUCTION_NOTES = [
-  "POST /refinements: rewrite and translate answer 501; clean and summarize use the template provider",
+  "POST /refinements: rewrite, summarize and translate answer 501; clean uses the template provider",
 ];
+
+/**
+ * Refinements that need a language model. The template output below is a
+ * development stand-in (a summary is only the first two sentences), so
+ * production refuses it rather than return text that only looks rewritten,
+ * summarized or translated. `clean` is a fixed filler and spacing clean-up,
+ * so it stays on.
+ */
+const MODEL_REFINEMENTS: ReadonlySet<RefinementInput["action"]> = new Set([
+  "rewrite",
+  "summarize",
+  "translate",
+]);
 
 const createStores = (): InMemoryStores => ({
   transcriptionJobs: new BoundedMap<string, TranscriptionJob>(
@@ -373,13 +386,7 @@ export async function createApp(
           refinementRequestSchema,
           request,
         );
-        // Rewrite and translate need a language model. The template output
-        // below is a development stand-in, so production refuses it rather
-        // than return text that only looks rewritten or translated.
-        if (
-          isProduction(env) &&
-          (input.action === "rewrite" || input.action === "translate")
-        )
+        if (isProduction(env) && MODEL_REFINEMENTS.has(input.action))
           throw new ServiceHttpError(
             501,
             "refinement_unavailable",

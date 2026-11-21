@@ -71,6 +71,14 @@ try {
   assert.equal(refined.statusCode, 200, refined.body);
   assert.equal(refined.json<RefinementResult>().action, "translate");
   assert.ok(refined.json<RefinementResult>().outputText.includes("fr"));
+
+  const summary = await app.inject({
+    method: "POST",
+    url: "/refinements",
+    payload: { action: "summarize", text: "One. Two. Three. Four." },
+  });
+  assert.equal(summary.statusCode, 200, summary.body);
+  assert.equal(summary.json<RefinementResult>().outputText, "One. Two.");
 } finally {
   await app.close();
 }
@@ -158,13 +166,26 @@ try {
     assert.ok(!response.body.includes("mock transcript"));
   }
 
-  const translate = await production.inject({
-    method: "POST",
-    url: "/refinements",
-    headers,
-    payload: { action: "translate", text: "Hello.", targetLanguage: "fr" },
-  });
-  assert.equal(translate.statusCode, 501, translate.body);
+  // Rewrite, summarize and translate need a language model, so production
+  // refuses the template stand-ins.
+  for (const payload of [
+    { action: "rewrite", text: "Hello.", instructions: "Make it formal." },
+    { action: "summarize", text: "One. Two. Three. Four." },
+    { action: "translate", text: "Hello.", targetLanguage: "fr" },
+  ]) {
+    const refusal = await production.inject({
+      method: "POST",
+      url: "/refinements",
+      headers,
+      payload,
+    });
+    assert.equal(refusal.statusCode, 501, `${payload.action}: ${refusal.body}`);
+    assert.equal(
+      refusal.json<{ error: string }>().error,
+      "refinement_unavailable",
+      payload.action,
+    );
+  }
 
   const clean = await production.inject({
     method: "POST",
