@@ -157,4 +157,13 @@ describe("sync messages", () => {
       "Les 3 notes de ce téléphone seront copiées dans cette synchronisation.",
     );
   });
+
+  it("says which note a conflict copy comes from, in both languages", () => {
+    assert.equal(
+      STRINGS.en.library.conflictCopyOf("Nov 20, 09:30"),
+      "Conflict copy of the note from Nov 20, 09:30: it was changed on two devices, and both versions are kept.",
+    );
+    assert.match(STRINGS.fr.library.conflictCopyOf("20 nov."), /du 20 nov\. :/);
+    assert.notEqual(STRINGS.fr.library.conflictCopyOfGone, "");
+  });
 });

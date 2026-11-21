@@ -143,6 +143,14 @@ export default function LibraryScreen() {
     setExpanded((current) => (current === id ? null : id));
   };
 
+  /** Which note a sync conflict copy was copied from, when it is still here. */
+  const conflictText = (originalId: string) => {
+    const original = history.find((turn) => turn.id === originalId);
+    return original
+      ? t.library.conflictCopyOf(formatNoteDate(original.createdAt, locale))
+      : t.library.conflictCopyOfGone;
+  };
+
   const renderItem = ({
     item,
     index,
@@ -182,6 +190,9 @@ export default function LibraryScreen() {
         >
           {item.refinedText}
         </Text>
+        {open && item.conflictOf ? (
+          <Text style={styles.conflict}>{conflictText(item.conflictOf)}</Text>
+        ) : null}
         {open && item.rawText && item.rawText !== item.refinedText ? (
           <View style={styles.raw}>
             <Label>{t.library.original.toUpperCase()}</Label>
@@ -420,6 +431,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     color: colors.muted,
+  },
+  conflict: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.amber,
   },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   empty: {

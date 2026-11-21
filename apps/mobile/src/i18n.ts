@@ -187,6 +187,10 @@ const en = {
     typed: "TYPED",
     /** A note sync kept when two devices changed it at once. */
     conflictCopy: "CONFLICT COPY",
+    conflictCopyOf: (date: string) =>
+      `Conflict copy of the note from ${date}: it was changed on two devices, and both versions are kept.`,
+    conflictCopyOfGone:
+      "Conflict copy of a note changed on two devices: both versions were kept.",
     expandHint: "Shows the whole transcript",
     collapseHint: "Shows less",
   },
@@ -583,6 +587,10 @@ const fr: Strings = {
     original: "Original",
     typed: "SAISI",
     conflictCopy: "COPIE EN CONFLIT",
+    conflictCopyOf: (date: string) =>
+      `Copie en conflit de la note du ${date} : elle a été modifiée sur deux appareils, et les deux versions sont conservées.`,
+    conflictCopyOfGone:
+      "Copie en conflit d'une note modifiée sur deux appareils : les deux versions ont été conservées.",
     expandHint: "Affiche toute la transcription",
     collapseHint: "Affiche moins",
   },
