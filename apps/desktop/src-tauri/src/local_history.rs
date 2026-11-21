@@ -12,7 +12,7 @@ use std::{
     sync::{Mutex, MutexGuard},
     time::{SystemTime, UNIX_EPOCH},
 };
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -143,11 +143,25 @@ fn store(directory: &Path, capture: &Capture) -> Result<(), String> {
     fs::rename(temp, path).map_err(|e| e.to_string())
 }
 
+/// Sent to the webview after a note changes on this device while sync is on,
+/// so the change reaches the other devices soon.
+pub const LOCAL_CHANGE_EVENT: &str = "sync-local-change";
+
+fn changed_here(app: &tauri::AppHandle, library: &Library) {
+    if library.sync.as_deref().is_some_and(super::sync::is_on) {
+        let _ = app.emit(LOCAL_CHANGE_EVENT, ());
+    }
+}
+
 /// Saves a recording made or changed on this device.
 pub(super) fn write_record(app: &tauri::AppHandle, capture: &mut Capture) -> Result<(), String> {
     let library = Library::open(app)?;
-    let _records = lock();
-    library.save_local(capture)
+    {
+        let _records = lock();
+        library.save_local(capture)?;
+    }
+    changed_here(app, &library);
+    Ok(())
 }
 
 /// Changes a saved record, read again under the lock so that a synced change
@@ -159,11 +173,15 @@ pub(super) fn change_record<T>(
     change: impl FnOnce(&mut Capture) -> T,
 ) -> Result<T, String> {
     let library = Library::open(app)?;
-    let _records = lock();
-    let mut record = read_record(&library.captures, id).unwrap_or_else(missing);
-    let outcome = change(&mut record);
-    record.updated_at_ms = Some(super::sync::now_ms());
-    library.save_local(&mut record)?;
+    let outcome = {
+        let _records = lock();
+        let mut record = read_record(&library.captures, id).unwrap_or_else(missing);
+        let outcome = change(&mut record);
+        record.updated_at_ms = Some(super::sync::now_ms());
+        library.save_local(&mut record)?;
+        outcome
+    };
+    changed_here(app, &library);
     Ok(outcome)
 }
 
@@ -354,7 +372,10 @@ pub fn update_local_capture(
     segments: Vec<super::WhisperSegment>,
 ) -> Result<(), String> {
     valid_id(&id)?;
-    update_record(&Library::open(&app)?, &id, transcript, segments)
+    let library = Library::open(&app)?;
+    update_record(&library, &id, transcript, segments)?;
+    changed_here(&app, &library);
+    Ok(())
 }
 
 impl Library {
@@ -374,7 +395,10 @@ impl Library {
 #[tauri::command]
 pub fn delete_local_capture(app: tauri::AppHandle, id: String) -> Result<(), String> {
     valid_id(&id)?;
-    Library::open(&app)?.delete_by_user(&id)
+    let library = Library::open(&app)?;
+    library.delete_by_user(&id)?;
+    changed_here(&app, &library);
+    Ok(())
 }
 /// Deletes saved recordings and transcripts from this device: every capture
 /// when `older_than_days` is `None` ("Delete all my data"), otherwise those

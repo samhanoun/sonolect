@@ -415,7 +415,12 @@ fn save_state(
         .collect::<Result<Vec<_>, _>>()?;
     let directory = sync.join("state");
     fs::create_dir_all(&directory).map_err(io_failed)?;
-    for (file, value) in writes {
+    // The records first and the meta last, as sync-core's key-value store
+    // does: a save cut short leaves the cursor where it was.
+    let (meta, buckets): (Vec<_>, Vec<_>) = writes
+        .into_iter()
+        .partition(|(file, _)| file == "meta.json");
+    for (file, value) in buckets {
         write_atomically(&directory.join(file), value.as_bytes())?;
     }
     for file in removes {
@@ -424,6 +429,9 @@ fn save_state(
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(io_failed(error)),
         }
+    }
+    for (file, value) in meta {
+        write_atomically(&directory.join(file), value.as_bytes())?;
     }
     Ok(())
 }
@@ -584,10 +592,15 @@ fn take_deletes(sync: &Path) -> Vec<PendingDelete> {
         .collect()
 }
 
-fn finish_deletes(sync: &Path, ids: &[String]) -> Result<(), String> {
+/// Forgets the deletes the engine recorded. One made again meanwhile (the
+/// note came back through sync and was deleted once more) carries another
+/// version and stays.
+fn finish_deletes(sync: &Path, done: &[PendingDelete]) -> Result<(), String> {
     let mut deletes = read_deletes(sync);
-    for id in ids {
-        deletes.remove(id);
+    for PendingDelete { id, hlc } in done {
+        if deletes.get(id) == Some(hlc) {
+            deletes.remove(id);
+        }
     }
     write_deletes(sync, &deletes)
 }
@@ -609,14 +622,14 @@ pub async fn sync_pending_deletes(app: tauri::AppHandle) -> Result<Vec<PendingDe
 #[tauri::command]
 pub async fn sync_pending_deletes_done(
     app: tauri::AppHandle,
-    ids: Vec<String>,
+    deletes: Vec<PendingDelete>,
 ) -> Result<(), String> {
     let Some(sync) = folder(&app) else {
         return Ok(());
     };
     blocking(move || {
         let _files = files_lock();
-        finish_deletes(&sync, &ids)
+        finish_deletes(&sync, &deletes)
     })
     .await
 }
@@ -1331,9 +1344,14 @@ mod tests {
                 },
             ]
         );
-        finish_deletes(&sync, &["1-1".into(), "unknown".into()]).unwrap();
+        let done = |id: &str, hlc: Option<Hlc>| PendingDelete { id: id.into(), hlc };
+        finish_deletes(&sync, &[done("1-1", None), done("unknown", None)]).unwrap();
         assert_eq!(take_deletes(&sync).len(), 1);
-        finish_deletes(&sync, &["turn_2_abc".into()]).unwrap();
+        // Deleted again since the engine took it: that delete still waits.
+        record_delete(&sync, "turn_2_abc", Some(hlc(9, 0, "device-A"))).unwrap();
+        finish_deletes(&sync, &[done("turn_2_abc", Some(hlc(5, 1, "phone")))]).unwrap();
+        assert_eq!(take_deletes(&sync).len(), 1);
+        finish_deletes(&sync, &[done("turn_2_abc", Some(hlc(9, 0, "device-A")))]).unwrap();
         assert!(!sync.join("deletes.json").exists());
         // Turning sync off forgets them with the rest of the state.
         record_delete(&sync, "3-1", None).unwrap();
