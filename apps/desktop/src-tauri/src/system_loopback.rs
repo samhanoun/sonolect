@@ -55,8 +55,13 @@ pub fn open(closing: Arc<AtomicBool>) -> Result<Loopback, String> {
     if output.sample_rate() == 0 || output.channels() == 0 {
         return Err("The playback device reports no audio format.".into());
     }
-    let format = PcmFormat::new(output.sample_rate(), output.channels())
-        .map_err(|_| format!("Unsupported playback format: {}.", output.sample_format()))?;
+    let format = PcmFormat::new(output.sample_rate(), output.channels()).map_err(|_| {
+        format!(
+            "Unsupported playback format: {} Hz, {} channels.",
+            output.sample_rate(),
+            output.channels()
+        )
+    })?;
     let (sender, audio) = mpsc::channel();
     let failed = Arc::new(Mutex::new(None));
     let config = output.config();

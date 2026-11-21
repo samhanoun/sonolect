@@ -293,6 +293,7 @@ export const en = {
   "studio.signal.listening": "Listening",
   "studio.signal.ready": "Ready",
   "studio.signal.meta": "16 kHz · mono · on device",
+  "studio.signal.metaHigh": "48 kHz · stereo when available · on device",
   "studio.overview.eyebrow": "A little less typing",
   "studio.overview.title": "Make room for your thoughts",
   "studio.overview.subtitle":
@@ -808,6 +809,7 @@ export const en = {
   "studio.library.noAudio": "The recording stays on the device that made it.",
   "studio.library.conflictOf": "Conflict copy of the note from {date}",
   "studio.library.conflictCopy": "Conflict copy",
+  "studio.library.saveAudio": "Save audio",
   "native.audioGone":
     "The audio of this recording is no longer on this device.",
   "native.recordingGone": "This recording is no longer in your library.",
@@ -842,8 +844,10 @@ export const en = {
   "toast.micFellBack":
     "Chosen microphone not found. Recording with the system default.",
   "studio.storage.format": "Save recordings as",
-  "studio.storage.wav": "Original quality (WAV)",
-  "studio.storage.opus": "Compressed (Opus, 10× smaller)",
+  "studio.storage.wav": "Speech quality (WAV, 16 kHz mono)",
+  "studio.storage.opus": "Speech quality, compressed (Opus, 10× smaller)",
+  "studio.storage.hq":
+    "High quality (Opus, 48 kHz, stereo when the source has it)",
   "studio.storage.compressNow": "Compress saved recordings",
   "studio.storage.compressing": "Compressing…",
   "studio.storage.compressed.one":
@@ -859,7 +863,9 @@ export const en = {
   "studio.storage.savedOpus":
     "New recordings are compressed once they are transcribed. You can still play them and transcribe them again.",
   "studio.storage.savedWav":
-    "New recordings are kept in original quality. Recordings already compressed stay compressed.",
+    "New recordings are kept as WAV, in speech quality. Recordings already compressed stay compressed.",
+  "studio.storage.savedHq":
+    "New recordings are kept at 48 kHz, in stereo when the source has it. Imported files and older recordings are compressed in speech quality.",
   "studio.transcribe.liveLabel": "Heard so far",
   "capture.keptForRetry":
     "{error} The recording is in your Library, where you can transcribe it again.",
@@ -874,7 +880,7 @@ export const en = {
   "studio.source.microphone": "The microphone",
   "studio.source.system": "This computer's sound",
   "studio.source.systemHint":
-    "The record button records what is playing on this computer, such as a meeting or a video. Dictation with the hotkeys or the bubble still uses the microphone.",
+    "The record button records what is playing on this computer, such as a meeting or a video. So does a dictation shortcut pressed while Sonolect is in front. Dictation into other apps and the bubble always use the microphone.",
   "studio.dock.recordingSystem": "Recording computer sound…",
   "native.noPlaybackDevice": "There is no playback device to record.",
   "native.playbackFormat": "Cannot read the playback format: {reason}",
@@ -896,6 +902,11 @@ export const en = {
   "native.pactlFailed": "pactl failed: {reason}",
   "native.systemAudioBusy": "System audio is unavailable.",
   "native.ffmpegNeeded": "ffmpeg is needed to record system audio.",
+  "native.invalidPcmFormat": "Invalid audio rate or channel count.",
+  "native.invalidPcmFrames": "Invalid 16-bit PCM audio or frame size.",
+  "native.pcmFormatChanged": "The audio format changed during the recording.",
+  "native.invalidQuality": "Invalid recording quality.",
+  "native.cannotConvert": "Cannot convert the audio: {reason}",
   "native.syncNotAvailable":
     "Sync is not available in this version of Sonolect.",
   "native.syncKeychainLinux":

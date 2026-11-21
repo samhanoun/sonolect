@@ -1,15 +1,28 @@
 /**
  * How saved recordings are kept on disk.
  *
- * A recording is always made as WAV, which survives a crash mid-recording.
- * With compressed storage, each finished recording is then turned into Ogg
- * Opus on the native side (`compress_local_captures`), about a tenth of the
- * size. Playback and transcribing again work the same with either format.
+ * A recording is always made as a 16 kHz mono WAV, the speech engine's
+ * format, which survives a crash mid-recording. With compressed storage,
+ * each finished recording is then turned into Ogg Opus on the native side
+ * (`compress_local_captures`), about a tenth of the size. In high quality, a
+ * live recording also writes a 48 kHz Opus copy while it is made (stereo
+ * when its source is), which takes the WAV's place when it ends. Playback
+ * and transcribing again work the same with every format.
  */
 import type { NativeCall } from "./privacyControls";
 
-export const CAPTURE_FORMATS = ["wav", "opus"] as const;
+export const CAPTURE_FORMATS = ["wav", "opus", "hq"] as const;
 export type CaptureFormat = (typeof CAPTURE_FORMATS)[number];
+
+/** How a live recording is made: what `capture_begin` takes. */
+export type CaptureQuality = "speech" | "high";
+
+/** High quality for the "hq" choice; speech quality otherwise. */
+export function captureQuality(
+  format: CaptureFormat = loadCaptureFormat(),
+): CaptureQuality {
+  return format === "hq" ? "high" : "speech";
+}
 
 export const CAPTURE_FORMAT_KEY = "sonolect.captureFormat";
 
@@ -27,7 +40,7 @@ export function isCaptureFormat(value: unknown): value is CaptureFormat {
   return (CAPTURE_FORMATS as readonly unknown[]).includes(value);
 }
 
-/** The saved choice; WAV until the user picks compressed storage. */
+/** The saved choice; WAV until the user picks another one. */
 export function loadCaptureFormat(
   storage: StorageLike | undefined = browserStorage(),
 ): CaptureFormat {
@@ -65,15 +78,38 @@ export function compressCaptures(call: NativeCall): Promise<CompressResult> {
 
 /**
  * Applies the storage choice after a recording or an import: compresses what
- * is still WAV when the user chose compressed storage, and does nothing
+ * is still WAV when the user chose compressed storage or high quality (whose
+ * imports and interrupted recordings are kept as Opus too), and does nothing
  * otherwise. Recordings are never expanded back.
  */
 export async function applyCaptureFormat(
   call: NativeCall,
   format: CaptureFormat = loadCaptureFormat(),
 ): Promise<CompressResult | undefined> {
-  if (format !== "opus") return undefined;
+  if (format === "wav") return undefined;
   return compressCaptures(call);
+}
+
+/** Opus at 24 kbit/s (speech) and at 96 kbit/s (high quality, stereo). */
+const OPUS_BYTES_PER_MS = { opus: 3, hq: 12 } as const;
+
+/**
+ * What a finished live recording is saved as. A WAV's size is exact (a
+ * 44-byte header, then 32 bytes a millisecond); an Opus file's is its
+ * bitrate's, the most it takes.
+ */
+export function savedCaptureMetadata(
+  durationMs: number,
+  format: CaptureFormat = loadCaptureFormat(),
+): { durationMs: number; mimeType: string; sizeBytes: number } {
+  const ms = Math.max(0, Math.round(durationMs));
+  return format === "wav"
+    ? { durationMs: ms, mimeType: "audio/wav", sizeBytes: 44 + ms * 32 }
+    : {
+        durationMs: ms,
+        mimeType: "audio/ogg",
+        sizeBytes: ms * OPUS_BYTES_PER_MS[format],
+      };
 }
 
 const SIZE_UNITS = ["kilobyte", "megabyte", "gigabyte"] as const;

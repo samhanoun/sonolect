@@ -4,17 +4,23 @@
  * The audio never sits in the web layer: every half second goes to disk on
  * the native side, which transcribes it at pauses and reports the text as
  * `capture-partial` events. That is what lifts the old three-minute limit
- * and shows text while the user is still speaking.
+ * and shows text while the user is still speaking. A speech-quality
+ * recording sends 16 kHz mono, as the native side has always taken it; a
+ * high-quality one sends its source's rate and channels as they are, with
+ * headers that say so, and the native side converts them.
  */
 import {
   normalizeWhisperSegments,
   type DesktopWhisperResult,
   type DesktopWhisperSegmentPayload,
 } from "./desktopWhisper";
+import type { CaptureQuality } from "./captureStorage";
 import {
   PcmBatcher,
   PcmResampler,
+  capturePieceSamples,
   floatToPcm16,
+  mixToMono,
   pcmBytes,
   pcmLevel,
 } from "./pcmStream";
@@ -27,7 +33,12 @@ export type LiveCaptureSettings = {
   /** An online speech model; the local engine when absent or "local". */
   provider?: string;
   model?: string;
+  /** "high" keeps a 48 kHz copy of a live recording; speech when absent. */
+  quality?: CaptureQuality;
 };
+
+/** The rate and channels of the pieces a high-quality recording sends. */
+export type PcmFormat = { rate: number; channels: number };
 
 export type LivePartialEvent = {
   captureId: string;
@@ -44,8 +55,15 @@ export type LiveCaptureNativeResult = {
 /** The native side of a live recording. Replaced by a fake in tests. */
 export type LiveCaptureTransport = {
   begin: (settings: LiveCaptureSettings) => Promise<string>;
-  /** Sends one piece; resolves with the length recorded so far. */
-  append: (captureId: string, pcm: Uint8Array) => Promise<number>;
+  /**
+   * Sends one piece; resolves with the length recorded so far. Without a
+   * format the piece is 16 kHz mono.
+   */
+  append: (
+    captureId: string,
+    pcm: Uint8Array,
+    format?: PcmFormat,
+  ) => Promise<number>;
   finish: (captureId: string) => Promise<LiveCaptureNativeResult>;
   cancel: (captureId: string) => Promise<void>;
   /** Subscribes to live text; resolves with the unsubscribe function. */
@@ -69,7 +87,9 @@ const MAX_WAITING_PIECES = 240;
 
 export class LiveCaptureSession {
   private resampler: PcmResampler | undefined;
-  private readonly batcher = new PcmBatcher();
+  private batcher = new PcmBatcher();
+  /** A high-quality recording's format, fixed by its first block. */
+  private format: PcmFormat | undefined;
   private readonly heard: DesktopWhisperSegmentPayload[] = [];
   private queue: Promise<void> = Promise.resolve();
   private waiting = 0;
@@ -85,6 +105,7 @@ export class LiveCaptureSession {
     private readonly transport: LiveCaptureTransport,
     private readonly handlers: LiveCaptureHandlers,
     private unlisten: () => void,
+    private readonly highQuality: boolean,
   ) {}
 
   static async start(
@@ -106,6 +127,7 @@ export class LiveCaptureSession {
         transport,
         handlers,
         unlisten,
+        settings.quality === "high",
       );
       pending.forEach((event) => session!.receive(event));
       return session;
@@ -144,14 +166,38 @@ export class LiveCaptureSession {
     this.handlers.onPartial?.(this.partialSegments);
   }
 
-  /** Adds a block of microphone audio at the given sample rate. */
-  push(block: Float32Array, sampleRate: number) {
+  /**
+   * Adds a block of microphone audio at the given sample rate, with
+   * `channels` interleaved. A speech-quality recording mixes it to mono and
+   * brings it to 16 kHz; a high-quality one sends it as it is, in pieces of
+   * half a second, and every block must keep the first one's format.
+   */
+  push(block: Float32Array, sampleRate: number, channels = 1) {
     if (this.closed || this.stalled) return;
+    if (this.highQuality) {
+      if (!this.format) {
+        this.format = { rate: sampleRate, channels };
+        this.batcher = new PcmBatcher(
+          capturePieceSamples(sampleRate, channels),
+        );
+      } else if (
+        this.format.rate !== sampleRate ||
+        this.format.channels !== channels
+      ) {
+        this.stall(getT()("native.pcmFormatChanged"));
+        return;
+      }
+      this.handlers.onLevel?.(pcmLevel(block));
+      for (const piece of this.batcher.push(floatToPcm16(block)))
+        this.send(piece);
+      return;
+    }
+    const mono = mixToMono(block, channels);
     if (this.resampler?.sourceRate !== sampleRate)
       this.resampler = new PcmResampler(sampleRate);
-    this.handlers.onLevel?.(pcmLevel(block));
+    this.handlers.onLevel?.(pcmLevel(mono));
     for (const piece of this.batcher.push(
-      floatToPcm16(this.resampler.push(block)),
+      floatToPcm16(this.resampler.push(mono)),
     ))
       this.send(piece);
   }
@@ -169,6 +215,7 @@ export class LiveCaptureSession {
         this.recordedMs = await this.transport.append(
           this.captureId,
           pcmBytes(piece),
+          this.format,
         );
       } catch (error) {
         this.stall(error instanceof Error ? error.message : String(error));

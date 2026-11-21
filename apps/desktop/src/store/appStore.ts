@@ -32,6 +32,12 @@ import {
   saveMicDeviceId,
 } from "../microphone";
 import {
+  captureQuality,
+  loadCaptureFormat,
+  savedCaptureMetadata,
+  type CaptureFormat,
+} from "../captureStorage";
+import {
   applySpeakerTurns,
   assignSpeakerLabel,
   mergeSegmentRun,
@@ -279,6 +285,8 @@ let activeRecorder: MediaRecorder | undefined;
 let activeLive: LiveRecording | undefined;
 /** Whether that recorder transcribes with an online model. */
 let activeLiveOnline = false;
+/** How that recording is saved, as chosen when it started. */
+let activeLiveFormat: CaptureFormat = "wav";
 let activeStream: MediaStream | undefined;
 let activeChunks: BlobPart[] = [];
 let activeStartedAt = 0;
@@ -784,10 +792,12 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
         const online =
           stt.provider !== "local" && get().privacyLevel === "cloud";
         if (online) await setProviderMode(true);
+        const format = loadCaptureFormat();
         const live = await recordSystemAudio(
           {
             language: get().sttLanguage,
             modelPath: get().whisperConfig.modelPath,
+            quality: captureQuality(format),
             ...(online ? { provider: stt.provider, model: stt.model } : {}),
           },
           {
@@ -814,6 +824,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
         }
         activeLive = live;
         activeLiveOnline = online;
+        activeLiveFormat = format;
         activeStartedAt = Date.now();
         set({ recordingState: "recording" });
       } catch (error) {
@@ -858,8 +869,15 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       liveTranscript: "",
     });
 
+    // Only the app's own recorder keeps a high-quality copy; the browser
+    // preview records what MediaRecorder gives.
+    const liveFormat = isTauriRuntime() ? loadCaptureFormat() : "wav";
     try {
-      const { stream, fellBack } = await openMicrophone(get().micDeviceId);
+      const { stream, fellBack } = await openMicrophone(
+        get().micDeviceId,
+        undefined,
+        captureQuality(liveFormat),
+      );
       if (fellBack) get().addToast("toast.micFellBack");
       if (permissionCancelled) {
         stream.getTracks().forEach((track) => track.stop());
@@ -878,6 +896,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
           {
             language: captureSettings.language,
             modelPath: captureSettings.modelPath,
+            quality: captureQuality(liveFormat),
             ...(online
               ? { provider: onlineChoice.provider, model: onlineChoice.model }
               : {}),
@@ -906,6 +925,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
         if (live) {
           activeLive = live;
           activeLiveOnline = online;
+          activeLiveFormat = liveFormat;
           activeStream = stream;
           activeStartedAt = Date.now();
           startLevelMeter(stream);
@@ -1021,6 +1041,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       const elapsedMs = Date.now() - activeStartedAt;
       const generation = captureGeneration;
       const online = activeLiveOnline;
+      const format = activeLiveFormat;
       // Closing the audio feed comes first, then the microphone itself.
       const finishing = live.finish();
       stopActiveStream();
@@ -1039,8 +1060,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
                 online ? "voice.onlineModel" : "voice.localWhisper",
               ),
             },
-            // 16 kHz mono 16-bit WAV: 32 bytes a millisecond.
-            { durationMs, mimeType: "audio/wav", sizeBytes: durationMs * 32 },
+            savedCaptureMetadata(durationMs, format),
             "",
           );
         })
