@@ -76,8 +76,10 @@ updates:
       node-base-image:
         patterns: ["*"]
 
-  # Terraform providers.
+  # Terraform providers: the platform root and the sync service's own root.
   - package-ecosystem: terraform
-    directory: /infra/terraform
+    directories:
+      - /infra/terraform
+      - /infra/terraform/sync
     schedule:
       interval: weekly
