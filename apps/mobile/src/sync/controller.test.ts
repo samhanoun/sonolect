@@ -18,6 +18,7 @@ import {
   SyncController,
   reportProblem,
 } from "./controller";
+import { SYNC_STATE_PREFIX } from "../storageCore";
 import { SYNC_KEY_ITEM, createSyncKeyStore } from "./keyStore";
 import {
   FakeClock,
@@ -27,7 +28,6 @@ import {
   testRandomBytes,
 } from "./testSupport";
 
-const STATE_PREFIX = "sonolect.mobile.sync.state.";
 const START = Date.parse("2026-11-20T12:00:00.000Z");
 
 function world() {
@@ -44,7 +44,7 @@ function world() {
       new SyncController({
         request: server.request,
         keyStore: createSyncKeyStore(secrets, notes.kv),
-        state: createKeyValueStateStore(notes.kv, STATE_PREFIX),
+        state: createKeyValueStateStore(notes.kv, SYNC_STATE_PREFIX),
         notes: notes.notes,
         randomBytes: testRandomBytes,
         now: clock.now,
@@ -358,7 +358,7 @@ describe("sync controller: failures", () => {
     assert.equal(b.sync.view().problem, null);
     assert.equal(w.server.records(vaultId).length, 2);
     assert.equal(
-      [...a.notes.kv.data.keys()].some((key) => key.startsWith(STATE_PREFIX)),
+      [...a.notes.kv.data.keys()].some((key) => key.startsWith(SYNC_STATE_PREFIX)),
       false,
       "the sync state is forgotten",
     );
@@ -431,7 +431,7 @@ describe("sync controller: local changes", () => {
     assert.equal(a.sync.view().status, "off");
     assert.equal(a.secrets.data.size, 0);
     assert.equal(
-      [...a.notes.kv.data.keys()].some((key) => key.startsWith(STATE_PREFIX)),
+      [...a.notes.kv.data.keys()].some((key) => key.startsWith(SYNC_STATE_PREFIX)),
       false,
     );
     b.sync.setForeground(true);

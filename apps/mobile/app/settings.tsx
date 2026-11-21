@@ -510,7 +510,7 @@ export default function SettingsScreen() {
                       destructive: true,
                     }))
                   )
-                    await clearHistory();
+                    await clearHistory("everywhere");
                 }}
               />
               <Button

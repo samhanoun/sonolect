@@ -2,67 +2,30 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  type SyncEngine,
   type SyncNote,
   createMemoryStateStore,
   deriveVaultKeys,
-  generateRootKey,
-  isPastRetention,
   openSyncEngine,
 } from "@sonolect/sync-core";
 import {
   type MemoryVaultServer,
   createMemoryNoteStore,
-  createMemoryVaultServer,
 } from "@sonolect/sync-core/testing";
 
 import { SYNC_COMPANION_PREFIX, noteKey } from "../storageCore";
 import { placeNotes, stampTurn } from "./edits";
 import { NotesChangedError } from "./noteStore";
-import { TestPhone, makeTurn, settle, testRandomBytes } from "./testSupport";
+import {
+  TestPhone,
+  createTestVault,
+  makeTurn,
+  settle,
+  testRandomBytes,
+} from "./testSupport";
 
 const NOW = Date.parse("2026-11-20T12:00:00.000Z");
 
-interface Device {
-  phone: TestPhone;
-  engine: SyncEngine;
-  stamp: (
-    previous?: Parameters<SyncEngine["stamp"]>[0],
-  ) => ReturnType<SyncEngine["stamp"]>;
-}
-
-async function vault() {
-  let time = NOW;
-  const now = () => time;
-  const server = createMemoryVaultServer({ now });
-  const root = generateRootKey(testRandomBytes);
-  const keys = deriveVaultKeys(root);
-  const device = async (
-    options: { retentionDays?: number } = {},
-  ): Promise<Device> => {
-    const phone = new TestPhone(now);
-    await phone.load();
-    const engine = await openSyncEngine({
-      keys,
-      transport: server.transport(keys),
-      notes: phone.notes,
-      state: createMemoryStateStore(),
-      randomBytes: testRandomBytes,
-      now,
-      isExpired: (note) =>
-        isPastRetention(note, options.retentionDays ?? 0, now()),
-    });
-    return { phone, engine, stamp: (previous) => engine.stamp(previous) };
-  };
-  return {
-    server,
-    keys,
-    device,
-    tick: (ms = 1000) => {
-      time += ms;
-    },
-  };
-}
+const vault = async () => createTestVault(NOW);
 
 /** A desktop app on the same vault: sync-core's reference note store. */
 async function desktop(

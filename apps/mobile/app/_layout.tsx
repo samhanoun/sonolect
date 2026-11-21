@@ -291,7 +291,8 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
             void deleteAndRetry(
               t.errorBoundary.deleteNotesTitle,
               t.errorBoundary.deleteNotesMessage,
-              () => useCompanionStore.getState().clearHistory(),
+              // This phone only: the other devices keep their notes.
+              () => useCompanionStore.getState().clearHistory("here"),
             )
           }
         />
@@ -302,7 +303,10 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
             void deleteAndRetry(
               t.settings.eraseTitle,
               t.settings.eraseMessage,
-              () => useCompanionStore.getState().eraseAll(),
+              // This phone only, the server copy kept.
+              async () => {
+                await useCompanionStore.getState().eraseAll();
+              },
             )
           }
         />

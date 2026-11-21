@@ -33,6 +33,8 @@ export interface KeyValueStore {
   getAllKeys(): Promise<readonly string[]>;
 }
 
+/** Every key Sonolect stores in AsyncStorage starts with this: Erase all removes them all. */
+export const APP_KEY_PREFIX = "sonolect.mobile.";
 export const NOTE_PREFIX = "sonolect.mobile.note.";
 /** `{"v":3,"ids":[...]}`, newest first. */
 export const INDEX_KEY = "sonolect.mobile.notes.index.v3";
@@ -51,6 +53,8 @@ export const LEGACY_V1_KEY = "sonolect.mobile.history";
  * reads it as a note.
  */
 export const SYNC_COMPANION_PREFIX = "sonolect.mobile.sync.note.";
+/** sync-core's key-value state store: the vault's cursor, records and clock. */
+export const SYNC_STATE_PREFIX = "sonolect.mobile.sync.state.";
 /** A value that could not be parsed is kept under its key plus this. */
 export const CORRUPT_SUFFIX = ".corrupt";
 const INDEX_VERSION = 3;

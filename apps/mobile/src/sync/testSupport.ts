@@ -1,9 +1,19 @@
 /**
  * Test doubles for the sync tests (not a test file itself, and never
- * imported by the app): an in-memory AsyncStorage, an in-memory SecureStore
- * and timers the test moves forward by hand.
+ * imported by the app): an in-memory AsyncStorage, an in-memory SecureStore,
+ * timers the test moves forward by hand, and phones on one vault.
  */
-import type { NoteStore as SyncNoteStore } from "@sonolect/sync-core";
+import {
+  type Hlc,
+  type SyncEngine,
+  type NoteStore as SyncNoteStore,
+  createMemoryStateStore,
+  deriveVaultKeys,
+  generateRootKey,
+  isPastRetention,
+  openSyncEngine,
+} from "@sonolect/sync-core";
+import { createMemoryVaultServer } from "@sonolect/sync-core/testing";
 
 import type { TranscriptTurn } from "../domain";
 import {
@@ -12,7 +22,14 @@ import {
   SYNC_COMPANION_PREFIX,
   createNoteStore,
 } from "../storageCore";
-import { type Stamp, placeNotes, stampTurn } from "./edits";
+import {
+  type DeleteScope,
+  type Stamp,
+  type Tombstone,
+  addNote,
+  changeNote,
+  deleteNotes,
+} from "./edits";
 import type { SecretStore } from "./keyStore";
 import { createNotesHost, createSyncNoteStore } from "./noteStore";
 import type { Timers } from "./timers";
@@ -256,15 +273,15 @@ export class TestPhone {
     await this.storage.save(this.history);
   }
 
-  /** A capture or a typed note. */
+  /** A capture or a typed note, as store.ts adds it. */
   async add(turn: TranscriptTurn, stamp: Stamp): Promise<TranscriptTurn> {
-    const stamped = stampTurn(turn, stamp);
-    this.latest = stamped;
-    await this.save([stamped, ...this.history]);
-    return stamped;
+    const added = addNote(this.history, turn, stamp);
+    this.latest = added.turn;
+    await this.save(added.history);
+    return added.turn;
   }
 
-  /** An edit (refine, pin). */
+  /** An edit (refine, pin), as store.ts makes it. */
   async edit(
     id: string,
     patch: Partial<TranscriptTurn>,
@@ -272,12 +289,29 @@ export class TestPhone {
   ): Promise<TranscriptTurn> {
     const turn = this.get(id);
     if (!turn) throw new Error(`no note ${id}`);
-    const edited = stampTurn({ ...turn, ...patch }, stamp);
-    await this.save(placeNotes(this.history, [edited]));
-    return edited;
+    const changed = changeNote(this.history, { ...turn, ...patch }, stamp);
+    if (this.latest?.id === id) this.latest = changed.turn;
+    await this.save(changed.history);
+    return changed.turn;
   }
 
-  /** Removes a note here (the caller records the delete for sync, or not for retention). */
+  /**
+   * A delete as store.ts makes it (a note's Delete, Clear history): the
+   * tombstones go to `record` before the notes go.
+   */
+  async delete(
+    ids: readonly string[] | "all",
+    scope: DeleteScope,
+    record: (tombstones: Tombstone[]) => Promise<void>,
+  ): Promise<void> {
+    const { history, tombstones } = deleteNotes(this.history, ids, scope);
+    const recorded = tombstones.length > 0 ? record(tombstones) : undefined;
+    if (this.latest && !history.includes(this.latest)) this.latest = undefined;
+    await this.save(history);
+    await recorded;
+  }
+
+  /** Removes a note here without telling sync (retention, or the caller records the delete). */
   async remove(id: string): Promise<void> {
     await this.save(this.history.filter((turn) => turn.id !== id));
   }
@@ -289,4 +323,49 @@ export class TestPhone {
     this.latest = undefined;
     await this.storage.clear();
   }
+}
+
+/** One phone on a test vault: its notes and its sync engine. */
+export interface TestDevice {
+  phone: TestPhone;
+  engine: SyncEngine;
+  stamp: (previous?: Hlc) => Hlc;
+}
+
+/**
+ * A vault on sync-core's in-memory server, and phones on it, each with its
+ * own notes and sync state. Time stands still until `tick`.
+ */
+export function createTestVault(start: number) {
+  let time = start;
+  const now = () => time;
+  const server = createMemoryVaultServer({ now });
+  const root = generateRootKey(testRandomBytes);
+  const keys = deriveVaultKeys(root);
+  const device = async (
+    options: { retentionDays?: number } = {},
+  ): Promise<TestDevice> => {
+    const phone = new TestPhone(now);
+    await phone.load();
+    const engine = await openSyncEngine({
+      keys,
+      transport: server.transport(keys),
+      notes: phone.notes,
+      state: createMemoryStateStore(),
+      randomBytes: testRandomBytes,
+      now,
+      isExpired: (note) =>
+        isPastRetention(note, options.retentionDays ?? 0, now()),
+    });
+    return { phone, engine, stamp: (previous) => engine.stamp(previous) };
+  };
+  return {
+    server,
+    keys,
+    now,
+    device,
+    tick: (ms = 1000) => {
+      time += ms;
+    },
+  };
 }
