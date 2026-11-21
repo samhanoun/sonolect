@@ -800,3 +800,20 @@ button.studio-segment-time:hover {
 .studio-mic-meter > i {
   background: var(--n-accent);
 }
+.studio-sync-warning {
+  color: var(--n-warn);
+}
+.studio-sync-join input,
+.studio-sync-code-text code {
+  font-family: var(--n-mono);
+}
+.studio-sync-code-text code {
+  color: var(--n-text);
+}
+.studio-sync-qr {
+  border-color: var(--n-line-strong);
+}
+.studio-sync-off {
+  border-color: var(--n-line-strong);
+  background: var(--n-raised);
+}

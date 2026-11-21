@@ -117,10 +117,10 @@ export function captureToNote(capture: StoredCapture): SyncNote {
     origin: capture.origin ?? DESKTOP_ORIGIN,
     source: capture.source,
     pinned: capture.pinned,
-    segments:
-      capture.segments.length > 0
-        ? capture.segments.map((segment) => ({ ...segment }) as SyncSegment)
-        : undefined,
+    // Records written before segments were stored may have none at all.
+    segments: capture.segments?.length
+      ? capture.segments.map((segment) => ({ ...segment }) as SyncSegment)
+      : undefined,
     conflictOf: capture.conflictOf,
   };
   try {

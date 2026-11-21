@@ -8,6 +8,7 @@ import {
   Scissors,
 } from "lucide-react";
 import { useDesktopStore } from "../store/appStore";
+import { hasPlayableAudio, useAudiolessCaptures } from "../captureAudio";
 import { isTauriRuntime } from "../desktopNative";
 import { nativeProviderCall } from "../providerSettings";
 import { useT } from "../i18n";
@@ -164,7 +165,11 @@ export function SegmentEditor({ player }: { player: CapturePlayer }) {
   const caret = useRef<{ id: string; index: number } | null>(null);
   const [speakerDraft, setSpeakerDraft] = useState("");
   const canPlay = isTauriRuntime();
-  const playable = canPlay && segments.some((segment) => segment.captureId);
+  // A note that came through sync has no recording here: no play buttons.
+  const audioless = useAudiolessCaptures((state) => state.ids);
+  const playable =
+    canPlay &&
+    segments.some((segment) => hasPlayableAudio(segment.captureId, audioless));
   const names = speakerNames(segments);
   const activeId = segmentAtTime(segments, player.captureId, player.positionMs);
   const selectedSegment =
@@ -287,7 +292,7 @@ export function SegmentEditor({ player }: { player: CapturePlayer }) {
                 onChange={() => actions.toggleSegmentSelection(segment.id)}
               />
               <div className="studio-segment-meta">
-                {captureId && canPlay ? (
+                {canPlay && hasPlayableAudio(captureId, audioless) ? (
                   <button
                     className="studio-segment-time"
                     title={

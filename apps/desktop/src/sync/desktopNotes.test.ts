@@ -94,6 +94,9 @@ describe("desktop captures as note/1", () => {
       captureToNote({ ...recording, language: null }).language,
       undefined,
     );
+    // A record from before segments were kept has none at all.
+    const { segments: _segments, ...older } = recording;
+    assert.equal(captureToNote(older as StoredCapture).segments, undefined);
   });
 
   it("stores a synced note with every field, and gives it back unchanged", () => {

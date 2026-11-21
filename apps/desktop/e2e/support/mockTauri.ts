@@ -14,7 +14,24 @@ export type MockCapture = {
     text: string;
     speaker?: string;
   }[];
+  /** False for a note that came through sync: it has no recording here. */
+  hasAudio?: boolean;
+  title?: string;
+  origin?: string;
+  conflictOf?: string;
+  hlc?: { t: number; c: number; d: string };
 };
+
+/** A request the page sends to the sync server, answered by the test. */
+export type MockSyncRequest = {
+  method: "GET" | "POST" | "DELETE";
+  path: string;
+  headers: Record<string, string>;
+  body?: string;
+};
+
+/** The function a test exposes to answer the page's sync requests. */
+export const SYNC_REQUEST_HOOK = "__sonolectE2eSyncRequest";
 
 export type MockTauriCall = { command: string; args: unknown };
 
@@ -39,6 +56,12 @@ const toneWav = readFileSync(
  *
  * With `systemAudio`, the computer's sound can be recorded: once started it
  * adds a second of audio to the live recording every 100 ms, with a level.
+ *
+ * With `sync`, the build has a sync server: the sync key, the sync state and
+ * the notes are kept in the page as the native side keeps them, and each
+ * `sync_request` goes to the function the test exposed as
+ * `SYNC_REQUEST_HOOK` (sync-core's memory server, say). Without it the
+ * build has no sync, as by default.
  */
 export async function installMockTauri(
   page: Page,
@@ -50,12 +73,39 @@ export async function installMockTauri(
     recorderLimitMs?: number;
     /** true: this computer's sound can be recorded. */
     systemAudio?: boolean;
+    /** true: this build syncs notes (see above). */
+    sync?: boolean;
   } = {},
 ) {
   await page.addInitScript(
-    ({ captures, toneWav, recorder, recorderLimitMs, systemAudio }) => {
+    ({
+      captures,
+      toneWav,
+      recorder,
+      recorderLimitMs,
+      systemAudio,
+      sync,
+      syncHook,
+    }) => {
       window.localStorage.clear();
       const library = structuredClone(captures);
+      // What the native side keeps for sync: the key, the state files.
+      const syncKey: { value: string | null } = { value: null };
+      const syncState = new Map<string, string>();
+      type Hlc = { t: number; c: number; d: string };
+      const sameHlc = (a?: Hlc, b?: Hlc) =>
+        a === undefined || b === undefined
+          ? a === b
+          : a.t === b.t && a.c === b.c && a.d === b.d;
+      const syncable = (id: unknown) =>
+        library.find((item) => item.id === id && item.transcript !== null);
+      const expectedHere = (
+        local: (typeof library)[number] | undefined,
+        expected: { exists: boolean; hlc?: Hlc },
+      ) =>
+        local === undefined
+          ? !expected.exists
+          : expected.exists && sameHlc(local.hlc, expected.hlc);
       /** Recordings already turned into Opus. */
       const compressed = new Set<string>();
       const calls: { command: string; args: unknown }[] = [];
@@ -233,6 +283,124 @@ export async function installMockTauri(
                 return false;
               case "local_model_status":
                 return { ready: true, path: "ggml-base.bin" };
+            }
+            if (!sync) return null;
+            switch (command) {
+              case "sync_config":
+                return { available: true, server: "sync.example.test" };
+              case "sync_key_status":
+                return syncKey.value !== null;
+              case "sync_key_create":
+                if (syncKey.value !== null && syncKey.value !== args.key)
+                  throw "Sync is already on with another key. Turn it off first.";
+                syncKey.value = args.key as string;
+                return null;
+              case "sync_key_import":
+                syncKey.value = args.key as string;
+                return null;
+              case "sync_key_load":
+                return syncKey.value;
+              case "sync_key_forget":
+                syncKey.value = null;
+                return null;
+              case "sync_state_load":
+                return Object.fromEntries(syncState);
+              case "sync_state_save":
+                for (const [key, value] of Object.entries(
+                  args.set as Record<string, string>,
+                ))
+                  syncState.set(key, value);
+                for (const key of args.remove as string[])
+                  syncState.delete(key);
+                return null;
+              case "sync_state_clear":
+                syncState.clear();
+                return null;
+              case "sync_pending_deletes":
+                return [];
+              case "sync_pending_deletes_done":
+                return null;
+              case "list_sync_notes":
+                return library
+                  .filter((item) => item.transcript !== null)
+                  .map(({ id, hlc, createdAtMs }) => ({
+                    id,
+                    createdAtMs,
+                    ...(hlc ? { hlc } : {}),
+                  }));
+              case "read_sync_note": {
+                const note = syncable(args.id);
+                if (!note) return null;
+                const { hasAudio: _hasAudio, ...stored } =
+                  structuredClone(note);
+                return stored;
+              }
+              case "upsert_synced_capture": {
+                const capture = args.capture as (typeof library)[number];
+                const expected = args.expected as {
+                  exists: boolean;
+                  hlc?: Hlc;
+                } | null;
+                const existing = library.find((item) => item.id === capture.id);
+                if (expected && !expectedHere(syncable(capture.id), expected))
+                  return "changed";
+                const next = {
+                  ...capture,
+                  error: existing?.error ?? null,
+                  hasAudio: existing?.hasAudio ?? false,
+                };
+                if (existing) library[library.indexOf(existing)] = next;
+                else {
+                  library.push(next);
+                  library.sort((a, b) => b.createdAtMs - a.createdAtMs);
+                }
+                return "written";
+              }
+              case "apply_remote_delete": {
+                const existing = syncable(args.id);
+                if (
+                  !expectedHere(
+                    existing,
+                    args.expected as { exists: boolean; hlc?: Hlc },
+                  )
+                )
+                  return "changed";
+                if (existing) library.splice(library.indexOf(existing), 1);
+                return "written";
+              }
+              case "sync_request": {
+                const body = args.body as string | null;
+                const bearer = args.bearer as string | null;
+                const answer = (
+                  window as unknown as Record<
+                    string,
+                    (request: unknown) => Promise<{
+                      status: number;
+                      body: string;
+                      retryAfter?: string;
+                    }>
+                  >
+                )[syncHook];
+                try {
+                  return await answer!({
+                    method: args.method,
+                    path: args.path,
+                    headers: {
+                      accept: "application/json",
+                      ...(body !== null
+                        ? { "content-type": "application/json" }
+                        : {}),
+                      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+                    },
+                    ...(body !== null ? { body } : {}),
+                  });
+                } catch {
+                  throw {
+                    kind: "network",
+                    message: "The sync server could not be reached.",
+                  };
+                }
+              }
               default:
                 return null;
             }
@@ -250,6 +418,8 @@ export async function installMockTauri(
       recorder: options.recorder ?? true,
       recorderLimitMs: options.recorderLimitMs,
       systemAudio: options.systemAudio ?? false,
+      sync: options.sync ?? false,
+      syncHook: SYNC_REQUEST_HOOK,
     },
   );
 }

@@ -103,4 +103,37 @@ describe("delete all my data", () => {
     assert.deepEqual(result.problems, ["Recordings: disk is read-only"]);
     assert.equal(storage.data.size, 0);
   });
+
+  it("forgets the sync key and state first, in a build with sync", async () => {
+    const storage = memoryStorage({ "sonolect.sync.newerSchema": "1" });
+    const order: string[] = [];
+    const { call, calls } = recordingCalls({ purge_local_captures: 2 });
+    const result = await deleteAllLocalData(
+      async <T>(command: string, args?: Record<string, unknown>) => {
+        order.push(command);
+        return call<T>(command, args);
+      },
+      storage,
+      {
+        forgetSync: async () => {
+          order.push("forget sync");
+        },
+      },
+    );
+    assert.deepEqual(result.problems, []);
+    assert.equal(order[0], "forget sync");
+    assert.equal(calls.length, 3);
+    assert.equal(storage.data.size, 0);
+  });
+
+  it("deletes the rest when sync cannot be forgotten, and says so", async () => {
+    const { call } = recordingCalls({ purge_local_captures: 1 });
+    const result = await deleteAllLocalData(call, memoryStorage(), {
+      forgetSync: async () => {
+        throw new Error("the keychain is locked");
+      },
+    });
+    assert.equal(result.recordingsRemoved, 1);
+    assert.deepEqual(result.problems, ["Sync: the keychain is locked"]);
+  });
 });

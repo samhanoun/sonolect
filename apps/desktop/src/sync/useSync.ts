@@ -64,10 +64,8 @@ const noSync = () => NO_SYNC;
 /** The sync state for the interface. */
 export function useSyncView(): SyncView {
   const sync = getSyncController();
-  return useSyncExternalStore(
-    sync?.subscribe ?? noSubscription,
-    sync?.getView ?? noSync,
-  );
+  const view = sync?.getView ?? noSync;
+  return useSyncExternalStore(sync?.subscribe ?? noSubscription, view, view);
 }
 
 /** Mounted once, in the main window: starts sync when this build has it. */
