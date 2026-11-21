@@ -33,6 +33,20 @@ export type MockSyncRequest = {
 /** The function a test exposes to answer the page's sync requests. */
 export const SYNC_REQUEST_HOOK = "__sonolectE2eSyncRequest";
 
+/** Where the mock keeps the native sync key and state across a reload (session storage). */
+export const SYNC_NATIVE_KEY = "__sonolectE2eSyncNative";
+
+/** The sync key and state the native side holds now. */
+export function nativeSyncState(page: Page) {
+  return page.evaluate((key) => {
+    const saved = JSON.parse(window.sessionStorage.getItem(key) ?? "null") as {
+      key: string | null;
+      state: [string, string][];
+    } | null;
+    return { key: saved?.key ?? null, stateKeys: saved?.state.length ?? 0 };
+  }, SYNC_NATIVE_KEY);
+}
+
 export type MockTauriCall = { command: string; args: unknown };
 
 const toneWav = readFileSync(
@@ -103,15 +117,26 @@ export async function installMockTauri(
       systemAudio,
       sync,
       syncHook,
+      syncNativeKey,
       compressedIds,
       unplayableOpus,
       holdWavReads,
     }) => {
       window.localStorage.clear();
       const library = structuredClone(captures);
-      // What the native side keeps for sync: the key, the state files.
-      const syncKey: { value: string | null } = { value: null };
-      const syncState = new Map<string, string>();
+      // What the native side keeps for sync: the key, the state files. The
+      // app's own data survives a reload, so they are kept in the tab's
+      // session storage (the page's localStorage is cleared above).
+      const saved = JSON.parse(
+        window.sessionStorage.getItem(syncNativeKey) ?? "null",
+      ) as { key: string | null; state: [string, string][] } | null;
+      const syncKey: { value: string | null } = { value: saved?.key ?? null };
+      const syncState = new Map<string, string>(saved?.state ?? []);
+      const keepSync = () =>
+        window.sessionStorage.setItem(
+          syncNativeKey,
+          JSON.stringify({ key: syncKey.value, state: [...syncState] }),
+        );
       type Hlc = { t: number; c: number; d: string };
       const sameHlc = (a?: Hlc, b?: Hlc) =>
         a === undefined || b === undefined
@@ -335,14 +360,17 @@ export async function installMockTauri(
                 if (syncKey.value !== null && syncKey.value !== args.key)
                   throw "Sync is already on with another key. Turn it off first.";
                 syncKey.value = args.key as string;
+                keepSync();
                 return null;
               case "sync_key_import":
                 syncKey.value = args.key as string;
+                keepSync();
                 return null;
               case "sync_key_load":
                 return syncKey.value;
               case "sync_key_forget":
                 syncKey.value = null;
+                keepSync();
                 return null;
               case "sync_state_load":
                 return Object.fromEntries(syncState);
@@ -353,9 +381,11 @@ export async function installMockTauri(
                   syncState.set(key, value);
                 for (const key of args.remove as string[])
                   syncState.delete(key);
+                keepSync();
                 return null;
               case "sync_state_clear":
                 syncState.clear();
+                keepSync();
                 return null;
               case "sync_pending_deletes":
                 return [];
@@ -462,6 +492,7 @@ export async function installMockTauri(
       systemAudio: options.systemAudio ?? false,
       sync: options.sync ?? false,
       syncHook: SYNC_REQUEST_HOOK,
+      syncNativeKey: SYNC_NATIVE_KEY,
       compressedIds: options.compressed ?? [],
       unplayableOpus: options.unplayableOpus ?? false,
       holdWavReads: options.holdWavReads ?? false,

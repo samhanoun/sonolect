@@ -19,6 +19,7 @@ import {
   SYNC_REQUEST_HOOK,
   installMockTauri,
   nativeCalls,
+  nativeSyncState,
   type MockCapture,
   type MockSyncRequest,
 } from "./support/mockTauri";
@@ -375,24 +376,35 @@ test.describe("note sync", () => {
       dialogs.push(dialog.message());
       void dialog.accept();
     });
+    expect(await nativeSyncState(page)).toMatchObject({
+      key: expect.any(String),
+    });
+    // The app starts again (a reload) once everything here is deleted.
+    const reloaded = page.waitForEvent("load");
     await page.getByRole("button", { name: "Delete all my data" }).click();
-    // The server copy goes first, then everything here, and the app starts again.
-    await expect
-      .poll(() =>
-        server.log.some(
-          ({ method, status }) => method === "DELETE" && status === 204,
-        ),
-      )
-      .toBe(true);
+    await reloaded;
+    // The server copy went first, then everything here.
+    expect(
+      server.log.some(
+        ({ method, status }) => method === "DELETE" && status === 204,
+      ),
+    ).toBe(true);
     expect(dialogs).toHaveLength(2);
     expect(dialogs[1]).toContain("Delete the server copy of your notes too?");
     await expect(other.engine.sync()).rejects.toMatchObject({
       code: "vault_deleted",
     });
+    // The native side forgot the key and the sync state, so the app that
+    // started again has sync off.
+    expect(await nativeSyncState(page)).toEqual({ key: null, stateKeys: 0 });
+    await nav(page, "Settings").click();
     await expect(
       page.getByRole("heading", { name: "Sync between devices" }),
     ).toBeVisible();
-    await nav(page, "Settings").click();
     await expect(syncCard(page).getByText("Sync is off.")).toBeVisible();
+    await expect(
+      syncCard(page).getByRole("button", { name: "Turn on sync" }),
+    ).toBeEnabled();
+    expect(await nativeCalls(page, "sync_request")).toEqual([]);
   });
 });
