@@ -1,8 +1,14 @@
 //! Models the app installs when the user asks for them. Each one is pinned in
 //! the code by its size and SHA-256: a download is written to a `.part` file
-//! and only moved into place once both match, and a model is checked again
-//! before it is loaded, so a damaged or replaced file never reaches a parser.
-//! Only the model itself is requested; no audio or transcript is sent.
+//! and only moved into place once both match. Only the model itself is
+//! requested; no audio or transcript is sent.
+//!
+//! The pin is checked again at load time only where a caller uses
+//! `read_verified`. Today that is the speaker model alone, which is hashed
+//! before every load and parsed from the checked bytes. The Whisper model is
+//! checked against its pin when it is downloaded; when it is loaded,
+//! `local_engine` only checks its size and GGML magic number before
+//! whisper.cpp opens the file.
 use sha2::{Digest, Sha256};
 use std::{
     fs,
