@@ -1,8 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 import {
   installMockTauri,
+  microphoneRequests,
   nativeCalls,
   releaseHeldReads,
+  watchMicrophoneRequests,
   type MockCapture,
 } from "./support/mockTauri";
 import { played, watchPlayback } from "./support/playback";
@@ -92,7 +95,7 @@ test.describe("compressed recordings", () => {
     // Back to WAV: the button goes and the choice is explained.
     await format.selectOption("wav");
     await expect(card.getByRole("status")).toHaveText(
-      "New recordings are kept in original quality. Recordings already compressed stay compressed.",
+      "New recordings are kept as WAV, in speech quality. Recordings already compressed stay compressed.",
     );
     await expect(compress).toHaveCount(0);
   });
@@ -151,6 +154,128 @@ test.describe("compressed recordings", () => {
         async () => (await nativeCalls(page, "compress_local_captures")).length,
       )
       .toBe(before + 1);
+  });
+});
+
+test.describe("high-quality recordings", () => {
+  test("choosing high quality records the microphone at 48 kHz and keeps it as Opus", async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await installMockTauri(page, []);
+    await page.goto("/");
+    await nav(page, "Overview").click();
+    await expect(page.locator(".studio-signal-meta")).toHaveText(
+      "16 kHz · mono · on device",
+    );
+    await nav(page, "Settings").click();
+    const card = privacyCard(page);
+    const format = card.getByLabel("Save recordings as");
+    await expect(format.locator("option")).toHaveText([
+      "Speech quality (WAV, 16 kHz mono)",
+      "Speech quality, compressed (Opus, 10× smaller)",
+      "High quality (Opus, 48 kHz, stereo when the source has it)",
+    ]);
+    await format.selectOption("hq");
+    await expect(card.getByRole("status")).toHaveText(
+      "New recordings are kept at 48 kHz, in stereo when the source has it. Imported files and older recordings are compressed in speech quality.",
+    );
+    // What is still WAV can be compressed, in speech quality.
+    await expect(
+      card.getByRole("button", { name: "Compress saved recordings" }),
+    ).toBeVisible();
+    await nav(page, "Overview").click();
+    await expect(page.locator(".studio-signal-meta")).toHaveText(
+      "48 kHz · stereo when available · on device",
+    );
+
+    await watchMicrophoneRequests(page);
+    await nav(page, "Transcribe").click();
+    await page.getByRole("button", { name: "Record to add text" }).click();
+    const dock = page.locator(".studio-recording-dock");
+    await expect(page.locator(".studio-live-text")).toContainText("Part 1.", {
+      timeout: 15_000,
+    });
+    await page.getByRole("button", { name: "Stop recording" }).click();
+    await expect(dock).toContainText("Your words are ready");
+    await expect(page.getByLabel("Transcript editor")).toHaveValue(/^Part 1\./);
+
+    // The microphone is asked for 48 kHz stereo, voice processing left on.
+    expect(await microphoneRequests(page)).toEqual([
+      { audio: { channelCount: { ideal: 2 }, sampleRate: { ideal: 48000 } } },
+    ]);
+    const [begin] = await nativeCalls(page, "capture_begin");
+    expect(begin!.args).toMatchObject({ quality: "high" });
+    // Pieces at the webview's 48 kHz, half a second of whole frames each.
+    const pieces = (await nativeCalls(page, "capture_append")).map(
+      (call) => call.args as { bytes: number; rate: number; channels: number },
+    );
+    expect(pieces.length).toBeGreaterThanOrEqual(6);
+    const { channels } = pieces[0]!;
+    expect([1, 2]).toContain(channels);
+    for (const piece of pieces) {
+      expect(piece).toMatchObject({ rate: 48000, channels });
+      expect(piece.bytes % (2 * channels)).toBe(0);
+    }
+    expect(Math.max(...pieces.map((piece) => piece.bytes))).toBe(
+      48000 * channels,
+    );
+    expect(await nativeCalls(page, "capture_cancel")).toEqual([]);
+    expect(errors).toEqual([]);
+
+    // Saving its audio gives the Opus file, read from the device.
+    await nav(page, "Library").click();
+    const saving = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Save audio" }).first().click();
+    const download = await saving;
+    expect(download.suggestedFilename()).toMatch(
+      /^sonolect-recording-\d{4}-\d{2}-\d{2}-\d{4}\.opus$/,
+    );
+    const saved = await readFile((await download.path())!);
+    expect(saved.subarray(0, 4).toString("latin1")).toBe("OggS");
+    const reads = await nativeCalls(page, "read_local_capture_audio");
+    expect(reads.at(-1)!.args).toMatchObject({ format: "file" });
+  });
+
+  test("saving the audio of a recording kept as WAV gives the WAV", async ({
+    page,
+  }) => {
+    await installMockTauri(
+      page,
+      [capture("1700000000000-1", 1000), capture("1700000000000-2", 1000)],
+      { compressed: ["1700000000000-2"] },
+    );
+    await page.goto("/");
+    await nav(page, "Library").click();
+    const cards = page.locator(".studio-card");
+    await expect(cards).toHaveCount(2);
+
+    const wav = page.waitForEvent("download");
+    await cards.nth(0).getByRole("button", { name: "Save audio" }).click();
+    const first = await wav;
+    expect(first.suggestedFilename()).toMatch(/\.wav$/);
+    expect(
+      (await readFile((await first.path())!)).subarray(0, 4).toString("latin1"),
+    ).toBe("RIFF");
+
+    const opus = page.waitForEvent("download");
+    await cards.nth(1).getByRole("button", { name: "Save audio" }).click();
+    const second = await opus;
+    expect(second.suggestedFilename()).toMatch(/\.opus$/);
+    expect(
+      (await readFile((await second.path())!))
+        .subarray(0, 4)
+        .toString("latin1"),
+    ).toBe("OggS");
+    expect(
+      (await nativeCalls(page, "read_local_capture_audio")).map(
+        (call) => call.args,
+      ),
+    ).toEqual([
+      { id: "1700000000000-1", format: "file" },
+      { id: "1700000000000-2", format: "file" },
+    ]);
   });
 });
 

@@ -2,7 +2,10 @@ import { expect, test, type Page } from "@playwright/test";
 import {
   emitNativeEvent,
   installMockTauri,
+  microphoneRequests,
   nativeCalls,
+  pressShortcut,
+  watchMicrophoneRequests,
 } from "./support/mockTauri";
 
 function nav(page: Page, name: string) {
@@ -27,7 +30,9 @@ test.describe("recording this computer's sound", () => {
     await source.selectOption("system");
     await expect(
       page.getByText("The record button records what is playing"),
-    ).toBeVisible();
+    ).toHaveText(
+      "The record button records what is playing on this computer, such as a meeting or a video. So does a dictation shortcut pressed while Sonolect is in front. Dictation into other apps and the bubble always use the microphone.",
+    );
 
     await nav(page, "Transcribe").click();
     await page.getByRole("button", { name: "Record to add text" }).click();
@@ -111,6 +116,89 @@ test.describe("recording this computer's sound", () => {
       .poll(async () => (await nativeCalls(page, "capture_cancel")).length)
       .toBe(1);
     expect(await nativeCalls(page, "start_system_audio_capture")).toEqual([]);
+  });
+
+  test("a dictation shortcut pressed while Sonolect is in front records the computer's sound", async ({
+    page,
+  }) => {
+    await installMockTauri(page, [], { systemAudio: true });
+    await page.goto("/");
+    await nav(page, "Settings").click();
+    await page.getByLabel("Record from").selectOption("system");
+    await watchMicrophoneRequests(page);
+    const dock = page.locator(".studio-recording-dock");
+
+    // The toggle shortcut: press to start, press again to stop.
+    await pressShortcut(page, "toggle", "Pressed", true);
+    await expect(dock).toContainText("Recording computer sound…");
+    await expect(dock.locator(".studio-dock-live")).toContainText("Part 1.");
+    await pressShortcut(page, "toggle", "Released", true);
+    await pressShortcut(page, "toggle", "Pressed", true);
+    await expect(dock).toContainText("Your words are ready");
+
+    // Hold to talk: recording while held.
+    await pressShortcut(page, "hold", "Pressed", true);
+    await expect(dock).toContainText("Recording computer sound…");
+    await expect
+      .poll(
+        async () =>
+          (await nativeCalls(page, "start_system_audio_capture")).length,
+      )
+      .toBe(2);
+    await pressShortcut(page, "hold", "Released", true);
+    await expect
+      .poll(async () => (await nativeCalls(page, "capture_finish")).length)
+      .toBe(2);
+
+    // Both followed "Record from": no microphone, nothing pasted elsewhere.
+    expect(await nativeCalls(page, "stop_system_audio_capture")).toHaveLength(
+      2,
+    );
+    expect(await microphoneRequests(page)).toEqual([]);
+    expect(await nativeCalls(page, "capture_append")).toEqual([]);
+    expect(await nativeCalls(page, "insert_text_into_active_app")).toEqual([]);
+  });
+
+  test("a dictation shortcut pressed in another app uses the microphone and pastes", async ({
+    page,
+  }) => {
+    await installMockTauri(page, [], { systemAudio: true });
+    await page.goto("/");
+    await nav(page, "Settings").click();
+    await page.getByLabel("Record from").selectOption("system");
+    await watchMicrophoneRequests(page);
+    const pasted = async () =>
+      (await nativeCalls(page, "insert_text_into_active_app")).length;
+
+    await pressShortcut(page, "toggle", "Pressed", false);
+    await expect
+      .poll(async () => (await nativeCalls(page, "capture_append")).length)
+      .toBeGreaterThan(0);
+    await pressShortcut(page, "toggle", "Pressed", false);
+    await expect.poll(pasted).toBe(1);
+
+    await pressShortcut(page, "hold", "Pressed", false);
+    await expect
+      .poll(async () => (await nativeCalls(page, "capture_begin")).length)
+      .toBe(2);
+    const sent = (await nativeCalls(page, "capture_append")).length;
+    await expect
+      .poll(async () => (await nativeCalls(page, "capture_append")).length)
+      .toBeGreaterThan(sent);
+    await pressShortcut(page, "hold", "Released", false);
+    await expect.poll(pasted).toBe(2);
+
+    // Each dictation opened the microphone; the computer's sound was never
+    // recorded, though it is the Studio's choice.
+    expect(await microphoneRequests(page)).toHaveLength(2);
+    expect(await nativeCalls(page, "start_system_audio_capture")).toEqual([]);
+    const texts = (await nativeCalls(page, "insert_text_into_active_app")).map(
+      (call) => (call.args as { text: string }).text,
+    );
+    expect(texts).toEqual([
+      expect.stringMatching(/^Part 1\./),
+      expect.stringMatching(/^Part 1\./),
+    ]);
   });
 
   test("the choice is not offered where the sound cannot be recorded", async ({
