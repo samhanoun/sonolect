@@ -405,7 +405,7 @@ impl Library {
         let _records = lock();
         if let Some(sync) = &self.sync {
             let hlc = read_record(&self.captures, id).and_then(|record| record.hlc);
-            super::sync::record_delete(sync, id, hlc)?;
+            super::sync::record_delete(sync, id, hlc, super::sync::now_ms())?;
         }
         delete_recording(&self.captures, id)
     }
@@ -1354,11 +1354,19 @@ mod tests {
         assert_eq!(fs::read_dir(&notes.captures).unwrap().count(), 0);
         let deletes: Value =
             serde_json::from_slice(&fs::read(sync.join("deletes.json")).unwrap()).unwrap();
+        // Each keeps the note's version, and is stamped when the user deleted
+        // it, however late the engine records it.
+        let stamped =
+            |id: &str| -> Hlc { serde_json::from_value(deletes[id]["deletedAt"].clone()).unwrap() };
+        let (first, second) = (stamped("2-1"), stamped("turn_3_x"));
+        assert_eq!(first.d, "desk");
+        assert!(first.t > 1_700_000_000_000);
+        assert_ne!(second.order(&first), std::cmp::Ordering::Less);
         assert_eq!(
             deletes,
             serde_json::json!({
-                "2-1": { "t": 9, "c": 2, "d": "desk" },
-                "turn_3_x": { "t": 4, "c": 0, "d": "phone" },
+                "2-1": { "hlc": { "t": 9, "c": 2, "d": "desk" }, "deletedAt": first },
+                "turn_3_x": { "hlc": { "t": 4, "c": 0, "d": "phone" }, "deletedAt": second },
             })
         );
     }

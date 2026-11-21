@@ -11,6 +11,7 @@
 //! neither the keychain nor the disk, and nothing reaches the network.
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     cmp::Ordering,
     collections::BTreeMap,
@@ -29,8 +30,14 @@ const LOCAL_HTTP_HOSTS: [&str; 2] = ["127.0.0.1", "localhost"];
 
 const KEYCHAIN_SERVICE: &str = "com.sonolect.local.sync";
 const KEYCHAIN_ACCOUNT: &str = "vault-root";
+/// sync-core's `PROTOCOL`: the HKDF salt of every key derived from the root.
+const PROTOCOL: &str = "sonolect-sync/v1";
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// A request with a body gets this many bytes a second on top of
+/// REQUEST_TIMEOUT (about 256 kbit/s): its deadline covers sending the body,
+/// so a full batch of notes still uploads over a slow link.
+const UPLOAD_BYTES_PER_SECOND: u64 = 32 * 1024;
 const MAX_REQUEST_BYTES: usize = 5 * 1024 * 1024;
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 /// One saved piece of the engine's state (its meta, or one bucket of records).
@@ -216,12 +223,13 @@ fn read_root(entry: &keyring::Entry) -> Result<Option<String>, String> {
     }
 }
 
-/// The file that says sync is on with the key in the keychain. It is written
-/// once the key is saved and removed before the key is forgotten. Without it
-/// a key still in the keychain is a leftover (the keychain could not delete
-/// it): nothing reads it, and a new key replaces it, so sync never comes
-/// back on by itself. It also keeps the keychain untouched at launch on a
-/// device where sync was never turned on.
+/// The file that says sync is on with the key in the keychain, and for which
+/// vault. It is written once the key is saved and removed before the key is
+/// forgotten. Without it a key still in the keychain is a leftover (the
+/// keychain could not delete it): nothing reads it, and a new key replaces
+/// it, so sync never comes back on by itself. It also keeps the keychain
+/// untouched at launch on a device where sync was never turned on, and
+/// `sync_request` sends nothing without it, nor for another vault.
 fn key_marker(sync: &Path) -> PathBuf {
     sync.join("key-saved")
 }
@@ -230,10 +238,18 @@ fn key_in_use(sync: &Path) -> bool {
     key_marker(sync).is_file()
 }
 
-fn mark_key_saved(sync: &Path) -> Result<(), String> {
+/// The vault the marker names: None without a marker, Some(None) for the
+/// empty marker of an earlier version (filled in by `sync_key_load`).
+fn marked_vault(sync: &Path) -> Option<Option<String>> {
+    let text = fs::read_to_string(key_marker(sync)).ok()?;
+    let vault = text.trim();
+    Some(is_vault_id(vault).then(|| vault.to_owned()))
+}
+
+fn mark_key_saved(sync: &Path, vault: &str) -> Result<(), String> {
     let _files = files_lock();
     fs::create_dir_all(sync).map_err(io_failed)?;
-    write_atomically(&key_marker(sync), b"")
+    write_atomically(&key_marker(sync), vault.as_bytes())
 }
 
 fn unmark_key(sync: &Path) -> Result<(), String> {
@@ -245,6 +261,39 @@ fn unmark_key(sync: &Path) -> Result<(), String> {
     }
 }
 
+/// HMAC-SHA256 (RFC 2104) of the parts of `message`, joined.
+fn hmac_sha256(key: &[u8], message: &[&[u8]]) -> [u8; 32] {
+    let mut block = [0u8; 64];
+    if key.len() > block.len() {
+        block[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        block[..key.len()].copy_from_slice(key);
+    }
+    let mut inner = Sha256::new();
+    inner.update(block.map(|byte| byte ^ 0x36));
+    for part in message {
+        inner.update(part);
+    }
+    let inner = inner.finalize();
+    let mut outer = Sha256::new();
+    outer.update(block.map(|byte| byte ^ 0x5c));
+    outer.update(inner);
+    outer.finalize().into()
+}
+
+/// The vault id of a root key, as sync-core's `deriveVaultKeys` derives it:
+/// 16 bytes of HKDF-SHA256 (RFC 5869) with the protocol as salt and
+/// "vault-id" as info, in unpadded base64url. Only that id and the vault's
+/// token ever reach the server; this module never derives the token.
+fn vault_id_of(key: &str) -> Result<String, String> {
+    let root = URL_SAFE_NO_PAD
+        .decode(key.trim())
+        .map_err(|_| INVALID_KEY.to_string())?;
+    let prk = hmac_sha256(PROTOCOL.as_bytes(), &[&root]);
+    let okm = hmac_sha256(&prk, &[b"vault-id", &[1]]);
+    Ok(URL_SAFE_NO_PAD.encode(&okm[..16]))
+}
+
 /// The root key sync uses, if sync is on here.
 fn saved_root(entry: &keyring::Entry, sync: &Path) -> Result<Option<String>, String> {
     if !key_in_use(sync) {
@@ -253,24 +302,33 @@ fn saved_root(entry: &keyring::Entry, sync: &Path) -> Result<Option<String>, Str
     read_root(entry)
 }
 
+/// Saves the key in the keychain. On Windows it stays on this computer: the
+/// keychain crate saves every credential to roam with a roaming profile.
+fn save_root(entry: &keyring::Entry, key: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let saved = local_credential::save(entry, key);
+    #[cfg(not(target_os = "windows"))]
+    let saved = entry.set_password(key);
+    saved.map_err(keychain_error)
+}
+
 /// Saves the root of a vault this device creates; never replaces the key
 /// sync uses (a leftover one, yes).
 fn create_root(entry: &keyring::Entry, sync: &Path, key: &str) -> Result<(), String> {
     let key = checked_root(key)?;
     match saved_root(entry, sync)? {
-        Some(saved) if saved == key => return Ok(()),
+        Some(saved) if saved == key => {}
         Some(_) => return Err(KEY_EXISTS.into()),
-        None => {}
+        None => save_root(entry, &key)?,
     }
-    entry.set_password(&key).map_err(keychain_error)?;
-    mark_key_saved(sync)
+    mark_key_saved(sync, &vault_id_of(&key)?)
 }
 
 /// Saves the root read from a pairing code: joining replaces the saved key.
 fn import_root(entry: &keyring::Entry, sync: &Path, key: &str) -> Result<(), String> {
     let key = checked_root(key)?;
-    entry.set_password(&key).map_err(keychain_error)?;
-    mark_key_saved(sync)
+    save_root(entry, &key)?;
+    mark_key_saved(sync, &vault_id_of(&key)?)
 }
 
 /// Turns sync off here first (the marker), then deletes the key. Should the
@@ -282,6 +340,104 @@ fn forget_root(entry: &keyring::Entry, sync: &Path) -> Result<(), String> {
         Err(error) => Err(keychain_error(error)),
     };
     unmarked.and(deleted)
+}
+
+/// The saved root key; names its vault in a marker an earlier version left empty.
+fn load_root(entry: &keyring::Entry, sync: &Path) -> Result<Option<String>, String> {
+    let root = saved_root(entry, sync)?;
+    if let Some(root) = &root {
+        if marked_vault(sync) == Some(None) {
+            mark_key_saved(sync, &vault_id_of(root)?)?;
+        }
+    }
+    Ok(root)
+}
+
+/// Writes the sync key as keyring's Windows store does (a generic credential,
+/// the password as UTF-16), but with `CRED_PERSIST_LOCAL_MACHINE`: keyring
+/// always asks for `CRED_PERSIST_ENTERPRISE`, which Windows copies to every
+/// computer a roaming profile signs in to. keyring still reads and deletes it.
+#[cfg(target_os = "windows")]
+mod local_credential {
+    use windows_sys::Win32::{
+        Foundation::FILETIME,
+        Security::Credentials::{
+            CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+        },
+    };
+
+    fn wide(text: &str) -> Vec<u16> {
+        text.encode_utf16().chain(Some(0)).collect()
+    }
+
+    pub(super) fn save(entry: &keyring::Entry, password: &str) -> keyring::Result<()> {
+        let Some(credential) = entry
+            .get_credential()
+            .downcast_ref::<keyring::windows::WinCredential>()
+        else {
+            return entry.set_password(password);
+        };
+        let mut username = wide(&credential.username);
+        let mut target_name = wide(&credential.target_name);
+        let mut target_alias = wide(&credential.target_alias);
+        let mut comment = wide(&credential.comment);
+        let mut blob: Vec<u8> = password.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let written = CREDENTIALW {
+            Flags: 0,
+            Type: CRED_TYPE_GENERIC,
+            TargetName: target_name.as_mut_ptr(),
+            Comment: comment.as_mut_ptr(),
+            LastWritten: FILETIME {
+                dwLowDateTime: 0,
+                dwHighDateTime: 0,
+            },
+            CredentialBlobSize: blob.len() as u32,
+            CredentialBlob: blob.as_mut_ptr(),
+            Persist: CRED_PERSIST_LOCAL_MACHINE,
+            AttributeCount: 0,
+            Attributes: std::ptr::null_mut(),
+            TargetAlias: target_alias.as_mut_ptr(),
+            UserName: username.as_mut_ptr(),
+        };
+        // SAFETY: every pointer refers to a live, NUL-terminated buffer (the
+        // blob to `blob.len()` bytes) that outlives the call.
+        let saved = unsafe { CredWriteW(&written, 0) } != 0;
+        let error = std::io::Error::last_os_error();
+        blob.fill(0);
+        if saved {
+            Ok(())
+        } else {
+            Err(keyring::Error::PlatformFailure(Box::new(error)))
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use windows_sys::Win32::Security::Credentials::{
+            CredFree, CredReadW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+        };
+
+        #[test]
+        fn the_sync_key_stays_on_this_computer() {
+            let entry = keyring::Entry::new("com.sonolect.local.sync.test", "vault-root").unwrap();
+            super::save(&entry, "a-key-for-this-test").unwrap();
+            assert_eq!(entry.get_password().unwrap(), "a-key-for-this-test");
+            let target = super::wide("vault-root.com.sonolect.local.sync.test");
+            let mut read: *mut CREDENTIALW = std::ptr::null_mut();
+            // SAFETY: CredReadW allocates `read`, freed by CredFree below.
+            let persist = unsafe {
+                assert_ne!(
+                    CredReadW(target.as_ptr(), CRED_TYPE_GENERIC, 0, &mut read),
+                    0
+                );
+                let persist = (*read).Persist;
+                CredFree(read.cast());
+                persist
+            };
+            entry.delete_credential().unwrap();
+            assert_eq!(persist, CRED_PERSIST_LOCAL_MACHINE);
+        }
+    }
 }
 
 /// Whether sync is on here with a key in the keychain.
@@ -323,7 +479,7 @@ pub async fn sync_key_load(app: tauri::AppHandle) -> Result<Option<String>, Stri
         if !key_in_use(&sync) {
             return Ok(None);
         }
-        saved_root(&keychain()?, &sync)
+        load_root(&keychain()?, &sync)
     })
     .await
 }
@@ -495,15 +651,54 @@ fn save_state(
     Ok(())
 }
 
-/// Forgets the engine's state and the deletes waiting for it. The key and
-/// its marker are `sync_key_forget`'s.
-fn clear_state(sync: &Path) -> Result<(), String> {
+/// Deletes to keep while the engine's state is forgotten and the server copy
+/// stays: those the engine had not uploaded yet, read from its state.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeptDeletes {
+    /// The vault the state belonged to, when the webview knows it.
+    #[serde(default)]
+    vault: Option<String>,
+    #[serde(default)]
+    deletes: Vec<PendingDelete>,
+}
+
+/// Forgets the engine's state. Without `keep` the deletes waiting for it go
+/// too (the server copy was deleted, or every local data). With `keep`, they
+/// stay, together with the deletes the engine had not uploaded, tagged with
+/// their vault: only an engine for that vault takes them, so a later rejoin
+/// still sends them. The key and its marker are `sync_key_forget`'s.
+fn clear_state(sync: &Path, keep: Option<&KeptDeletes>) -> Result<(), String> {
+    let kept = match keep {
+        None => BTreeMap::new(),
+        Some(keep) => {
+            let vault = keep.vault.as_deref().filter(|vault| is_vault_id(vault));
+            let mut deletes = read_deletes(sync);
+            for entry in deletes.values_mut() {
+                if entry.vault.is_none() {
+                    entry.vault = vault.map(str::to_owned);
+                }
+            }
+            for delete in &keep.deletes {
+                if !is_note_id(&delete.id) {
+                    continue;
+                }
+                let mut entry = DeleteEntry::from(delete);
+                entry.vault = entry
+                    .vault
+                    .filter(|vault| is_vault_id(vault))
+                    .or_else(|| vault.map(str::to_owned));
+                deletes.insert(delete.id.clone(), entry);
+            }
+            deletes
+        }
+    };
     match fs::remove_dir_all(sync.join("state")) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(io_failed(error)),
     }
-    write_deletes(sync, &BTreeMap::new())
+    write_deletes(sync, &kept)
 }
 
 /// The engine's saved state: every key and its text.
@@ -534,16 +729,20 @@ pub async fn sync_state_save(
     .await
 }
 
-/// Forgets the sync state and the deletes waiting for it (sync turned off,
-/// or every local data deleted). Local notes stay.
+/// Forgets the sync state (sync turned off, or every local data deleted).
+/// Local notes stay. The deletes waiting for the engine go too, unless
+/// `keep` says to keep them (see `clear_state`).
 #[tauri::command]
-pub async fn sync_state_clear(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn sync_state_clear(
+    app: tauri::AppHandle,
+    keep: Option<KeptDeletes>,
+) -> Result<(), String> {
     let Some(sync) = folder(&app) else {
         return Ok(());
     };
     blocking(move || {
         let _files = files_lock();
-        clear_state(&sync)
+        clear_state(&sync, keep.as_ref())
     })
     .await
 }
@@ -605,22 +804,93 @@ pub(super) fn local_stamp(sync: &Path, previous: Option<&Hlc>, now_ms: u64) -> O
     read_meta(sync).map(|meta| next_stamp(&meta, now_ms, previous))
 }
 
-/// A note the user deleted, kept until the engine has recorded the delete.
+/// The version of a note the engine last synced (sync-core's `LocalDelete.synced`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SyncedVersion {
+    pub hlc: Hlc,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fp: Option<String>,
+}
+
+/// A note the user deleted, kept until the engine has recorded the delete
+/// (sync-core's `LocalDelete`, with the vault it belongs to).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PendingDelete {
     pub id: String,
+    /// The note's version when it was deleted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hlc: Option<Hlc>,
+    /// Stamped when the user deleted it, so an edit made elsewhere after the
+    /// delete still wins however late the engine gets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<Hlc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub synced: Option<SyncedVersion>,
+    /// Kept when sync was turned off: only an engine for this vault takes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vault: Option<String>,
 }
 
-fn read_deletes(sync: &Path) -> BTreeMap<String, Option<Hlc>> {
-    fs::read(sync.join("deletes.json"))
+/// One delete in deletes.json, by note id.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hlc: Option<Hlc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    deleted_at: Option<Hlc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    synced: Option<SyncedVersion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    vault: Option<String>,
+}
+
+impl From<&PendingDelete> for DeleteEntry {
+    fn from(delete: &PendingDelete) -> Self {
+        Self {
+            hlc: delete.hlc.clone(),
+            deleted_at: delete.deleted_at.clone(),
+            synced: delete.synced.clone(),
+            vault: delete.vault.clone(),
+        }
+    }
+}
+
+/// An entry of deletes.json, as this version writes it or as earlier ones
+/// did (the note's HLC alone).
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredDelete {
+    Earlier(Option<Hlc>),
+    Entry(DeleteEntry),
+}
+
+fn is_note_id(id: &str) -> bool {
+    is_device_id(id)
+}
+
+fn read_deletes(sync: &Path) -> BTreeMap<String, DeleteEntry> {
+    let stored: BTreeMap<String, StoredDelete> = fs::read(sync.join("deletes.json"))
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    stored
+        .into_iter()
+        .map(|(id, stored)| {
+            let entry = match stored {
+                StoredDelete::Earlier(hlc) => DeleteEntry {
+                    hlc,
+                    ..DeleteEntry::default()
+                },
+                StoredDelete::Entry(entry) => entry,
+            };
+            (id, entry)
+        })
+        .collect()
 }
 
-fn write_deletes(sync: &Path, deletes: &BTreeMap<String, Option<Hlc>>) -> Result<(), String> {
+fn write_deletes(sync: &Path, deletes: &BTreeMap<String, DeleteEntry>) -> Result<(), String> {
     let path = sync.join("deletes.json");
     if deletes.is_empty() {
         return match fs::remove_file(path) {
@@ -637,20 +907,41 @@ fn write_deletes(sync: &Path, deletes: &BTreeMap<String, Option<Hlc>>) -> Result
 
 /// Records a delete the user made while sync is on, so it reaches the other
 /// devices even if the engine is not running now. Retention never calls it.
-pub(super) fn record_delete(sync: &Path, id: &str, hlc: Option<Hlc>) -> Result<(), String> {
+/// The delete is stamped now, as the engine would stamp it, so it keeps the
+/// moment it was made however late the engine records it.
+pub(super) fn record_delete(
+    sync: &Path,
+    id: &str,
+    hlc: Option<Hlc>,
+    now_ms: u64,
+) -> Result<(), String> {
     let _files = files_lock();
     if !is_on(sync) {
         return Ok(());
     }
     let mut deletes = read_deletes(sync);
-    deletes.insert(id.to_owned(), hlc);
+    let deleted_at = local_stamp(sync, hlc.as_ref(), now_ms);
+    deletes.insert(
+        id.to_owned(),
+        DeleteEntry {
+            hlc,
+            deleted_at,
+            ..DeleteEntry::default()
+        },
+    );
     write_deletes(sync, &deletes)
 }
 
 fn take_deletes(sync: &Path) -> Vec<PendingDelete> {
     read_deletes(sync)
         .into_iter()
-        .map(|(id, hlc)| PendingDelete { id, hlc })
+        .map(|(id, entry)| PendingDelete {
+            id,
+            hlc: entry.hlc,
+            deleted_at: entry.deleted_at,
+            synced: entry.synced,
+            vault: entry.vault,
+        })
         .collect()
 }
 
@@ -659,9 +950,9 @@ fn take_deletes(sync: &Path) -> Vec<PendingDelete> {
 /// version and stays.
 fn finish_deletes(sync: &Path, done: &[PendingDelete]) -> Result<(), String> {
     let mut deletes = read_deletes(sync);
-    for PendingDelete { id, hlc } in done {
-        if deletes.get(id) == Some(hlc) {
-            deletes.remove(id);
+    for delete in done {
+        if deletes.get(&delete.id) == Some(&DeleteEntry::from(delete)) {
+            deletes.remove(&delete.id);
         }
     }
     write_deletes(sync, &deletes)
@@ -838,14 +1129,19 @@ fn http() -> Result<&'static reqwest::blocking::Client, RequestError> {
     Ok(CLIENT.get_or_init(|| client))
 }
 
-fn send(
+/// The deadline of a request whose body has `bytes` bytes.
+fn request_timeout(bytes: usize) -> Duration {
+    REQUEST_TIMEOUT + Duration::from_secs((bytes as u64).div_ceil(UPLOAD_BYTES_PER_SECOND))
+}
+
+fn build_request(
+    client: &reqwest::blocking::Client,
     base: &str,
     method: &str,
     path: &str,
     body: Option<String>,
     bearer: Option<&str>,
-) -> Result<SyncResponse, RequestError> {
-    let client = http()?;
+) -> Result<reqwest::blocking::RequestBuilder, RequestError> {
     let url = format!("{base}{path}");
     let mut request = match method {
         "GET" => client.get(url),
@@ -859,10 +1155,21 @@ fn send(
     }
     if let Some(body) = body {
         request = request
+            .timeout(request_timeout(body.len()))
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(body);
     }
-    let response = request
+    Ok(request)
+}
+
+fn send(
+    base: &str,
+    method: &str,
+    path: &str,
+    body: Option<String>,
+    bearer: Option<&str>,
+) -> Result<SyncResponse, RequestError> {
+    let response = build_request(http()?, base, method, path, body, bearer)?
         .send()
         .map_err(|_| RequestError::new(RequestErrorKind::Network))?;
     let status = response.status().as_u16();
@@ -886,19 +1193,53 @@ fn send(
     })
 }
 
+/// The vault a request is for: in its path, or in the body that creates it.
+fn request_vault(route: Route, path: &str, body: Option<&str>) -> Option<String> {
+    if route == Route::CreateVault {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Creation {
+            vault_id: String,
+        }
+        return serde_json::from_str::<Creation>(body?)
+            .ok()
+            .map(|creation| creation.vault_id);
+    }
+    let vault = path.strip_prefix("/v1/vaults/")?.split(['/', '?']).next()?;
+    Some(vault.to_owned())
+}
+
+/// Requests go out only while sync is on here (the key marker), and only
+/// for the vault of the saved key, so code in the webview cannot use the
+/// sync server to send anything elsewhere. A marker from an earlier
+/// version names no vault until the key is next loaded.
+fn request_allowed(sync: &Path, vault: Option<&str>) -> bool {
+    match marked_vault(sync) {
+        None => false,
+        Some(None) => true,
+        Some(Some(marked)) => vault == Some(marked.as_str()),
+    }
+}
+
 /// Sends one of the sync engine's requests to the build's sync server and
 /// returns the answer, whatever its status. `bearer` is the vault's token,
 /// sent on every request but the one that creates the vault.
 #[tauri::command]
 pub async fn sync_request(
+    app: tauri::AppHandle,
     method: String,
     path: String,
     body: Option<String>,
     bearer: Option<String>,
 ) -> Result<SyncResponse, RequestError> {
     let base = base_url().ok_or_else(|| RequestError::new(RequestErrorKind::Unavailable))?;
-    check_request(&method, &path, body.as_deref(), bearer.as_deref())?;
+    let route = check_request(&method, &path, body.as_deref(), bearer.as_deref())?;
+    let sync = folder(&app).ok_or_else(|| RequestError::new(RequestErrorKind::Unavailable))?;
+    let vault = request_vault(route, &path, body.as_deref());
     tauri::async_runtime::spawn_blocking(move || {
+        if !request_allowed(&sync, vault.as_deref()) {
+            return Err(RequestError::new(RequestErrorKind::Invalid));
+        }
         send(&base, &method, &path, body, bearer.as_deref())
     })
     .await
@@ -1175,10 +1516,10 @@ mod tests {
         // Joining another vault replaces it.
         import_root(&entry, &sync, SECOND).unwrap();
         assert_eq!(saved_root(&entry, &sync), Ok(Some(SECOND.into())));
-        // Forgetting the sync state keeps the key: turning sync on clears
-        // the state of an earlier vault before it saves the new key.
+        // Forgetting the sync state keeps the key: turning sync on saves the
+        // new key, then forgets the state of an earlier vault.
         save_state(&sync, &map(&[("meta", "{}")]), &[]).unwrap();
-        clear_state(&sync).unwrap();
+        clear_state(&sync, None).unwrap();
         assert_eq!(saved_root(&entry, &sync), Ok(Some(SECOND.into())));
         forget_root(&entry, &sync).unwrap();
         assert!(!key_in_use(&sync));
@@ -1211,6 +1552,103 @@ mod tests {
     }
 
     #[test]
+    fn the_vault_id_is_derived_as_sync_core_does() {
+        // packages/sync-core/src/keys.test.ts: the vector for bytes 0 to 31.
+        assert_eq!(vault_id_of(ROOT), Ok("epZ1mszKnlFaWC6pFcVmKg".into()));
+        assert!(is_vault_id(&vault_id_of(SECOND).unwrap()));
+        assert_ne!(vault_id_of(SECOND), vault_id_of(ROOT));
+    }
+
+    #[test]
+    fn requests_go_only_to_the_vault_of_the_saved_key() {
+        let folder = tempfile::tempdir().unwrap();
+        let sync = folder.path().join("sync");
+        let entry = mock_entry();
+        let ours = vault_id_of(ROOT).unwrap();
+        let theirs = vault_id_of(SECOND).unwrap();
+        let vault_of = |method: &str, path: &str, body: Option<&str>| {
+            let route = check_request(
+                method,
+                path,
+                body,
+                (method != "POST" || path != "/v1/vaults").then_some(TOKEN),
+            )
+            .unwrap();
+            request_vault(route, path, body)
+        };
+        let creation = |vault: &str| format!(r#"{{"vaultId":"{vault}","authVerifier":"x"}}"#);
+        let ours_records = format!("/v1/vaults/{ours}/records");
+        let ours_changes = format!("/v1/vaults/{ours}/changes?since=0&limit=200");
+        let theirs_vault = format!("/v1/vaults/{theirs}");
+        assert_eq!(
+            vault_of("POST", &ours_records, Some("{}")),
+            Some(ours.clone())
+        );
+        assert_eq!(vault_of("GET", &ours_changes, None), Some(ours.clone()));
+        assert_eq!(
+            vault_of("DELETE", &theirs_vault, None),
+            Some(theirs.clone())
+        );
+        assert_eq!(
+            vault_of("POST", "/v1/vaults", Some(&creation(&ours))),
+            Some(ours.clone())
+        );
+        assert_eq!(vault_of("POST", "/v1/vaults", Some("{}")), None);
+        // Sync off: nothing goes out.
+        assert!(!request_allowed(&sync, Some(&ours)));
+        create_root(&entry, &sync, ROOT).unwrap();
+        assert!(request_allowed(&sync, Some(&ours)));
+        assert!(!request_allowed(&sync, Some(&theirs)));
+        assert!(!request_allowed(&sync, None));
+        // Joining another vault moves the requests there.
+        import_root(&entry, &sync, SECOND).unwrap();
+        assert!(request_allowed(&sync, Some(&theirs)));
+        assert!(!request_allowed(&sync, Some(&ours)));
+        forget_root(&entry, &sync).unwrap();
+        assert!(!request_allowed(&sync, Some(&theirs)));
+        // The empty marker of an earlier version names its vault once the
+        // key is loaded.
+        entry.set_password(ROOT).unwrap();
+        fs::write(key_marker(&sync), b"").unwrap();
+        assert!(request_allowed(&sync, Some(&theirs)));
+        assert_eq!(load_root(&entry, &sync), Ok(Some(ROOT.into())));
+        assert_eq!(marked_vault(&sync), Some(Some(ours.clone())));
+        assert!(!request_allowed(&sync, Some(&theirs)));
+        assert!(request_allowed(&sync, Some(&ours)));
+    }
+
+    #[test]
+    fn an_upload_has_time_to_send_its_body_over_a_slow_link() {
+        assert_eq!(request_timeout(0), REQUEST_TIMEOUT);
+        // A full batch at 256 kbit/s, with the usual 30 s for the answer.
+        let full = request_timeout(MAX_REQUEST_BYTES);
+        assert_eq!(full, Duration::from_secs(30 + 160));
+        let client = reqwest::blocking::Client::new();
+        let base = "https://sync.example";
+        let records = format!("/v1/vaults/{VAULT}/records");
+        let upload = build_request(
+            &client,
+            base,
+            "POST",
+            &records,
+            Some("x".repeat(MAX_REQUEST_BYTES)),
+            Some(TOKEN),
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+        assert_eq!(upload.timeout(), Some(&full));
+        // Without a body the client's own timeout applies, which also gives
+        // each read of a large answer its own 30 s.
+        let changes = format!("/v1/vaults/{VAULT}/changes?since=0&limit=200");
+        let pull = build_request(&client, base, "GET", &changes, None, Some(TOKEN))
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(pull.timeout(), None);
+    }
+
+    #[test]
     fn only_32_byte_keys_are_saved() {
         let folder = tempfile::tempdir().unwrap();
         let sync = folder.path().join("sync");
@@ -1238,7 +1676,7 @@ mod tests {
         assert!(!key_in_use(&sync));
         // A damaged entry counts as none, and a new key replaces it.
         entry.set_password("not a key").unwrap();
-        mark_key_saved(&sync).unwrap();
+        mark_key_saved(&sync, VAULT).unwrap();
         assert_eq!(saved_root(&entry, &sync), Ok(None));
         create_root(&entry, &sync, ROOT).unwrap();
         assert_eq!(saved_root(&entry, &sync), Ok(Some(ROOT.into())));
@@ -1331,11 +1769,11 @@ mod tests {
         assert_eq!(load_state(&sync).unwrap().len(), 4);
         // Removing what is not there is fine.
         save_state(&sync, &BTreeMap::new(), &["r.z".into()]).unwrap();
-        clear_state(&sync).unwrap();
+        clear_state(&sync, None).unwrap();
         assert!(!sync.join("state").exists());
         assert_eq!(load_state(&sync), Ok(BTreeMap::new()));
         assert!(!is_on(&sync));
-        clear_state(&sync).unwrap();
+        clear_state(&sync, None).unwrap();
     }
 
     #[test]
@@ -1445,40 +1883,111 @@ mod tests {
         assert_eq!(hlc(1, 2, "a").order(&hlc(1, 2, "a")), Ordering::Equal);
     }
 
+    fn pending(id: &str, hlc: Option<Hlc>, deleted_at: Option<Hlc>) -> PendingDelete {
+        PendingDelete {
+            id: id.into(),
+            hlc,
+            deleted_at,
+            synced: None,
+            vault: None,
+        }
+    }
+
     #[test]
     fn deletes_wait_for_the_engine_only_while_sync_is_on() {
         let folder = tempfile::tempdir().unwrap();
         let sync = folder.path().join("sync");
-        record_delete(&sync, "1-1", None).unwrap();
+        record_delete(&sync, "1-1", None, 1_000).unwrap();
         assert_eq!(take_deletes(&sync), vec![]);
         meta(&sync, "device-A", 0, 0);
-        record_delete(&sync, "1-1", None).unwrap();
-        record_delete(&sync, "turn_2_abc", Some(hlc(5, 1, "phone"))).unwrap();
+        record_delete(&sync, "1-1", None, 1_000).unwrap();
+        record_delete(&sync, "turn_2_abc", Some(hlc(5, 1, "phone")), 2_000).unwrap();
+        // Each delete is stamped when it was made, later than the note.
         assert_eq!(
             take_deletes(&sync),
             vec![
-                PendingDelete {
-                    id: "1-1".into(),
-                    hlc: None
-                },
-                PendingDelete {
-                    id: "turn_2_abc".into(),
-                    hlc: Some(hlc(5, 1, "phone"))
-                },
+                pending("1-1", None, Some(hlc(1_000, 0, "device-A"))),
+                pending(
+                    "turn_2_abc",
+                    Some(hlc(5, 1, "phone")),
+                    Some(hlc(2_000, 0, "device-A"))
+                ),
             ]
         );
-        let done = |id: &str, hlc: Option<Hlc>| PendingDelete { id: id.into(), hlc };
-        finish_deletes(&sync, &[done("1-1", None), done("unknown", None)]).unwrap();
+        let taken = take_deletes(&sync);
+        finish_deletes(&sync, &[taken[0].clone(), pending("unknown", None, None)]).unwrap();
         assert_eq!(take_deletes(&sync).len(), 1);
         // Deleted again since the engine took it: that delete still waits.
-        record_delete(&sync, "turn_2_abc", Some(hlc(9, 0, "device-A"))).unwrap();
-        finish_deletes(&sync, &[done("turn_2_abc", Some(hlc(5, 1, "phone")))]).unwrap();
+        record_delete(&sync, "turn_2_abc", Some(hlc(9, 0, "device-A")), 3_000).unwrap();
+        finish_deletes(&sync, &[taken[1].clone()]).unwrap();
         assert_eq!(take_deletes(&sync).len(), 1);
-        finish_deletes(&sync, &[done("turn_2_abc", Some(hlc(9, 0, "device-A")))]).unwrap();
+        finish_deletes(&sync, &take_deletes(&sync)).unwrap();
         assert!(!sync.join("deletes.json").exists());
-        // Turning sync off forgets them with the rest of the state.
-        record_delete(&sync, "3-1", None).unwrap();
-        clear_state(&sync).unwrap();
+        // Turning sync off for good (the server copy deleted, or every local
+        // data) forgets them with the rest of the state.
+        record_delete(&sync, "3-1", None, 4_000).unwrap();
+        clear_state(&sync, None).unwrap();
         assert_eq!(take_deletes(&sync), vec![]);
+    }
+
+    #[test]
+    fn deletes_not_uploaded_stay_for_their_vault_when_the_state_is_forgotten() {
+        let folder = tempfile::tempdir().unwrap();
+        let sync = folder.path().join("sync");
+        meta(&sync, "device-A", 0, 0);
+        // One delete still waiting for the engine, one the engine had.
+        record_delete(&sync, "1-1", None, 1_000).unwrap();
+        let from_engine = PendingDelete {
+            synced: Some(SyncedVersion {
+                hlc: hlc(500, 0, "phone"),
+                fp: Some("fingerprint".into()),
+            }),
+            ..pending("2-2", None, Some(hlc(900, 0, "device-A")))
+        };
+        let keep = KeptDeletes {
+            vault: Some(VAULT.into()),
+            deletes: vec![from_engine.clone(), pending("../x", None, None)],
+        };
+        clear_state(&sync, Some(&keep)).unwrap();
+        assert!(!is_on(&sync));
+        let tagged = |delete: PendingDelete| PendingDelete {
+            vault: Some(VAULT.into()),
+            ..delete
+        };
+        assert_eq!(
+            take_deletes(&sync),
+            vec![
+                tagged(pending("1-1", None, Some(hlc(1_000, 0, "device-A")))),
+                tagged(from_engine),
+            ]
+        );
+        // A delete made while sync is off is not kept.
+        record_delete(&sync, "3-3", None, 2_000).unwrap();
+        assert_eq!(take_deletes(&sync).len(), 2);
+        // Turning sync on again keeps them, tags and all.
+        clear_state(
+            &sync,
+            Some(&KeptDeletes {
+                vault: Some("BBBBBBBBBBBBBBBBBBBBBB".into()),
+                deletes: vec![],
+            }),
+        )
+        .unwrap();
+        assert!(take_deletes(&sync)
+            .iter()
+            .all(|delete| delete.vault.as_deref() == Some(VAULT)));
+        // deletes.json written by an earlier version still reads.
+        fs::write(
+            sync.join("deletes.json"),
+            r#"{"4-4":null,"5-5":{"t":5,"c":1,"d":"phone"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            take_deletes(&sync),
+            vec![
+                pending("4-4", None, None),
+                pending("5-5", Some(hlc(5, 1, "phone")), None)
+            ]
+        );
     }
 }

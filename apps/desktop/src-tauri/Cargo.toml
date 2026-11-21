@@ -26,8 +26,11 @@ enigo = { version = "0.6", default-features = false }
 # Dictation bubble: remember the app being dictated into and give focus back to it.
 # System audio: WASAPI loopback recording of the default playback device.
 cpal = "0.18"
+# Sync key: written with CredWriteW so it stays on this computer.
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Credentials",
     "Win32_System_Threading",
     "Win32_UI_Accessibility",
     "Win32_UI_WindowsAndMessaging",
