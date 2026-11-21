@@ -30,6 +30,8 @@ export const SYNC_LIMITS = {
   maxRecordBytes: 768 * KIB,
   /** Smallest well-formed sealed record: header, nonce and tag. */
   minRecordBytes: 2 + 24 + 16,
+  /** Largest sealed tombstone (a delete): a real one is 298 bytes. */
+  maxTombstoneBytes: KIB,
   /** Largest note JSON before compression. */
   maxPlaintextBytes: 4 * MIB,
   /** Writes in one POST /records. */

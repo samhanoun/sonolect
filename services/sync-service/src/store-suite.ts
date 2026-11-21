@@ -21,7 +21,11 @@ import {
   sealedBytes,
 } from "./test-support.js";
 
-const QUOTAS: Quotas = { maxVaultRecords: 20_000, maxVaultBytes: 200 << 20 };
+const QUOTAS: Quotas = {
+  maxVaultRecords: 20_000,
+  maxVaultBytes: 200 << 20,
+  maxTombstoneBytes: 1024,
+};
 const T0 = Date.parse("2026-11-20T12:00:00.000Z");
 const EPOCH = "AAAAAAAAAAA";
 
@@ -274,7 +278,11 @@ export function defineStoreTests(factory: StoreFactory): void {
     it("enforces the quotas, but never on deleting a stored record", async () => {
       const store = await open();
       const vaultId = await vault(store);
-      const quotas: Quotas = { maxVaultRecords: 2, maxVaultBytes: 1000 };
+      const quotas: Quotas = {
+        maxVaultRecords: 2,
+        maxVaultBytes: 1000,
+        maxTombstoneBytes: 1024,
+      };
       const [a, b, c] = [newRid(), newRid(), newRid()];
       const results = await store.write(
         vaultId,
@@ -332,7 +340,11 @@ export function defineStoreTests(factory: StoreFactory): void {
       assert.equal(meta?.records, 2);
       assert.equal(meta?.bytes, 564);
       // Even a tombstone larger than the record it replaces, in a full vault.
-      const full: Quotas = { maxVaultRecords: 2, maxVaultBytes: 564 };
+      const full: Quotas = {
+        maxVaultRecords: 2,
+        maxVaultBytes: 564,
+        maxTombstoneBytes: 1024,
+      };
       const larger = await store.write(
         vaultId,
         [tombstone(b, 1, 600)],
@@ -341,6 +353,30 @@ export function defineStoreTests(factory: StoreFactory): void {
       );
       ok(larger[0]);
       assert.equal((await store.getVault(vaultId))?.bytes, 664);
+      // But a write flagged as a delete cannot carry data past the quota: one
+      // larger than a tombstone can be, that grows the vault, is refused.
+      const bulky = await store.write(
+        vaultId,
+        [tombstone(a, 2, 4096)],
+        full,
+        T0,
+      );
+      assert.deepEqual(bulky[0], {
+        rid: a,
+        status: "rejected",
+        reason: "quota_bytes",
+      });
+      // Shrinking a record is still a delete the full vault accepts.
+      const shrink = await store.write(
+        vaultId,
+        [tombstone(b, 2, 300)],
+        full,
+        T0,
+      );
+      ok(shrink[0]);
+      const meta2 = await store.getVault(vaultId);
+      assert.equal(meta2?.bytes, 364);
+      assert.equal(meta2?.records, 2);
     });
 
     it("deletes a vault for good, keeping only its marker", async () => {

@@ -54,7 +54,8 @@ threat model.
   (`current`: the record the server holds, or null) or
   `{rid, status: "rejected", reason: "quota_records" | "quota_bytes"}`. A
   batch is one transaction, and its rids are distinct. Turning a record into
-  a tombstone is never refused.
+  a tombstone is never refused; a write with `deleted: true` whose `ct` is
+  over 1 KiB (a tombstone is 298 bytes) answers 400.
 - **`DELETE /v1/vaults/:vaultId`** erases every record. From then on the
   vault's routes answer 410 `vault_deleted`, which the other devices show as
   "This sync was deleted".
@@ -91,4 +92,5 @@ Every error is `{error, message}`. The message never quotes the request.
 | Requests                     | 600 per minute per IP address (not `/health`), 120 per minute per vault |
 | New vaults                   | 10 per hour per IP address                                              |
 
-The request limits are kept per service instance.
+The request limits are kept per service instance. An IPv6 client counts by
+its /64 prefix.

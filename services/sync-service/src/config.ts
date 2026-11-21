@@ -15,6 +15,8 @@ export type StoreSpec =
 export interface ServiceLimits {
   maxRecordBytes: number;
   minRecordBytes: number;
+  /** A delete (tombstone) larger than this is refused (400). */
+  maxTombstoneBytes: number;
   maxBatchWrites: number;
   maxRequestBytes: number;
   maxPageRecords: number;
@@ -35,6 +37,7 @@ export interface ServiceLimits {
 export const DEFAULT_LIMITS: Readonly<ServiceLimits> = {
   maxRecordBytes: SYNC_LIMITS.maxRecordBytes,
   minRecordBytes: SYNC_LIMITS.minRecordBytes,
+  maxTombstoneBytes: SYNC_LIMITS.maxTombstoneBytes,
   maxBatchWrites: SYNC_LIMITS.maxBatchWrites,
   maxRequestBytes: SYNC_LIMITS.maxRequestBytes,
   maxPageRecords: SYNC_LIMITS.maxPageRecords,

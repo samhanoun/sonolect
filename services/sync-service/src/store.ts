@@ -12,7 +12,9 @@ import type { QuotaReason } from "@sonolect/sync-core/wire";
  *   one transaction per batch.
  * - `records` and `bytes` count every stored record, tombstones included. A
  *   delete that replaces a stored record is never refused for quota, so a
- *   full vault can always be cleaned up.
+ *   full vault can always be cleaned up, as long as it does not grow the
+ *   vault by more than a tombstone can be (`Quotas.maxTombstoneBytes`): a
+ *   write flagged as a delete cannot carry data past the quota.
  * - Tombstones older than the tombstone TTL are purged by `purge`, which
  *   records the highest purged seq so a client whose cursor is older is told
  *   to resync (410 cursor_expired).
@@ -66,6 +68,8 @@ export type StoreWriteResult =
 export interface Quotas {
   maxVaultRecords: number;
   maxVaultBytes: number;
+  /** A delete over a stored record is exempt from the quotas up to this size. */
+  maxTombstoneBytes: number;
 }
 
 export type CreateOutcome =
@@ -159,7 +163,12 @@ export function decideWrite(
   const growth = size - (current?.size ?? 0);
   const added = current ? 0 : 1;
   // Deleting a stored record must work even in a full vault.
-  const exempt = write.deleted && current !== undefined;
+  // Only a real delete: one that does not make the vault larger, or no
+  // larger than a sealed tombstone is.
+  const exempt =
+    write.deleted &&
+    current !== undefined &&
+    (growth <= 0 || size <= quotas.maxTombstoneBytes);
   if (!exempt && added > 0 && counters.records + added > quotas.maxVaultRecords)
     return {
       result: { rid: write.rid, status: "rejected", reason: "quota_records" },

@@ -18,7 +18,11 @@ import {
   readConfig,
 } from "./config.js";
 import { openStore } from "./open-store.js";
-import { FixedWindowLimiter, retryAfterSeconds } from "./rate-limit.js";
+import {
+  FixedWindowLimiter,
+  clientKey,
+  retryAfterSeconds,
+} from "./rate-limit.js";
 import { VAULT_ROUTES, vaultRoutes } from "./routes.js";
 import type { VaultStore } from "./store.js";
 
@@ -119,7 +123,7 @@ export async function createApp(
   const perIp = new FixedWindowLimiter(limits.ipRequestsPerMinute, 60_000);
   app.addHook("onRequest", async (request, reply) => {
     if (request.routeOptions.url === "/health") return;
-    const wait = perIp.hit(request.ip, now());
+    const wait = perIp.hit(clientKey(request.ip), now());
     if (wait > 0)
       return reply
         .status(429)

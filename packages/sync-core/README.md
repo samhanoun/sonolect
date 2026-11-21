@@ -209,7 +209,8 @@ const report = await engine.sync();
   - A vault holds at most 20,000 records and 200 MiB. A refused write sets
     `report.quotaExceeded`.
   - Deleting a stored record is never refused, so a full vault can always
-    be cleaned up.
+    be cleaned up. A tombstone still counts as a record until the service
+    purges it, 90 days later; it frees its bytes at once.
   - A note too large to seal is listed in `report.tooLarge` and not
     uploaded.
 

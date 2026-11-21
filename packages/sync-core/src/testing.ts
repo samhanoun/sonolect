@@ -299,6 +299,8 @@ export function createMemoryVaultServer(
         return error(413, SYNC_ERROR_CODES.recordTooLarge, "record too large");
       if (size < limits.minRecordBytes)
         return error(400, SYNC_ERROR_CODES.badRequest, "invalid ciphertext");
+      if (item.deleted === true && size > limits.maxTombstoneBytes)
+        return error(400, SYNC_ERROR_CODES.badRequest, "a delete too large");
       rids.add(item.rid);
     }
     purge(vault, false);
@@ -327,7 +329,11 @@ export function createMemoryVaultServer(
         continue;
       }
       const size = base64urlDecode(item.ct).length;
-      const exempt = item.deleted && current !== undefined;
+      // A delete over a stored record, no larger than a tombstone can be.
+      const exempt =
+        item.deleted &&
+        current !== undefined &&
+        (size <= (current?.size ?? 0) || size <= limits.maxTombstoneBytes);
       if (
         !exempt &&
         !current &&

@@ -418,6 +418,8 @@ export function defineRouteTests(factory: StoreFactory): void {
         [{ ...good, ct: `${good.ct}A`.slice(0, 401) }],
         [{ ...good, ct: b64(sealedBytes(SYNC_LIMITS.minRecordBytes - 1)) }],
         [{ ...good, ct: "" }],
+        // A delete carries a tombstone: anything larger is not one.
+        [write(newRid(), 0, SYNC_LIMITS.maxTombstoneBytes + 1, true)],
       ];
       for (const writes of bad) {
         const response = await put(keys, writes);
@@ -583,6 +585,99 @@ export function defineRouteTests(factory: StoreFactory): void {
       assert.equal(
         (await perIp.send({ method: "GET", url: "/health" })).statusCode,
         200,
+      );
+    });
+
+    it("counts concurrent vault creations against the hourly limit", async () => {
+      // A store with real latency (Firestore): every creation awaits it.
+      const slow = (store: VaultStore): VaultStore => {
+        const later = () => new Promise((done) => setTimeout(done, 20));
+        return Object.assign(Object.create(store) as VaultStore, {
+          getVault: async (vaultId: string) => {
+            await later();
+            return store.getVault(vaultId);
+          },
+          createVault: async (
+            ...args: Parameters<VaultStore["createVault"]>
+          ) => {
+            await later();
+            return store.createVault(...args);
+          },
+        });
+      };
+      const { createVault } = await setup({
+        limits: { vaultCreatesPerHour: 2, ipRequestsPerMinute: 1000 },
+        store: slow,
+      });
+      const statuses = (
+        await Promise.all(
+          Array.from({ length: 8 }, () => createVault(newKeys())),
+        )
+      ).map((response) => response.statusCode);
+      assert.deepEqual(
+        statuses.filter((status) => status === 201).length,
+        2,
+        String(statuses),
+      );
+      assert.deepEqual(
+        statuses.filter((status) => status === 429).length,
+        6,
+        String(statuses),
+      );
+      // Confirming vaults that exist gave their slot back.
+      const confirmed = await setup({
+        limits: { vaultCreatesPerHour: 1, ipRequestsPerMinute: 1000 },
+        store: slow,
+      });
+      const keys = newKeys();
+      assert.equal((await confirmed.createVault(keys)).statusCode, 201);
+      assert.equal((await confirmed.createVault(newKeys())).statusCode, 429);
+      // A confirmation is still answered over the limit.
+      assert.equal((await confirmed.createVault(keys)).statusCode, 200);
+    });
+
+    it("counts an IPv6 client by its /64", async () => {
+      const { createVault, send } = await setup({
+        limits: { vaultCreatesPerHour: 1, ipRequestsPerMinute: 3 },
+        env: { K_SERVICE: "sync" },
+      });
+      const from = (ip: string) => ({ "x-forwarded-for": ip });
+      assert.equal(
+        (await createVault(newKeys(), from("2001:db8:1:2::1"))).statusCode,
+        201,
+      );
+      // Another address in the same /64 is the same client...
+      assert.equal(
+        (await createVault(newKeys(), from("2001:db8:1:2:abcd::99")))
+          .statusCode,
+        429,
+      );
+      // ...one in another /64 is another.
+      const keys = newKeys();
+      assert.equal(
+        (await createVault(keys, from("2001:db8:1:3::1"))).statusCode,
+        201,
+      );
+      // The request limit counts the /64 as well: 3 requests a minute.
+      const read = (ip: string) =>
+        send({
+          method: "GET",
+          url: `/v1/vaults/${keys.vaultId}/changes?since=0&limit=200`,
+          headers: { ...bearer(keys.authToken), ...from(ip) },
+        });
+      assert.equal((await read("2001:db8:1:3::5")).statusCode, 200);
+      assert.equal((await read("2001:db8:1:3::6")).statusCode, 200);
+      const limited = await read("2001:db8:1:3::7");
+      assert.equal(limited.statusCode, 429);
+      assert.equal(limited.json().error, "rate_limited");
+      // An IPv4 address mapped into IPv6 is that IPv4 address.
+      assert.equal(
+        (await createVault(newKeys(), from("::ffff:203.0.113.9"))).statusCode,
+        201,
+      );
+      assert.equal(
+        (await createVault(newKeys(), from("203.0.113.9"))).statusCode,
+        429,
       );
     });
 

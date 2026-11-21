@@ -44,10 +44,13 @@ the client crypto.
   - `{status: "conflict", current}`: the record the server holds, or null;
   - `{status: "rejected", reason}`: `quota_records` (20,000 records) or
     `quota_bytes` (200 MiB). Turning a stored record into a tombstone is
-    never refused, so a full vault can always be cleaned up.
+    never refused, so a full vault can always be cleaned up. Tombstones
+    count as records until they are purged, 90 days later.
 
   One batch is one transaction, and the seqs it assigns have no gaps. A
-  sealed record is 42 bytes to 768 KiB; a larger one answers 413.
+  sealed record is 42 bytes to 768 KiB; a larger one answers 413. A write
+  with `deleted: true` carries a tombstone (298 bytes): one over 1 KiB
+  answers 400, so a delete cannot carry data past the quota.
 
 - **Deleting a vault** erases every record. From then on its routes answer
   410 `vault_deleted`, which tells the other devices that "this sync was
@@ -79,7 +82,11 @@ Every error is `{error, message}`, with a code from `SYNC_ERROR_CODES`:
   - 600 requests per minute per IP address, on every route but `/health`;
   - 120 requests per minute per vault, counted after authentication;
   - 10 new vaults per hour per IP address. Confirming an existing vault does
-    not count.
+    not count. A creation takes its slot before the store is asked, so
+    concurrent requests cannot pass the limit together.
+  - An IPv6 client counts by its /64 prefix (it can use any address in it),
+    an IPv4 client by its address, and an IPv4 address mapped into IPv6
+    (`::ffff:192.0.2.1`) as that IPv4 address.
 - **Client IP.** `request.ip` comes from `X-Forwarded-For` only behind a
   trusted proxy: one hop on Cloud Run (`K_SERVICE` is set there), otherwise
   none unless `SONOLECT_SYNC_TRUST_PROXY` says how many. A direct caller

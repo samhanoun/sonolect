@@ -17,7 +17,11 @@ import {
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import type { ServiceLimits } from "./config.js";
-import { FixedWindowLimiter, retryAfterSeconds } from "./rate-limit.js";
+import {
+  FixedWindowLimiter,
+  clientKey,
+  retryAfterSeconds,
+} from "./rate-limit.js";
 import {
   type CreateOutcome,
   type StoreWriteResult,
@@ -153,6 +157,7 @@ export async function vaultRoutes(
   const quotas = {
     maxVaultRecords: limits.maxVaultRecords,
     maxVaultBytes: limits.maxVaultBytes,
+    maxTombstoneBytes: limits.maxTombstoneBytes,
   };
   const perVault = new FixedWindowLimiter(
     limits.vaultRequestsPerMinute,
@@ -279,6 +284,9 @@ export async function vaultRoutes(
       if (bytes.length > limits.maxRecordBytes) throw tooLarge();
       if (bytes.length < limits.minRecordBytes)
         throw badRequest(`${at}.ct is too short to be a sealed record`);
+      // A delete carries a sealed tombstone (298 bytes), never a note.
+      if (deleted && bytes.length > limits.maxTombstoneBytes)
+        throw badRequest(`${at}.ct is too large for a delete`);
       return { rid, baseRev, deleted, ct: bytes };
     });
   }
@@ -298,29 +306,38 @@ export async function vaultRoutes(
     // Canonical base64url, so one key always names one verifier.
     const verifier = base64url(decodeBase64url(body.authVerifier));
     // Confirming an existing vault is not a creation: only new vaults count
-    // against the caller's hourly limit.
-    const existing = await store.getVault(vaultId);
+    // against the caller's hourly limit. The slot is taken before the store
+    // is asked, so concurrent requests cannot all pass the check, and given
+    // back when no vault was created.
+    const caller = clientKey(request.ip);
+    const wait = creations.hit(caller, time);
     let created: CreateOutcome;
-    if (existing)
-      created =
-        existing.verifier !== verifier
-          ? { outcome: "mismatch" }
-          : existing.deletedAt !== undefined
-            ? { outcome: "deleted" }
-            : { outcome: "exists", epoch: existing.epoch };
-    else {
-      const wait = creations.check(request.ip, time);
-      if (wait > 0) throw rateLimited(wait);
-      created = await store.createVault(
-        vaultId,
-        verifier,
-        base64url(randomBytes(8)),
-        time,
-      );
+    try {
+      const existing = await store.getVault(vaultId);
+      if (existing)
+        created =
+          existing.verifier !== verifier
+            ? { outcome: "mismatch" }
+            : existing.deletedAt !== undefined
+              ? { outcome: "deleted" }
+              : { outcome: "exists", epoch: existing.epoch };
+      else {
+        if (wait > 0) throw rateLimited(wait);
+        created = await store.createVault(
+          vaultId,
+          verifier,
+          base64url(randomBytes(8)),
+          time,
+        );
+      }
+    } catch (error) {
+      if (wait === 0) creations.release(caller, time);
+      throw error;
     }
+    if (wait === 0 && created.outcome !== "created")
+      creations.release(caller, time);
     switch (created.outcome) {
       case "created":
-        creations.hit(request.ip, time);
         return reply.status(201).send({
           vaultId,
           created: true,
