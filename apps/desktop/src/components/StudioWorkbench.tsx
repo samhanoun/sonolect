@@ -34,6 +34,7 @@ import { MicrophoneSettings } from "./StudioMicrophone";
 import { StudioSync } from "./StudioSync";
 import { StudioModelSelector } from "./StudioModels";
 import { SegmentEditor, useCapturePlayer } from "./StudioSegments";
+import { SpeakerModelSettings } from "./StudioSpeakers";
 import {
   formatTimestamp,
   singleCaptureId,
@@ -1721,6 +1722,7 @@ export function StudioSettings() {
               />
             </label>
           </details>
+          <SpeakerModelSettings />
         </section>
         <section className="studio-card">
           <h3>{t("studio.settings.languageTitle")}</h3>

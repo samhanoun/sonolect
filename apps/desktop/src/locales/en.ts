@@ -910,6 +910,51 @@ export const en = {
   "native.syncStateFailed": "The sync state could not be saved.",
   "native.syncInterrupted": "Sync was interrupted.",
   "native.syncInvalidNote": "Invalid synced note.",
+  // Speaker detection
+  "studio.speakers.detect": "Detect speakers",
+  "studio.speakers.count": "Speakers",
+  "studio.speakers.auto": "Auto",
+  "studio.speakers.label": "Speaker {number}",
+  "studio.speakers.consent":
+    "Download the {size} speaker model? Your audio stays on this device.",
+  "studio.speakers.download": "Download",
+  "studio.speakers.notNow": "Not now",
+  "studio.speakers.downloading": "Downloading the speaker model… {progress}%",
+  "studio.speakers.keepOrReplace":
+    "Some segments already have names. Keep them or replace them?",
+  "studio.speakers.keep": "Keep names",
+  "studio.speakers.replace": "Replace names",
+  "studio.speakers.cancel": "Cancel",
+  "studio.speakers.detecting": "Detecting speakers… {progress}%",
+  "studio.speakers.found.one": "{count} speaker found.",
+  "studio.speakers.found.other": "{count} speakers found.",
+  "studio.speakers.noSpeech": "No speech was found in this recording.",
+  "studio.speakers.stale":
+    "Another transcript was opened, so no names were changed.",
+  "studio.speakers.legend": "Speakers in this transcript",
+  "studio.speakers.rename": "Rename {name} everywhere",
+  "studio.speakers.segments.one": "{count} segment",
+  "studio.speakers.segments.other": "{count} segments",
+  "studio.settings.speakerModelTitle": "Speaker model",
+  "studio.settings.speakerModelMeta": "Speaker detection · CPU",
+  "studio.settings.speakerModelReady": "The speaker model is on this computer.",
+  "studio.settings.speakerModelMissing":
+    "Download it once to detect who speaks in a recording. Your audio stays on this device.",
+  "studio.settings.speakerModelInstall": "Download speaker model",
+  "studio.settings.speakerModelReinstall": "Reinstall speaker model",
+  "studio.settings.speakerModelDownloaded":
+    "Speaker model downloaded and checksum verified.",
+  "native.speakersCancelled": "Speaker detection was cancelled.",
+  "native.speakersBusy": "Speaker detection is already running.",
+  "native.speakerCount": "Choose between 2 and 8 speakers.",
+  "native.speakerModelMissing": "Download the speaker model first.",
+  "native.speakerModelDamaged":
+    "The speaker model was damaged and has been removed. Download it again.",
+  "native.speakersStillRecording":
+    "Finish the recording before detecting speakers.",
+  "native.speakerModelUnreadable": "Cannot read the speaker model: {reason}",
+  "native.speakerModelLoad": "Cannot load the speaker model: {reason}",
+  "native.speakerModelFailed": "The speaker model failed: {reason}",
 } as const;
 
 export type LocaleKeys = keyof typeof en;

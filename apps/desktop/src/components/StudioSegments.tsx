@@ -19,7 +19,9 @@ import {
   segmentAtTime,
   speakerColorIndex,
   speakerNames,
+  type TranscriptSegment,
 } from "../segmentEditor";
+import { SpeakerTools, useSpeakerStatus } from "./StudioSpeakers";
 
 export type CapturePlayer = {
   /** The recording that is loaded, playing or paused. */
@@ -117,7 +119,7 @@ function SpeakerField({
 }: {
   value: string;
   label: string;
-  placeholder: string;
+  placeholder?: string;
   listId: string;
   onCommit: (speaker: string) => void;
 }) {
@@ -142,6 +144,51 @@ function SpeakerField({
         if (event.key === "Escape") setDraft(value);
       }}
     />
+  );
+}
+
+/**
+ * The speakers of a transcript, each with its colour and how many segments
+ * it has. Renaming one here renames it on every segment.
+ */
+function SpeakerLegend({
+  segments,
+  listId,
+}: {
+  segments: TranscriptSegment[];
+  listId: string;
+}) {
+  const t = useT();
+  const rename = useDesktopStore((state) => state.renameSpeakerEverywhere);
+  const names = speakerNames(segments);
+  if (!names.length) return null;
+  return (
+    <ul
+      className="studio-speaker-legend"
+      aria-label={t("studio.speakers.legend")}
+    >
+      {names.map((name) => (
+        <li
+          key={name}
+          className={`studio-speaker speaker-${speakerColorIndex(segments, name)}`}
+        >
+          <span className="studio-speaker-swatch" aria-hidden="true" />
+          <SpeakerField
+            value={name}
+            label={t("studio.speakers.rename", { name })}
+            listId={listId}
+            onCommit={(to) => rename(name, to)}
+          />
+          <span>
+            {t.count(
+              "studio.speakers.segments",
+              segments.filter((segment) => segment.speaker?.trim() === name)
+                .length,
+            )}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -170,6 +217,7 @@ export function SegmentEditor({ player }: { player: CapturePlayer }) {
   const canSplit = Boolean(
     selectedSegment && /\S\s+\S/.test(selectedSegment.text),
   );
+  const speakerStatus = useSpeakerStatus(segments, selected.length > 0);
 
   if (!segments.length)
     return (
@@ -230,6 +278,7 @@ export function SegmentEditor({ player }: { player: CapturePlayer }) {
             {t("studio.segments.applySpeaker")}
           </button>
         </form>
+        <SpeakerTools segments={segments} />
         <datalist id={speakerListId}>
           {names.map((name) => (
             <option key={name} value={name} />
@@ -237,22 +286,24 @@ export function SegmentEditor({ player }: { player: CapturePlayer }) {
         </datalist>
       </div>
       <p className="studio-segments-status studio-muted" role="status">
-        {selected.length ? (
-          <>
-            {t.count("studio.segments.selected", selected.length)}
-            <button
-              className="studio-link"
-              onClick={actions.clearSegmentSelection}
-            >
-              {t("studio.segments.clearSelection")}
-            </button>
-          </>
-        ) : playable ? (
-          t("studio.segments.hintPlay")
-        ) : (
-          t("studio.segments.hint")
-        )}
+        {speakerStatus ??
+          (selected.length ? (
+            <>
+              {t.count("studio.segments.selected", selected.length)}
+              <button
+                className="studio-link"
+                onClick={actions.clearSegmentSelection}
+              >
+                {t("studio.segments.clearSelection")}
+              </button>
+            </>
+          ) : playable ? (
+            t("studio.segments.hintPlay")
+          ) : (
+            t("studio.segments.hint")
+          ))}
       </p>
+      <SpeakerLegend segments={segments} listId={speakerListId} />
       <ol
         className="studio-segment-list"
         aria-label={t("studio.segments.listLabel")}

@@ -1,12 +1,14 @@
 import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
 import {
+  applySpeakerTurns,
   assignSpeakerLabel,
   formatTimestamp,
   mergeSegmentRun,
   mergeTranscriptSegments,
   mergeableRun,
   moveTranscriptSegment,
+  renameSpeaker,
   resyncSegments,
   segmentAtTime,
   segmentsFromCapture,
@@ -16,6 +18,8 @@ import {
   speakerNames,
   splitTranscriptSegment,
   textToSegments,
+  typedSpeakerNames,
+  type SpeakerTurn,
   type TranscriptSegment,
 } from "./segmentEditor";
 
@@ -335,5 +339,179 @@ describe("playback position", () => {
     assert.equal(segmentAtTime(list, "17-1", 8999), list[2]!.id);
     assert.equal(segmentAtTime(list, "other", 100), undefined);
     assert.equal(segmentAtTime(list, undefined, 100), undefined);
+  });
+});
+
+describe("detected speakers", () => {
+  const label = (number: number) => `Speaker ${number}`;
+  /** Five sentences of one recording, two seconds each. */
+  const meeting = (): TranscriptSegment[] =>
+    ["One.", "Two.", "Three.", "Four.", "Five."].map((text, index) => ({
+      id: `m${index + 1}`,
+      text,
+      startMs: index * 2000,
+      endMs: index * 2000 + 2000,
+      captureId: "30-1",
+    }));
+  // A speaks the first four seconds, B the next five, A again at the end.
+  const turns: SpeakerTurn[] = [
+    { startMs: 0, endMs: 4100, speaker: 1 },
+    { startMs: 4100, endMs: 8900, speaker: 2 },
+    { startMs: 9300, endMs: 10_000, speaker: 1 },
+  ];
+  const speakers = (list: TranscriptSegment[]) =>
+    list.map((segment) => segment.speaker);
+
+  it("gives each segment the speaker it overlaps most", () => {
+    const labelled = applySpeakerTurns(meeting(), turns, label);
+    assert.deepEqual(speakers(labelled), [
+      "Speaker 1",
+      "Speaker 1",
+      "Speaker 2",
+      "Speaker 2",
+      // 8.0-10.0 s: 0.9 s of speaker 2 against 0.7 s of speaker 1.
+      "Speaker 2",
+    ]);
+    // Only the labels change.
+    assert.deepEqual(
+      labelled.map(({ speaker: _speaker, ...rest }) => rest),
+      meeting(),
+    );
+  });
+
+  it("adds up a speaker's time across the turns a segment spans", () => {
+    const [segment] = meeting();
+    const long = { ...segment!, endMs: 3000 };
+    const split: SpeakerTurn[] = [
+      { startMs: 0, endMs: 800, speaker: 1 },
+      { startMs: 800, endMs: 2000, speaker: 2 },
+      { startMs: 2000, endMs: 3000, speaker: 1 },
+    ];
+    assert.equal(
+      applySpeakerTurns([long], split, label)[0]?.speaker,
+      "Speaker 1",
+    );
+  });
+
+  it("gives a segment between turns the nearest speaker", () => {
+    const quiet: TranscriptSegment = {
+      id: "q",
+      text: "Mm-hmm.",
+      startMs: 9000,
+      endMs: 9200,
+      captureId: "30-1",
+    };
+    // 8.9 s is nearer than 9.3 s.
+    assert.equal(
+      applySpeakerTurns([quiet], turns, label)[0]?.speaker,
+      "Speaker 2",
+    );
+    // A segment with no length takes the turn it sits in.
+    const point = { ...quiet, startMs: 9500, endMs: 9500 };
+    assert.equal(
+      applySpeakerTurns([point], turns, label)[0]?.speaker,
+      "Speaker 1",
+    );
+  });
+
+  it("leaves typed text alone and changes nothing without turns", () => {
+    const typed = textToSegments("Added later.");
+    const list = [...meeting(), ...typed];
+    const labelled = applySpeakerTurns(list, turns, label);
+    assert.equal(labelled[5], typed[0]);
+    assert.equal(applySpeakerTurns(list, [], label), list);
+  });
+
+  it("keeps typed names and names a detected speaker after them", () => {
+    const list = meeting();
+    // Speaker 1 has one typed name, so it is called by it.
+    list[0] = assignSpeakerLabel(list[0]!, "Ana");
+    // Speaker 2 has two different names, neither on most of its named
+    // segments: it keeps its number, and each name stays where it was typed.
+    list[2] = assignSpeakerLabel(list[2]!, "Ben");
+    list[3] = assignSpeakerLabel(list[3]!, "Cleo");
+    assert.deepEqual(typedSpeakerNames(list, label), ["Ana", "Ben", "Cleo"]);
+    const kept = applySpeakerTurns(list, turns, label);
+    assert.deepEqual(speakers(kept), [
+      "Ana",
+      "Ana",
+      "Ben",
+      "Cleo",
+      "Speaker 2",
+    ]);
+
+    // With one name left on speaker 2, that name covers all of it.
+    list[3] = assignSpeakerLabel(list[3]!, "");
+    assert.deepEqual(speakers(applySpeakerTurns(list, turns, label)), [
+      "Ana",
+      "Ana",
+      "Ben",
+      "Ben",
+      "Ben",
+    ]);
+  });
+
+  it("replaces typed names when asked to", () => {
+    const list = meeting();
+    list[0] = assignSpeakerLabel(list[0]!, "Ana");
+    const replaced = applySpeakerTurns(list, turns, label, {
+      replaceTyped: true,
+    });
+    assert.deepEqual(speakers(replaced), [
+      "Speaker 1",
+      "Speaker 1",
+      "Speaker 2",
+      "Speaker 2",
+      "Speaker 2",
+    ]);
+  });
+
+  it("treats the labels of an earlier detection as its own", () => {
+    // Detected once with three speakers, now with two.
+    const earlier = applySpeakerTurns(
+      meeting(),
+      [...turns.slice(0, 2), { startMs: 9300, endMs: 10_000, speaker: 3 }],
+      label,
+    );
+    assert.deepEqual(typedSpeakerNames(earlier, label), []);
+    const again = applySpeakerTurns(
+      earlier,
+      [
+        { startMs: 0, endMs: 6000, speaker: 1 },
+        { startMs: 6000, endMs: 10_000, speaker: 2 },
+      ],
+      label,
+    );
+    assert.deepEqual(speakers(again), [
+      "Speaker 1",
+      "Speaker 1",
+      "Speaker 1",
+      "Speaker 2",
+      "Speaker 2",
+    ]);
+  });
+
+  it("renames a speaker on every segment", () => {
+    const list = applySpeakerTurns(meeting(), turns, label);
+    const renamed = renameSpeaker(list, "Speaker 2", "  Ben ");
+    assert.deepEqual(speakers(renamed), [
+      "Speaker 1",
+      "Speaker 1",
+      "Ben",
+      "Ben",
+      "Ben",
+    ]);
+    // The other segments are the same objects.
+    assert.equal(renamed[0], list[0]);
+    // Renaming into an existing name joins the two.
+    assert.deepEqual(speakerNames(renameSpeaker(renamed, "Ben", "Speaker 1")), [
+      "Speaker 1",
+    ]);
+    // An empty name clears the label.
+    assert.equal(renameSpeaker(renamed, "Ben", " ")[2]?.speaker, undefined);
+    // Nothing to do: the same list comes back.
+    assert.equal(renameSpeaker(renamed, "Nobody", "Ana"), renamed);
+    assert.equal(renameSpeaker(renamed, "Ben", "Ben"), renamed);
+    assert.equal(renameSpeaker(renamed, "", "Ana"), renamed);
   });
 });

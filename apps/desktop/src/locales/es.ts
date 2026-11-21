@@ -312,4 +312,53 @@ export const es: Partial<Record<LocaleKeys, string>> = {
     "No se pudo guardar el estado de la sincronización.",
   "native.syncInterrupted": "La sincronización se interrumpió.",
   "native.syncInvalidNote": "Nota sincronizada no válida.",
+  // Speaker detection
+  "studio.speakers.detect": "Detectar hablantes",
+  "studio.speakers.count": "Hablantes",
+  "studio.speakers.auto": "Automático",
+  "studio.speakers.label": "Hablante {number}",
+  "studio.speakers.consent":
+    "¿Descargar el modelo de hablantes de {size}? Tu audio se queda en este dispositivo.",
+  "studio.speakers.download": "Descargar",
+  "studio.speakers.notNow": "Ahora no",
+  "studio.speakers.downloading":
+    "Descargando el modelo de hablantes… {progress}\u00a0%",
+  "studio.speakers.keepOrReplace":
+    "Algunos segmentos ya tienen nombre. ¿Conservarlos o reemplazarlos?",
+  "studio.speakers.keep": "Conservar nombres",
+  "studio.speakers.replace": "Reemplazar nombres",
+  "studio.speakers.cancel": "Cancelar",
+  "studio.speakers.detecting": "Detectando hablantes… {progress}\u00a0%",
+  "studio.speakers.found.one": "Se encontró {count} hablante.",
+  "studio.speakers.found.other": "Se encontraron {count} hablantes.",
+  "studio.speakers.noSpeech": "No se encontró voz en esta grabación.",
+  "studio.speakers.stale":
+    "Se abrió otra transcripción, así que no se cambió ningún nombre.",
+  "studio.speakers.legend": "Hablantes de esta transcripción",
+  "studio.speakers.rename": "Renombrar {name} en todas partes",
+  "studio.speakers.segments.one": "{count} segmento",
+  "studio.speakers.segments.other": "{count} segmentos",
+  "studio.settings.speakerModelTitle": "Modelo de hablantes",
+  "studio.settings.speakerModelMeta": "Detección de hablantes · CPU",
+  "studio.settings.speakerModelReady":
+    "El modelo de hablantes está en este equipo.",
+  "studio.settings.speakerModelMissing":
+    "Descárgalo una vez para detectar quién habla en una grabación. Tu audio se queda en este dispositivo.",
+  "studio.settings.speakerModelInstall": "Descargar el modelo de hablantes",
+  "studio.settings.speakerModelReinstall": "Reinstalar el modelo de hablantes",
+  "studio.settings.speakerModelDownloaded":
+    "Modelo de hablantes descargado y suma de verificación comprobada.",
+  "native.speakersCancelled": "Se canceló la detección de hablantes.",
+  "native.speakersBusy": "La detección de hablantes ya está en curso.",
+  "native.speakerCount": "Elige entre 2 y 8 hablantes.",
+  "native.speakerModelMissing": "Descarga primero el modelo de hablantes.",
+  "native.speakerModelDamaged":
+    "El modelo de hablantes estaba dañado y se eliminó. Descárgalo de nuevo.",
+  "native.speakersStillRecording":
+    "Termina la grabación antes de detectar hablantes.",
+  "native.speakerModelUnreadable":
+    "No se puede leer el modelo de hablantes: {reason}",
+  "native.speakerModelLoad":
+    "No se puede cargar el modelo de hablantes: {reason}",
+  "native.speakerModelFailed": "El modelo de hablantes falló: {reason}",
 };

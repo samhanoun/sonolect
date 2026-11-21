@@ -31,17 +31,21 @@ import {
   saveMicDeviceId,
 } from "../microphone";
 import {
+  applySpeakerTurns,
   assignSpeakerLabel,
   mergeSegmentRun,
   moveTranscriptSegment,
+  renameSpeaker,
   resyncSegments,
   segmentsFromCapture,
   segmentsToText,
+  singleCaptureId,
   splitTranscriptSegment,
   textToSegments,
   type SavedCaptureSegment,
   type TranscriptSegment,
 } from "../segmentEditor";
+import { detectSpeakerTurns } from "../speakersNative";
 import {
   parseWhisperConfig,
   serializeWhisperConfig,
@@ -121,6 +125,14 @@ export type Toast = { id: string; message: string };
 /** A saved recording's version for sync (sync-core's `Hlc`). */
 export type CaptureVersion = { t: number; c: number; d: string };
 export type OpenedVersion = { id: string; hlc: CaptureVersion | null };
+
+export type SpeakerDetectionResult =
+  /** The segments are labelled; `speakers` voices were found. */
+  | { status: "labelled"; speakers: number }
+  /** The recording has no speech in it, so nothing changed. */
+  | { status: "silent" }
+  /** The transcript no longer belongs to that recording; nothing changed. */
+  | { status: "stale" };
 
 export type DesktopState = {
   commandOpen: boolean;
@@ -216,6 +228,19 @@ export type DesktopState = {
   moveSegment: (segmentId: string, direction: "up" | "down") => void;
   /** Labels every selected segment with one speaker; empty clears the label. */
   setSpeakerForSelection: (speaker: string) => void;
+  /**
+   * Finds who speaks when in the recording the transcript belongs to, on
+   * this device, and labels its segments as one undo step. Typed names are
+   * kept unless `replaceTyped` is set; see applySpeakerTurns.
+   */
+  detectSpeakers: (options?: {
+    /** How many people speak, 2 to 8; counted when left out. */
+    speakers?: number | undefined;
+    replaceTyped?: boolean;
+    onProgress?: (percent: number) => void;
+  }) => Promise<SpeakerDetectionResult>;
+  /** Renames a speaker on every segment, as one undo step. */
+  renameSpeakerEverywhere: (from: string, to: string) => void;
   clearSegmentSelection: () => void;
   /**
    * Opens one saved recording in the editor, with its timings and audio.
@@ -1469,6 +1494,51 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
         state.selectedSegmentIds,
       );
       return withUndoSnapshot(state, next);
+    }),
+  detectSpeakers: async ({
+    speakers,
+    replaceTyped = false,
+    onProgress,
+  } = {}) => {
+    const captureId = singleCaptureId(get().transcriptSegments);
+    if (!captureId) return { status: "stale" };
+    const turns = await detectSpeakerTurns(captureId, speakers, onProgress);
+    if (!turns.length) return { status: "silent" };
+    // Another recording may have been opened while the audio was read.
+    if (singleCaptureId(get().transcriptSegments) !== captureId)
+      return { status: "stale" };
+    const t = getT();
+    set((state) => {
+      const labelled = applySpeakerTurns(
+        state.transcriptSegments,
+        turns,
+        (number) => t("studio.speakers.label", { number }),
+        { replaceTyped },
+      );
+      if (
+        labelled.every(
+          (segment, index) => segment === state.transcriptSegments[index],
+        )
+      )
+        return state;
+      return withUndoSnapshot(
+        state,
+        syncSegments(labelled, state.selectedSegmentIds),
+      );
+    });
+    return {
+      status: "labelled",
+      speakers: new Set(turns.map((turn) => turn.speaker)).size,
+    };
+  },
+  renameSpeakerEverywhere: (from, to) =>
+    set((state) => {
+      const renamed = renameSpeaker(state.transcriptSegments, from, to);
+      if (renamed === state.transcriptSegments) return state;
+      return withUndoSnapshot(
+        state,
+        syncSegments(renamed, state.selectedSegmentIds),
+      );
     }),
   clearSegmentSelection: () => set({ selectedSegmentIds: [] }),
   setOpenedVersion: (id, hlc) => set({ openedVersion: { id, hlc } }),
