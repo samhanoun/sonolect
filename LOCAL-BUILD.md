@@ -42,11 +42,52 @@ The desktop TypeScript checks and production frontend build pass. Native unit ch
 - Implement and test destination focus tracking and automatic insertion into other apps. For now, use the saved transcript's Copy action. The inherited manual native insertion action is not a verified app-wide dictation workflow.
 - Add cancelable native inference, improved local editing/rewriting, streaming, reliable spoken snippets, app context and styles.
 - Validate languages beyond the English fixture and profile larger models/GPU acceleration.
-- Repair and validate cloud authentication, cloud service configuration, and account sync before enabling a hosted service. The cloud fallback code is opt-in; this copy has no configured cloud account or deployed backend.
+- Repair and validate cloud authentication and cloud service configuration before enabling a hosted API. The cloud fallback code is opt-in; this copy has no configured cloud account or deployed backend. Note sync is separate: it is end-to-end encrypted, needs no account, and stays hidden until a build names a sync server (see [Note sync against a local server](#note-sync-against-a-local-server) and [docs/sync-setup.md](docs/sync-setup.md)).
 - Complete local-history crash/failure tests, encrypted-storage options, retention limits, signing and installer QA.
 - Resolve inherited dependency advisories before release. The initial production dependency audit of the full monorepo reported 2 critical and 52 high advisories (including packages outside the local dictation scope). This development build is not a production security sign-off.
 
 Reader and Team are disabled in local mode. Offline semantic rewriting with a local language model and offline TTS are not implemented here. Local processing currently means speech recognition and conservative formatting.
+
+## Note sync against a local server
+
+Sync between devices is built in but hidden: a build shows it only when it names a sync server, `SONOLECT_SYNC_URL` for the desktop app and `EXPO_PUBLIC_SONOLECT_SYNC_URL` for the phone, read when the app is built. Release builds accept only `https://`. Development builds may also use plain http to this machine (`127.0.0.1` or `localhost`) and, from the Android emulator, to `10.0.2.2`, so the whole loop runs locally. Without a URL nothing changes and the apps make no sync request.
+
+1. Start the sync service from the repository root. With no store set it keeps vaults in memory and forgets them when it stops; a SQLite file (here in the ignored `local-test` folder) keeps them:
+
+   ```bash
+   pnpm --filter @sonolect/sync-service dev     # http://127.0.0.1:8080, in memory
+   SONOLECT_SYNC_STORE="sqlite:$PWD/local-test/sync.db" pnpm --filter @sonolect/sync-service dev
+   curl http://127.0.0.1:8080/health
+   ```
+
+   Set `PORT` for another port. The service listens on `127.0.0.1` only outside production, and never logs a note, a key or a token.
+
+2. Run a desktop development build against it. Plain http works only in `tauri dev`: `tauri build` and `scripts/build-local.ps1` build the interface in production mode, which accepts only https. The browser preview (`pnpm --filter @sonolect/desktop dev`) never syncs.
+
+   ```bash
+   SONOLECT_SYNC_URL=http://127.0.0.1:8080 pnpm --filter @sonolect/desktop tauri dev
+   ```
+
+   ```powershell
+   $env:SONOLECT_SYNC_URL = "http://127.0.0.1:8080"; pnpm --filter @sonolect/desktop tauri dev
+   ```
+
+   Settings then shows **Sync between devices**. On Linux the key lives in the Secret Service (GNOME Keyring or KWallet); without one running, the app says sync is unavailable.
+
+3. Run a phone development build against it, from `apps/mobile` (`pnpm exec expo run:android` or `pnpm exec expo run:ios`), with `EXPO_PUBLIC_SONOLECT_SYNC_URL` set in that shell or in `apps/mobile/.env`:
+
+   | Device                 | URL                                                                                     |
+   | ---------------------- | --------------------------------------------------------------------------------------- |
+   | iOS simulator          | `http://127.0.0.1:8080`                                                                 |
+   | Android emulator       | `http://10.0.2.2:8080` (the emulator's address for this computer)                       |
+   | Android phone over USB | `http://127.0.0.1:8080`, after `adb reverse tcp:8080 tcp:8080`                          |
+   | iPhone                 | Only an https server, such as the hosted one ([docs/sync-setup.md](docs/sync-setup.md)) |
+
+   Expo inlines `EXPO_PUBLIC_` variables when Metro bundles the app, so restart Metro after changing it (`pnpm exec expo start --clear` if the old value sticks). The web build never shows sync.
+
+4. Pair the two: turn sync on in one app's Settings, then join from the other with the 56-character code (or, on a phone, by opening the QR code's link). Notes made on one appear on the other within a minute or two; recordings stay where they were made. Joining shares every note with whoever holds the code, so use test notes.
+
+`pnpm --filter @sonolect/sync-service test` runs the service's own tests, including two devices syncing through it over HTTP.
 
 ## Rebuild
 
