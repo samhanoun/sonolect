@@ -17,6 +17,7 @@ import {
   type SyncPause,
   SyncController,
   reportProblem,
+  syncPauseFor,
 } from "./controller";
 import { SYNC_STATE_PREFIX } from "../storageCore";
 import { SYNC_KEY_ITEM, createSyncKeyStore } from "./keyStore";
@@ -245,6 +246,30 @@ describe("sync controller: when it syncs", () => {
     assert.equal(a.sync.view().paused, null);
     await w.clock.advance(0);
     assert.equal(w.server.records(vaultIdOf(a)).length, 1);
+  });
+
+  it("stays paused while the settings could not be read", () => {
+    const ready = { keepsHistory: true, notesReady: true };
+    assert.equal(syncPauseFor({ ...ready, settingsUnread: false }), null);
+    // Even with history turned on meanwhile, until settings are saved: the
+    // stored choice is unknown.
+    assert.equal(syncPauseFor({ ...ready, settingsUnread: true }), "settings");
+    assert.equal(
+      syncPauseFor({
+        settingsUnread: true,
+        keepsHistory: false,
+        notesReady: false,
+      }),
+      "settings",
+    );
+    assert.equal(
+      syncPauseFor({ ...ready, settingsUnread: false, keepsHistory: false }),
+      "historyOff",
+    );
+    assert.equal(
+      syncPauseFor({ ...ready, settingsUnread: false, notesReady: false }),
+      "storage",
+    );
   });
 });
 

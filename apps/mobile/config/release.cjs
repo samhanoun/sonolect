@@ -14,8 +14,12 @@
  * builds may also use plain http to this machine (127.0.0.1, localhost) or,
  * from the Android emulator, to its host (10.0.2.2). The app reads the
  * variable itself (Expo inlines EXPO_PUBLIC_ variables) and checks it again
- * with sync-core's checkSyncServerUrl; this check makes a build with a bad
- * URL fail instead of shipping without sync.
+ * with sync-core's checkSyncServerUrl, where plain http needs __DEV__; this
+ * check makes a build with a bad URL fail instead of shipping without sync.
+ * A development build is one whose JavaScript is bundled for development:
+ * Expo CLI sets NODE_ENV=production when it bundles for release (an EAS
+ * build of any profile but a development client, a release variant, or an
+ * export), and that bundle has __DEV__ false.
  *
  * SONOLECT_BUILD_NUMBER is the build number of a local release archive
  * (ios-10, android-3): it sets ios.buildNumber (CFBundleVersion) and
@@ -41,7 +45,7 @@ const MAX_BUILD_NUMBER = 2100000000;
 const MESSAGES = {
   invalidUrl: `${POLICY_URL_VAR} must be an https:// URL`,
   invalidSyncUrl: `${SYNC_URL_VAR} must be an https:// URL with no user name, query or fragment (development builds may also use http://127.0.0.1, http://localhost or http://10.0.2.2)`,
-  localSyncUrlInRelease: `${SYNC_URL_VAR} must be an https:// URL in release builds`,
+  localSyncUrlInRelease: `${SYNC_URL_VAR} must be an https:// URL in release builds and in builds bundled for production (NODE_ENV=production, such as an EAS preview build or a release variant), where the app ignores plain http`,
   missingUrl: `${POLICY_URL_VAR} is required for release builds (App Review 5.1.1(i), Google Play User Data policy). See docs/mobile-release.md.`,
   invalidBuildNumber: `${BUILD_NUMBER_VAR} must be a whole number from 1 to ${MAX_BUILD_NUMBER}`,
   missingBuildNumber: `Set ${BUILD_NUMBER_VAR} for local release builds (EAS builds use remote versioning)`,
@@ -53,6 +57,15 @@ const MESSAGES = {
  */
 function isReleaseBuild(env) {
   return env.EAS_BUILD_PROFILE === "production" || env.SONOLECT_RELEASE === "1";
+}
+
+/**
+ * JavaScript bundled for development (__DEV__ true in the app): not a
+ * release build, and not bundled for production. Expo CLI sets NODE_ENV to
+ * the mode it bundles in before it reads this config.
+ */
+function isDevelopmentBundle(env) {
+  return !isReleaseBuild(env) && env.NODE_ENV !== "production";
 }
 
 /**
@@ -98,7 +111,8 @@ function privacyPolicyUrlFrom(env) {
 /**
  * The sync server URL from the environment, without a trailing slash, or null
  * when unset (no sync). Throws when it is malformed, plain http to another
- * host, or plain http in a release build.
+ * host, or plain http outside a development bundle, where the app would
+ * drop it and have no sync (features.ts).
  */
 function syncServerUrlFrom(env) {
   const url = (env[SYNC_URL_VAR] ?? "").trim();
@@ -120,7 +134,9 @@ function syncServerUrlFrom(env) {
     if (!LOCAL_HTTP_HOSTS.includes(host)) {
       throw new Error(MESSAGES.invalidSyncUrl);
     }
-    if (isReleaseBuild(env)) throw new Error(MESSAGES.localSyncUrlInRelease);
+    if (!isDevelopmentBundle(env)) {
+      throw new Error(MESSAGES.localSyncUrlInRelease);
+    }
   }
   const path = (match[4] ?? "").replace(/\/+$/, "");
   return `${scheme}://${host}${port !== undefined ? `:${port}` : ""}${path}`;
@@ -181,6 +197,7 @@ module.exports = {
   POLICY_URL_VAR,
   SYNC_URL_VAR,
   buildNumberFrom,
+  isDevelopmentBundle,
   isEasBuilder,
   isReleaseBuild,
   privacyPolicyUrlFrom,

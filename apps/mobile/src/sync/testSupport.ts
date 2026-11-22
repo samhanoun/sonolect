@@ -30,6 +30,7 @@ import {
   addNote,
   changeNote,
   deleteNotes,
+  unreadNoteDeletes,
 } from "./edits";
 import type { SecretStore } from "./keyStore";
 import { createNotesHost, createSyncNoteStore } from "./noteStore";
@@ -310,6 +311,28 @@ export class TestPhone {
     const recorded = tombstones.length > 0 ? record(tombstones) : undefined;
     if (this.latest && !history.includes(this.latest)) this.latest = undefined;
     await this.save(history);
+    await recorded;
+  }
+
+  /**
+   * Clear history as store.ts makes it: the shown notes' tombstones go to
+   * `record` first, then storage is cleared, and the notes it removed
+   * without showing them (a load that failed) are recorded too.
+   */
+  async clearHistory(
+    scope: DeleteScope,
+    record: (tombstones: Tombstone[]) => Promise<void>,
+  ): Promise<void> {
+    const shown = this.history;
+    const { tombstones } = deleteNotes(shown, "all", scope);
+    const recorded = tombstones.length > 0 ? record(tombstones) : undefined;
+    this.epoch += 1;
+    this.history = [];
+    this.latest = undefined;
+    const removed = await this.storage.clear();
+    const unread = unreadNoteDeletes(removed, shown, scope);
+    if (unread.length > 0) await record(unread);
+    this.writable = true;
     await recorded;
   }
 

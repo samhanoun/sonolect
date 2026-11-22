@@ -32,7 +32,10 @@ export const requestTimeoutMs = (bytes: number, base = REQUEST_TIMEOUT_MS) =>
  */
 export const MAX_RESPONSE_BYTES = PAGE_RESPONSE_BYTES;
 
-/** What the requester needs from `fetch` (React Native's, or Node's in scripts). */
+/**
+ * What the requester needs from `fetch`: Expo's on the phone (runtime.ts),
+ * which refuses redirects, or Node's in scripts.
+ */
 export type FetchLike = (
   url: string,
   init: {
@@ -66,6 +69,18 @@ const tooLarge = () =>
 const badAnswer = (what: string) =>
   new SyncError("server", `unexpected answer from the sync server (${what})`);
 
+/**
+ * A fetch that refused to follow a redirect (redirect "error"): Expo's on
+ * iOS and Android ("Redirect is not allowed when redirect mode is
+ * 'error'"), or Node's ("unexpected redirect", as the cause).
+ */
+const isRedirectRefusal = (error: unknown): boolean =>
+  [error, error instanceof Error ? error.cause : undefined].some(
+    (item) =>
+      item instanceof Error &&
+      /redirect mode is|unexpected redirect/i.test(item.message),
+  );
+
 /** An HttpRequester over fetch. Network failures and timeouts throw (the transport maps them to "network"). */
 export function createFetchRequester({
   baseUrl,
@@ -95,7 +110,12 @@ export function createFetchRequester({
         signal: controller.signal,
         // A redirect would send the token somewhere else.
         redirect: "error",
+      }).catch((error: unknown) => {
+        // The server answered, with a redirect: a server problem, not
+        // being offline.
+        throw isRedirectRefusal(error) ? badAnswer("redirected") : error;
       });
+      // A second line of defence: a fetch that followed a redirect anyway.
       if (response.url && !response.url.startsWith(`${base}/`))
         throw badAnswer("redirected");
       const length = Number(response.headers.get("content-length") ?? "");

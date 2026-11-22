@@ -8,6 +8,7 @@ import {
   clearHistoryPrompt,
   historyOffConfirmation,
   historyOffPrompt,
+  historyWrites,
   httpsUrlOrNull,
   retentionPrompt,
 } from "./settingsPolicy";
@@ -31,6 +32,28 @@ describe("keepsHistory", () => {
     );
     assert.equal(keepsHistory({ ...localFirst, saveHistory: false }), false);
     assert.equal(keepsHistory(ephemeral), false);
+  });
+});
+
+describe("historyWrites", () => {
+  it("stores every note only with history on and the settings read", () => {
+    assert.equal(historyWrites(localFirst, false), "all");
+    assert.equal(
+      historyWrites({ ...localFirst, saveHistory: false }, false),
+      "existing",
+    );
+    assert.equal(historyWrites(ephemeral, false), "existing");
+  });
+
+  it("keeps changes to stored notes while the settings could not be read", () => {
+    // The session runs with history off: edits, refines, pins and deletes
+    // of the notes that loaded are still written, but no new note is.
+    assert.equal(
+      historyWrites({ ...localFirst, saveHistory: false }, true),
+      "existing",
+    );
+    // History turned on meanwhile: still no new note until settings are saved.
+    assert.equal(historyWrites(localFirst, true), "existing");
   });
 });
 

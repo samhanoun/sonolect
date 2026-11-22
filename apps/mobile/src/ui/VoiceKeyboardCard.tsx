@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Platform, StyleSheet, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 
 import {
   getVoiceKeyboardStatus,
@@ -11,6 +11,8 @@ import {
 import { strings } from "../i18n";
 import { systemServiceAllowedWithoutAsking } from "../speechPolicy";
 import { useCompanionStore } from "../store";
+import { systemTimers } from "../sync/timers";
+import { watchKeyboardChange } from "../voiceKeyboardWatch";
 import { Button, Card, Label } from "./components";
 import { colors, fonts, space } from "./theme";
 
@@ -32,13 +34,43 @@ export function VoiceKeyboardCard({ enterIndex }: { enterIndex: number }) {
     getVoiceKeyboardStatus(),
   );
   const refresh = useCallback(() => setStatus(getVoiceKeyboardStatus()), []);
+  /** Stops the reads that follow the keyboard picker. */
+  const stopWatch = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
       if (state === "active") refresh();
     });
-    return () => sub.remove();
+    // Android: the window gets focus back when the keyboard picker closes.
+    const focus =
+      Platform.OS === "android"
+        ? AppState.addEventListener("focus", refresh)
+        : null;
+    return () => {
+      sub.remove();
+      focus?.remove();
+      stopWatch.current?.();
+    };
   }, [refresh]);
+
+  // Tabs stay mounted: the status is read again each time Settings shows.
+  useFocusEffect(refresh);
+
+  const openPicker = () => {
+    stopWatch.current?.();
+    const before = status;
+    void showVoiceKeyboardPicker().then((shown) => {
+      if (!shown) return;
+      // The picker answers as soon as it shows, before the user picks.
+      stopWatch.current = watchKeyboardChange({
+        read: getVoiceKeyboardStatus,
+        changed: (next) =>
+          next.selected !== before.selected || next.enabled !== before.enabled,
+        onStatus: setStatus,
+        timers: systemTimers,
+      });
+    });
+  };
 
   if (Platform.OS === "android" && status.supported) {
     const step = !status.enabled
@@ -70,11 +102,7 @@ export function VoiceKeyboardCard({ enterIndex }: { enterIndex: number }) {
               label={status.selected ? t.changeKeyboard : t.switchKeyboard}
               icon="keyboard"
               variant={status.selected ? "outline" : "primary"}
-              onPress={() => {
-                void showVoiceKeyboardPicker().then(() =>
-                  setTimeout(refresh, 800),
-                );
-              }}
+              onPress={openPicker}
             />
           )}
         </View>

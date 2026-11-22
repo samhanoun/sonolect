@@ -11,7 +11,11 @@ import android.graphics.Shader
 import android.view.View
 import android.view.animation.LinearInterpolator
 
-/** The big lime mic button; its glow breathes with the voice level. */
+/**
+ * The big lime mic button; its glow breathes with the voice level. It draws
+ * every frame while listening, so onDraw allocates nothing: the shaders are
+ * made when the size changes, and the glow is scaled to the ring.
+ */
 internal class VoiceOrbView(context: Context) : View(context) {
   private val density = resources.displayMetrics.density
   private val glow = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -23,6 +27,9 @@ internal class VoiceOrbView(context: Context) : View(context) {
     strokeWidth = 2.4f * density
   }
   private val iconFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#0B120E") }
+  private val square = RectF()
+  private val capsule = RectF()
+  private val arc = RectF()
   private var active = false
   private var level = 0f
   private var pulse = 0f
@@ -55,38 +62,56 @@ internal class VoiceOrbView(context: Context) : View(context) {
     super.onDetachedFromWindow()
   }
 
-  override fun onDraw(canvas: Canvas) {
-    val cx = width / 2f
-    val cy = height / 2f
-    val base = minOf(width, height) / 2f * 0.66f
-    if (active) {
-      val ring = base * (1.12f + 0.32f * level + 0.06f * pulse)
-      glow.shader = RadialGradient(
-        cx, cy, ring,
-        intArrayOf(Color.argb(140, 221, 243, 154), Color.argb(0, 221, 243, 154)),
-        floatArrayOf(0.55f, 1f),
-        Shader.TileMode.CLAMP,
-      )
-      canvas.drawCircle(cx, cy, ring, glow)
+  override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+    super.onSizeChanged(w, h, oldw, oldh)
+    val cx = w / 2f
+    val cy = h / 2f
+    val base = minOf(w, h) / 2f * 0.66f
+    if (base <= 0f) {
+      glow.shader = null
+      body.shader = null
+      return
     }
+    // The glow at the body's radius; onDraw scales it out to the ring.
+    glow.shader = RadialGradient(
+      cx, cy, base,
+      intArrayOf(Color.argb(140, 221, 243, 154), Color.argb(0, 221, 243, 154)),
+      floatArrayOf(0.55f, 1f),
+      Shader.TileMode.CLAMP,
+    )
     body.shader = RadialGradient(
       cx - base * 0.3f, cy - base * 0.35f, base * 1.4f,
       intArrayOf(Color.parseColor("#F4FBD9"), SonolectVoiceIme.LIME),
       floatArrayOf(0f, 0.6f),
       Shader.TileMode.CLAMP,
     )
+  }
+
+  override fun onDraw(canvas: Canvas) {
+    val cx = width / 2f
+    val cy = height / 2f
+    val base = minOf(width, height) / 2f * 0.66f
+    if (base <= 0f) return
+    if (active) {
+      val scale = 1.12f + 0.32f * level + 0.06f * pulse
+      val saved = canvas.save()
+      canvas.scale(scale, scale, cx, cy)
+      canvas.drawCircle(cx, cy, base, glow)
+      canvas.restoreToCount(saved)
+    }
     canvas.drawCircle(cx, cy, base, body)
 
     // Mic glyph (or a stop square while listening).
     val s = base * 0.42f
     if (active) {
       val half = s * 0.55f
-      canvas.drawRoundRect(RectF(cx - half, cy - half, cx + half, cy + half), 4f * density, 4f * density, iconFill)
+      square.set(cx - half, cy - half, cx + half, cy + half)
+      canvas.drawRoundRect(square, 4f * density, 4f * density, iconFill)
       return
     }
-    val capsule = RectF(cx - s * 0.38f, cy - s, cx + s * 0.38f, cy + s * 0.2f)
+    capsule.set(cx - s * 0.38f, cy - s, cx + s * 0.38f, cy + s * 0.2f)
     canvas.drawRoundRect(capsule, s * 0.38f, s * 0.38f, iconFill)
-    val arc = RectF(cx - s * 0.7f, cy - s * 0.55f, cx + s * 0.7f, cy + s * 0.62f)
+    arc.set(cx - s * 0.7f, cy - s * 0.55f, cx + s * 0.7f, cy + s * 0.62f)
     canvas.drawArc(arc, 20f, 140f, false, icon)
     canvas.drawLine(cx, cy + s * 0.62f, cx, cy + s * 0.95f, icon)
   }

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { StyleSheet, Text, TextInput, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppState, StyleSheet, Text, TextInput, View } from "react-native";
+import { useFocusEffect } from "expo-router";
 import Svg, { Path, Rect } from "react-native-svg";
 
 import { SYNC_URL } from "../features";
@@ -63,6 +64,23 @@ export function SyncSection({
     if (!on) setPairing(null);
   }, [on]);
 
+  // Tabs stay mounted: the code also goes when Settings loses focus and
+  // when the app leaves the screen (iOS 'inactive' comes before the app
+  // switcher's snapshot), so it never shows again by itself. A code read
+  // meanwhile is not shown either: each leave counts.
+  const leaves = useRef(0);
+  const leave = useCallback(() => {
+    leaves.current += 1;
+    setPairing(null);
+  }, []);
+  useFocusEffect(useCallback(() => leave, [leave]));
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state !== "active") leave();
+    });
+    return () => subscription.remove();
+  }, [leave]);
+
   if (!view) return null;
   const lines = syncStatusLines(t, view, (ms) =>
     formatNoteDate(new Date(ms).toISOString(), locale),
@@ -87,11 +105,17 @@ export function SyncSection({
     setJoinRoot(null);
   };
 
+  /** Shows the code read, unless the user left Settings or the app since `at`. */
+  const showPairing = (at: number, next: Pairing | null) => {
+    if (leaves.current === at) setPairing(next);
+  };
+
   const turnOn = () =>
     act(async () => {
+      const at = leaves.current;
       try {
         await sync.turnOn();
-        setPairing(await sync.pairing());
+        showPairing(at, await sync.pairing());
       } catch (error) {
         setMessage(actionErrorText(t, error));
       }
@@ -99,8 +123,9 @@ export function SyncSection({
 
   const showCode = () =>
     act(async () => {
+      const at = leaves.current;
       try {
-        setPairing(await sync.pairing());
+        showPairing(at, await sync.pairing());
       } catch (error) {
         setMessage(actionErrorText(t, error));
       }

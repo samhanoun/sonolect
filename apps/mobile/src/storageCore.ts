@@ -1,7 +1,13 @@
 import { isHlc, toHlc } from "@sonolect/sync-core";
 import type { SonolectMode } from "@sonolect/types";
 
-import type { DictionaryEntry, Snippet, TranscriptTurn } from "./domain";
+import type {
+  CompanionSettings,
+  DictionaryEntry,
+  Snippet,
+  TranscriptTurn,
+} from "./domain";
+import { normalizeSettings } from "./domain";
 import { sanitizeSegments } from "./noteSegments";
 
 /**
@@ -257,7 +263,8 @@ export function splitUtf8(text: string, maxBytes: number): string[] {
 
 /**
  * The key-value pairs that store a companion value under `key`, and the
- * part keys to remove: those a shorter value no longer uses. Null when the
+ * part keys to remove: those a shorter value no longer uses. A value that
+ * fits in one key uses no part, so every part key is stale. Null when the
  * value is over MAX_COMPANION_PARTS parts.
  */
 export function companionPairs(
@@ -265,14 +272,17 @@ export function companionPairs(
   value: string,
 ): { pairs: [string, string][]; stale: string[] } | null {
   const parts = splitUtf8(value, COMPANION_PART_BYTES);
-  if (parts.length === 1) return { pairs: [[key, value]], stale: [] };
   if (parts.length > MAX_COMPANION_PARTS) return null;
-  const pairs: [string, string][] = [[key, `${PARTS_HEADER}${parts.length}`]];
-  parts.forEach((part, index) =>
-    pairs.push([companionPartKey(key, index + 1), part]),
-  );
+  const used = parts.length === 1 ? 0 : parts.length;
+  const pairs: [string, string][] =
+    used === 0 ? [[key, value]] : [[key, `${PARTS_HEADER}${used}`]];
+  if (used > 0) {
+    parts.forEach((part, index) =>
+      pairs.push([companionPartKey(key, index + 1), part]),
+    );
+  }
   const stale: string[] = [];
-  for (let part = parts.length + 1; part <= MAX_COMPANION_PARTS; part += 1)
+  for (let part = used + 1; part <= MAX_COMPANION_PARTS; part += 1)
     stale.push(companionPartKey(key, part));
   return { pairs, stale };
 }
@@ -428,6 +438,13 @@ export interface NoteStore {
   /** Stores this list (newest first) as the notes. */
   save(notes: readonly TranscriptTurn[]): Promise<void>;
   /**
+   * Like save, for the notes already stored only: the notes this session
+   * read or wrote take their changes and deletes, and a note the store
+   * does not hold is left out. For a session that stores no new note
+   * (store.ts persistHistory). Writes nothing while it holds no note.
+   */
+  saveExisting(notes: readonly TranscriptTurn[]): Promise<void>;
+  /**
    * Stores single notes at once, for sync: `put` writes each note and its
    * companion value in one write, `remove` deletes notes and their
    * companions. It leaves the index alone, so a change costs one write
@@ -439,8 +456,12 @@ export interface NoteStore {
     put?: readonly NoteWrite[];
     remove?: readonly string[];
   }): Promise<void>;
-  /** Removes every note, the index and the older history values. */
-  clear(): Promise<void>;
+  /**
+   * Removes every note, the index and the older history values. Resolves
+   * with the ids of the notes it removed, those a failed load could not
+   * read among them.
+   */
+  clear(): Promise<string[]>;
   /** True until a load succeeds, and after a load that failed. */
   isDegraded(): boolean;
 }
@@ -875,19 +896,32 @@ export function createNoteStore(
     for (const batch of chunk([...keys], size)) await kv.multiRemove(batch);
     known = new Map();
     degraded = false;
+    return [...keys]
+      .filter(isNoteKey)
+      .map((key) => key.slice(NOTE_PREFIX.length));
   };
 
   return {
     load: () => serialized(load),
     save: (notes) => serialized(() => save(notes)),
+    // Filtered when it runs: an earlier save or clear changes what is held.
+    saveExisting: (notes) =>
+      serialized(async () => {
+        if (known.size === 0) return;
+        await save(notes.filter((note) => known.has(note.id)));
+      }),
     apply: (change) => serialized(() => apply(change)),
     clear: () => serialized(clear),
     isDegraded: () => degraded,
   };
 }
 
-/** A value read from one key: settings, the dictionary or the snippets. */
-export type JsonRead = { ok: true; value: unknown } | { ok: false };
+/**
+ * A value read from one key: settings, the dictionary or the snippets.
+ * corrupt: the key held JSON that does not parse (value undefined).
+ */
+export type JsonRead =
+  { ok: true; value: unknown; corrupt?: true } | { ok: false };
 
 const UNREADABLE_ERROR = "UnreadableValueError";
 
@@ -901,7 +935,7 @@ export interface JsonStore {
    * Reads and parses one key. ok false: the read failed, the value is kept
    * and this store never overwrites it (data-1). JSON that doesn't parse is
    * copied to `<key>.corrupt`, then removed, and reads as absent (value
-   * undefined).
+   * undefined) with corrupt true.
    */
   read(key: string): Promise<JsonRead>;
   /** Rejects, writing nothing, for a key whose read failed. */
@@ -937,6 +971,7 @@ export function createJsonStore(
         } catch {
           // Kept as is: the next write replaces it.
         }
+        return { ok: true, value, corrupt: true };
       }
       return { ok: true, value };
     },
@@ -959,6 +994,93 @@ export function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+/**
+ * The settings a launch runs on, from the read of their key. Nothing
+ * stored: a first run, with `firstRun`'s settings. Stored but unreadable
+ * (a read error, JSON that does not parse, or a value that is not
+ * settings): ok false, and the session runs on those settings with Save
+ * history off, so the defaults never break a choice such as Ephemeral or
+ * Save history off. store.ts then stores no new note and pauses sync until
+ * settings are saved. stored: settings were read; false on a first run and
+ * when they could not be read.
+ */
+export function settingsFromRead(
+  read: JsonRead,
+  firstRun: () => CompanionSettings,
+): { ok: boolean; stored: boolean; value: CompanionSettings } {
+  const saved = read.ok ? asRecord(read.value) : undefined;
+  if (saved) {
+    return {
+      ok: true,
+      stored: true,
+      value: normalizeSettings(saved as Partial<CompanionSettings>),
+    };
+  }
+  if (read.ok && read.value === undefined && read.corrupt !== true) {
+    return { ok: true, stored: false, value: firstRun() };
+  }
+  return {
+    ok: false,
+    stored: false,
+    value: { ...firstRun(), saveHistory: false },
+  };
+}
+
+export interface SettingsStore {
+  /** The settings a launch runs on (settingsFromRead). */
+  load(): Promise<{ ok: boolean; stored: boolean; value: CompanionSettings }>;
+  /** Rejects, writing nothing, when the settings could not be read. */
+  save(settings: CompanionSettings): Promise<void>;
+}
+
+/**
+ * The settings under `key`. Settings that could not be read stay unread at
+ * every launch until settings are saved again. JSON that does not parse is
+ * copied to `<key>.corrupt`, then removed (JsonStore.read), so a launch that
+ * finds no settings but that copy is no first run. A save that succeeds
+ * removes the copy.
+ */
+export function createSettingsStore(
+  kv: Pick<KeyValueStore, "getItem" | "removeItem">,
+  values: JsonStore,
+  key: string,
+  firstRun: () => CompanionSettings,
+): SettingsStore {
+  const copyKey = `${key}${CORRUPT_SUFFIX}`;
+  /** A copy of broken settings may be stored: the next save removes it. */
+  let setAside = false;
+  return {
+    async load() {
+      let read = await values.read(key);
+      if (read.ok && read.corrupt === true) setAside = true;
+      if (read.ok && read.value === undefined && read.corrupt !== true) {
+        try {
+          const copy = await kv.getItem(copyKey);
+          if (copy !== null && copy !== undefined) {
+            setAside = true;
+            read = { ok: true, value: undefined, corrupt: true };
+          }
+        } catch {
+          // Unknown whether settings were set aside: not a first run.
+          setAside = true;
+          read = { ok: false };
+        }
+      }
+      return settingsFromRead(read, firstRun);
+    },
+    async save(settings) {
+      await values.write(key, settings);
+      if (!setAside) return;
+      try {
+        await kv.removeItem(copyKey);
+        setAside = false;
+      } catch {
+        // Harmless: a launch reads the saved settings, not the copy.
+      }
+    },
+  };
 }
 
 /** The entries with string fields, without unknown fields (security-6). */

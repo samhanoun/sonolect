@@ -1,7 +1,8 @@
 import * as assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { TranscriptTurn } from "./domain";
+import type { CompanionSettings, TranscriptTurn } from "./domain";
+import { DEFAULT_SETTINGS, keepsHistory } from "./domain";
 import type { KeyValueStore } from "./storageCore";
 import {
   CORRUPT_SUFFIX,
@@ -18,6 +19,7 @@ import {
   companionKeys,
   createJsonStore,
   createNoteStore,
+  createSettingsStore,
   isUnreadableValueError,
   isV01Sample,
   noteKey,
@@ -27,6 +29,7 @@ import {
   sanitizeSnippets,
   sanitizeTurn,
   serializeIndex,
+  settingsFromRead,
   splitUtf8,
   utf8Length,
 } from "./storageCore";
@@ -319,8 +322,10 @@ describe("single-note writes (sync)", () => {
     kv.log.length = 0;
     const remote = note(0, { hlc: { t: NOW, c: 0, d: "phone2" } });
     await store.apply({ put: [{ note: remote, companion: '{"v":1}' }] });
+    // One write for both; then the parts an earlier, larger value used.
     assert.deepEqual(kv.writes(), [
       `multiSet ${noteKey(remote.id)},${companionOf(remote.id)}`,
+      `multiRemove ${companionKeys(companionOf(remote.id)).slice(1).join(",")}`,
     ]);
     assert.equal(kv.data.get(companionOf(remote.id)), '{"v":1}');
     assert.deepEqual(indexOf(kv), ["turn_1", "turn_2"]);
@@ -413,12 +418,34 @@ describe("single-note writes (sync)", () => {
     const half = big.slice(0, 1_000_000) + '"}}';
     await store.apply({ put: [{ note: one, companion: half }] });
     assert.equal(await readCompanionValue(kv, companionOf("turn_1")), half);
+    assert.equal(kv.data.has(`${companionOf("turn_1")}~3`), false);
     await store.apply({ remove: ["turn_1"] });
     assert.deepEqual(
       [...kv.data.keys()].filter((key) =>
         key.startsWith(SYNC_COMPANION_PREFIX),
       ),
       [],
+    );
+  });
+
+  it("removes every part when a split companion shrinks to one key", async () => {
+    const kv = await seeded([note(1)]);
+    const store = syncStoreOn(kv);
+    const [one] = (await store.load()).notes;
+    assert.ok(one);
+    const big = `{"v":1,"extra":{"t":"${"aé€😀".repeat(400_000)}"}}`;
+    await store.apply({ put: [{ note: one, companion: big }] });
+    const partsOf = () =>
+      [...kv.data.keys()].filter((key) =>
+        key.startsWith(`${companionOf("turn_1")}~`),
+      );
+    assert.equal(partsOf().length, 3);
+    await store.apply({ put: [{ note: one, companion: '{"v":1}' }] });
+    assert.deepEqual(partsOf(), []);
+    assert.equal(kv.data.get(companionOf("turn_1")), '{"v":1}');
+    assert.equal(
+      await readCompanionValue(kv, companionOf("turn_1")),
+      '{"v":1}',
     );
   });
 
@@ -566,6 +593,45 @@ describe("note store", () => {
     assert.deepEqual((await storeOn(kv).load()).notes, [
       { ...c, refinedText: "Edited." },
     ]);
+  });
+
+  it("keeps changes to stored notes, and stores no new one, without history", async () => {
+    // A launch that could not read the settings: history is off for the
+    // session, and the notes that loaded are shown.
+    const kv = await seeded([note(1), note(2), note(3)]);
+    const store = storeOn(kv);
+    const [a, b, c] = (await store.load()).notes;
+    assert.ok(a && b && c);
+    kv.log.length = 0;
+
+    // A new note, a refine of note 1, note 2 deleted.
+    const fresh = note(0);
+    const refined = { ...a, refinedText: "Refined." };
+    await store.saveExisting([fresh, refined, c]);
+    assert.deepEqual(kv.writes(), [
+      `multiSet ${noteKey(a.id)}`,
+      `multiRemove ${noteKey(b.id)}`,
+      `setItem ${INDEX_KEY}`,
+    ]);
+    assert.equal(kv.data.has(noteKey(fresh.id)), false);
+    // The next launch shows the refine, and not the deleted note.
+    assert.deepEqual((await storeOn(kv).load()).notes, [refined, c]);
+  });
+
+  it("writes nothing for a session without history that holds no note", async () => {
+    const kv = new MemoryStore();
+    const store = storeOn(kv);
+    await store.load();
+    await store.saveExisting([note(0)]);
+    assert.deepEqual(kv.writes(), []);
+
+    const stored = await seeded([note(1)]);
+    const cleared = storeOn(stored);
+    await cleared.load();
+    await cleared.clear();
+    stored.log.length = 0;
+    await cleared.saveExisting([note(1), note(0)]);
+    assert.deepEqual(stored.writes(), []);
   });
 
   it("gives ok false for an unreadable index and changes nothing", async () => {
@@ -774,6 +840,20 @@ describe("note store", () => {
     await store.clear();
     assert.deepEqual([...kv.data.keys()], [SETTINGS_KEY]);
     assert.deepEqual(await storeOn(kv).load(), { ok: true, notes: [] });
+  });
+
+  it("reports every note it removed, the ones a failed load could not read too", async () => {
+    const kv = await seeded([note(1), note(2), note(3)]);
+    kv.data.set(`${noteKey("turn_8")}${CORRUPT_SUFFIX}`, "{");
+    kv.fail = (op) => op === "multiGet";
+    const store = storeOn(kv);
+    assert.deepEqual(await store.load(), { ok: false, notes: [] });
+    kv.fail = () => false;
+    assert.deepEqual((await store.clear()).sort(), [
+      "turn_1",
+      "turn_2",
+      "turn_3",
+    ]);
   });
 
   it("leaves degraded mode after a clear", async () => {
@@ -1107,6 +1187,7 @@ describe("JSON values (settings, dictionary, snippets)", () => {
     assert.deepEqual(await json.read(SETTINGS_KEY), {
       ok: true,
       value: undefined,
+      corrupt: true,
     });
     assert.deepEqual(kv.snapshot(), [
       [`${SETTINGS_KEY}${CORRUPT_SUFFIX}`, "{not json"],
@@ -1123,8 +1204,147 @@ describe("JSON values (settings, dictionary, snippets)", () => {
     assert.deepEqual(await json.read(SETTINGS_KEY), {
       ok: true,
       value: undefined,
+      corrupt: true,
     });
     assert.deepEqual(kv.snapshot(), [[SETTINGS_KEY, "{not json"]]);
+  });
+
+  describe("the settings a launch runs on", () => {
+    const firstRun = (): CompanionSettings => ({
+      ...DEFAULT_SETTINGS,
+      uiLanguage: "fr",
+      language: "fr-FR",
+    });
+
+    it("reads stored settings, and starts a first run when none are stored", () => {
+      const stored = settingsFromRead(
+        { ok: true, value: { privacyLevel: "ephemeral", onboarded: true } },
+        firstRun,
+      );
+      assert.equal(stored.ok, true);
+      assert.equal(stored.stored, true);
+      assert.equal(stored.value.privacyLevel, "ephemeral");
+      assert.equal(stored.value.onboarded, true);
+
+      assert.deepEqual(
+        settingsFromRead({ ok: true, value: undefined }, firstRun),
+        {
+          ok: true,
+          stored: false,
+          value: firstRun(),
+        },
+      );
+    });
+
+    it("keeps no history when stored settings can't be read", async () => {
+      // A user who chose Ephemeral, then a launch that can't read it.
+      const kv = new MemoryStore();
+      kv.data.set(SETTINGS_KEY, JSON.stringify({ privacyLevel: "ephemeral" }));
+      kv.fail = (op) => op === "getItem";
+      const json = createJsonStore(kv);
+      const unread = settingsFromRead(await json.read(SETTINGS_KEY), firstRun);
+      assert.equal(unread.ok, false);
+      assert.equal(unread.stored, false);
+      assert.equal(keepsHistory(unread.value), false);
+      assert.deepEqual(unread.value, { ...firstRun(), saveHistory: false });
+      // The stored choice is never overwritten this session.
+      kv.fail = () => false;
+      await assert.rejects(json.write(SETTINGS_KEY, unread.value));
+      assert.equal(
+        kv.data.get(SETTINGS_KEY),
+        JSON.stringify({ privacyLevel: "ephemeral" }),
+      );
+    });
+
+    it("keeps no history for broken settings, which are no first run", async () => {
+      const kv = new MemoryStore();
+      kv.data.set(SETTINGS_KEY, '{"privacyLevel":"ephem');
+      const broken = settingsFromRead(
+        await createJsonStore(kv).read(SETTINGS_KEY),
+        firstRun,
+      );
+      assert.equal(broken.ok, false);
+      assert.equal(keepsHistory(broken.value), false);
+      for (const value of [[], "settings", 3, null]) {
+        const odd = settingsFromRead({ ok: true, value }, firstRun);
+        assert.equal(odd.ok, false, JSON.stringify(value));
+        assert.equal(keepsHistory(odd.value), false, JSON.stringify(value));
+      }
+    });
+
+    /** A launch: new stores over the same phone storage. */
+    const launch = (kv: MemoryStore) =>
+      createSettingsStore(kv, createJsonStore(kv), SETTINGS_KEY, firstRun);
+    const COPY_KEY = `${SETTINGS_KEY}${CORRUPT_SUFFIX}`;
+
+    it("keeps broken settings unread at every launch until settings are saved", async () => {
+      const kv = new MemoryStore();
+      kv.data.set(SETTINGS_KEY, '{"privacyLevel":"ephem');
+      const first = await launch(kv).load();
+      assert.equal(first.ok, false);
+      assert.equal(kv.data.has(SETTINGS_KEY), false);
+      assert.equal(kv.data.get(COPY_KEY), '{"privacyLevel":"ephem');
+
+      // The key is gone, but this is no first run: history stays off, and
+      // store.ts keeps the provider keys and pauses sync.
+      const settings = launch(kv);
+      const second = await settings.load();
+      assert.equal(second.ok, false);
+      assert.equal(second.stored, false);
+      assert.equal(keepsHistory(second.value), false);
+
+      // Settings saved then hold from the next launch, and the copy goes.
+      const chosen = { ...second.value, privacyLevel: "ephemeral" as const };
+      await settings.save(chosen);
+      assert.equal(kv.data.has(COPY_KEY), false);
+      assert.deepEqual(await launch(kv).load(), {
+        ok: true,
+        stored: true,
+        value: chosen,
+      });
+    });
+
+    it("keeps a value that is not settings unread until settings are saved", async () => {
+      const kv = new MemoryStore();
+      kv.data.set(SETTINGS_KEY, "[]");
+      assert.equal((await launch(kv).load()).ok, false);
+      const settings = launch(kv);
+      const again = await settings.load();
+      assert.equal(again.ok, false);
+      await settings.save(again.value);
+      assert.equal((await launch(kv).load()).ok, true);
+    });
+
+    it("starts a first run only when no settings were set aside", async () => {
+      const kv = new MemoryStore();
+      assert.deepEqual(await launch(kv).load(), {
+        ok: true,
+        stored: false,
+        value: firstRun(),
+      });
+      // Whether settings were set aside can't be read: no first run.
+      kv.fail = (op, keys) => op === "getItem" && keys[0] === COPY_KEY;
+      const unknown = await launch(kv).load();
+      assert.equal(unknown.ok, false);
+      assert.equal(keepsHistory(unknown.value), false);
+    });
+
+    it("never overwrites settings it could not read, nor removes their copy", async () => {
+      const kv = new MemoryStore();
+      kv.data.set(SETTINGS_KEY, JSON.stringify({ privacyLevel: "ephemeral" }));
+      kv.data.set(COPY_KEY, "older");
+      kv.fail = (op, keys) => op === "getItem" && keys[0] === SETTINGS_KEY;
+      const settings = launch(kv);
+      const unread = await settings.load();
+      assert.equal(unread.ok, false);
+      kv.fail = () => false;
+      await assert.rejects(settings.save(unread.value), isUnreadableValueError);
+      assert.equal(
+        kv.data.get(SETTINGS_KEY),
+        JSON.stringify({ privacyLevel: "ephemeral" }),
+      );
+      assert.equal(kv.data.get(COPY_KEY), "older");
+    });
   });
 
   it("accepts only plain objects as records", () => {

@@ -149,8 +149,24 @@ describe("notices", () => {
     );
     assert.deepEqual(
       [...STORAGE_NOTICE_KINDS],
-      ["storageReadError", "storageWriteError"],
+      ["storageReadError", "storageWriteError", "settingsReadError"],
     );
+  });
+
+  it("says when the settings could not be read, on Library and Settings too", () => {
+    const settings = noticeFor("settingsReadError");
+    assert.equal(
+      noticeText(STRINGS.en, settings),
+      "Sonolect couldn't read your settings, so new notes aren't saved and sync is paused. Nothing was deleted, and changes to saved notes are kept. Check your settings, or restart the app to try again.",
+    );
+    assert.equal(
+      noticeText(STRINGS.fr, settings),
+      "Sonolect n'a pas pu lire vos réglages : les nouvelles notes ne sont pas enregistrées et la synchronisation est en pause. Rien n'a été supprimé, et les modifications des notes enregistrées sont conservées. Vérifiez vos réglages, ou redémarrez l'app pour réessayer.",
+    );
+    assert.deepEqual(storageBanner(settings, false), {
+      notice: settings,
+      dismissable: true,
+    });
   });
 
   it("puts storage notices, or the unread notes, on Library and Settings", () => {

@@ -24,6 +24,11 @@ after the user turns sync on (see [Note sync](#note-sync)).
 Development builds, `expo start`, the web export and the CI jobs run without
 these variables. They build normally and show no policy link and no sync.
 
+A build bundled for production (`NODE_ENV=production`, which Expo sets for an
+EAS `preview` build, a release variant and an export) is not a development
+build: the app ignores a plain `http://` sync URL there, so the config check
+fails on one. Use `https://`, or a debug build with `expo run`.
+
 ## Why a release build fails without the policy URL
 
 The app records the microphone and can hand audio to the system speech
@@ -388,7 +393,10 @@ URL in the build (see [Note sync](#note-sync)).
   dictated note keeps when each part was said (text and times, no audio),
   for its subtitles. With sync on, those times go with the note, end-to-end
   encrypted like its text (see [Note sync](#note-sync)).
-  Android backups are off (`allowBackup: false`). _Ephemeral_ saves nothing.
+  Android backups are off (`allowBackup: false`). _Ephemeral_ saves nothing,
+  and a launch that can't read the settings saves no new note and syncs
+  nothing until settings are saved; changes to the notes already saved are
+  kept.
   _Clear history_ and _Erase all data_ delete them. _Keep notes for_
   (forever by default; 1, 7, 30 or 90 days) deletes older notes at launch
   and whenever the app comes back to the foreground; pinned notes stay.

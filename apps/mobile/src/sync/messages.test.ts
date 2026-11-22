@@ -115,6 +115,10 @@ describe("sync messages", () => {
       "Paused while Save history is off.",
     );
     assert.equal(
+      at({ paused: "settings" }).problem,
+      "Paused: Sonolect couldn't read its settings. Check them, or restart the app to try again.",
+    );
+    assert.equal(
       at({ paused: "historyOff", problem: "network" }).problem,
       "Offline. Notes will sync when you're back online.",
     );

@@ -109,6 +109,8 @@ const en = {
         "Sonolect couldn't refine this note. It was kept as it was.",
       storageReadError:
         "Sonolect couldn't read your saved notes. Nothing was deleted. Restart the app to try again.",
+      settingsReadError:
+        "Sonolect couldn't read your settings, so new notes aren't saved and sync is paused. Nothing was deleted, and changes to saved notes are kept. Check your settings, or restart the app to try again.",
       storageWriteError:
         "Your latest change couldn't be saved on this phone. Free up some storage and try again.",
       // Online editing (Rewrite and Reply with the user's own key). The
@@ -422,6 +424,8 @@ const en = {
     never: "Not synced yet.",
     lastSync: (time: string) => `Last synced ${time}.`,
     paused: {
+      settings:
+        "Paused: Sonolect couldn't read its settings. Check them, or restart the app to try again.",
       historyOff: "Paused while Save history is off.",
       storage: "Paused: some notes on this phone could not be read.",
     },
@@ -590,6 +594,8 @@ const fr: Strings = {
         "Sonolect n'a pas pu raffiner cette note. Elle est restée inchangée.",
       storageReadError:
         "Sonolect n'a pas pu lire vos notes enregistrées. Rien n'a été supprimé. Redémarrez l'app pour réessayer.",
+      settingsReadError:
+        "Sonolect n'a pas pu lire vos réglages : les nouvelles notes ne sont pas enregistrées et la synchronisation est en pause. Rien n'a été supprimé, et les modifications des notes enregistrées sont conservées. Vérifiez vos réglages, ou redémarrez l'app pour réessayer.",
       storageWriteError:
         "Votre dernière modification n'a pas pu être enregistrée sur ce téléphone. Libérez de l'espace et réessayez.",
       onlineSetup:
@@ -898,6 +904,8 @@ const fr: Strings = {
     never: "Pas encore synchronisé.",
     lastSync: (time: string) => `Dernière synchronisation : ${time}.`,
     paused: {
+      settings:
+        "En pause : Sonolect n'a pas pu lire ses réglages. Vérifiez-les, ou redémarrez l'app pour réessayer.",
       historyOff: "En pause tant que l'historique est désactivé.",
       storage:
         "En pause : certaines notes de ce téléphone n'ont pas pu être lues.",

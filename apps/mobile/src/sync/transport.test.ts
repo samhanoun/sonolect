@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, it } from "node:test";
 
 import {
@@ -268,6 +270,49 @@ describe("fetch requester", () => {
       request({ method: "GET", path: "/v1/x", headers: {} }),
       (error) => error instanceof SyncError && error.kind === "server",
     );
+  });
+
+  it("goes through Expo's fetch on the phone, which refuses redirects", () => {
+    // React Native's global fetch follows a redirect whatever `redirect`
+    // says, with the body and maybe the token: runtime.ts must not use it.
+    const runtime = readFileSync(path.join(__dirname, "runtime.ts"), "utf8");
+    assert.match(
+      runtime,
+      /import \{ fetch as expoFetch \} from "expo\/fetch";/,
+    );
+    assert.match(runtime, /fetch: \(url, init\) => expoFetch\(url, init\),/);
+    assert.doesNotMatch(runtime, /=> fetch\(/);
+  });
+
+  it("reports a redirect the fetch refused as a server problem, not offline", async () => {
+    // Expo's fetch on iOS and Android, then Node's.
+    const expoRefusal = new Error(
+      "fetch failed: Redirect is not allowed when redirect mode is 'error'",
+    );
+    const nodeRefusal = new TypeError("fetch failed", {
+      cause: new Error("unexpected redirect"),
+    });
+    for (const refusal of [expoRefusal, nodeRefusal]) {
+      const fetch: FetchLike = async () => {
+        throw refusal;
+      };
+      const transport = createHttpTransport({
+        request: createFetchRequester({
+          baseUrl: BASE,
+          fetch,
+          timers: clock().timersApi,
+        }),
+        vault: deriveVaultKeys(new Uint8Array(32).fill(4)),
+      });
+      await assert.rejects(
+        transport.createVault(),
+        (error) =>
+          error instanceof SyncError &&
+          error.kind === "server" &&
+          /redirected/.test(error.message),
+        refusal.message,
+      );
+    }
   });
 
   it("lets a network failure through for the transport to map", async () => {

@@ -1,4 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <string name="sonolect_voice_keyboard_label">Sonolect voice</string>
+  <!-- The keyboard's name, the same in every language (the app's Settings use it). -->
+  <string name="sonolect_voice_keyboard_label" translatable="false">Sonolect voice</string>
+
+  <!-- What the keyboard says above its mic. -->
+  <string name="sonolect_voice_idle">Tap the mic and speak</string>
+  <string name="sonolect_voice_listening">Listening…</string>
+  <string name="sonolect_voice_finishing">Finishing…</string>
+  <string name="sonolect_voice_keep_talking">Tap to keep talking</string>
+  <string name="sonolect_voice_no_match">Didn\'t catch that. Tap to try again.</string>
+  <string name="sonolect_voice_allow_mic">Open Sonolect once and allow the microphone.</string>
+  <string name="sonolect_voice_no_recognizer">No on-device speech recognizer. To use the system speech service here, allow it in Sonolect\'s privacy settings.</string>
+  <string name="sonolect_voice_start_failed">Couldn\'t start listening.</string>
+  <string name="sonolect_voice_offline">The speech service is offline. Try again.</string>
+  <string name="sonolect_voice_busy">The recognizer is busy. Try again.</string>
+  <string name="sonolect_voice_language_missing">Download this language for offline speech in Android settings.</string>
+  <string name="sonolect_voice_error">Couldn\'t dictate (error %1$d). Tap to try again.</string>
+  <string name="sonolect_voice_open">Open ›</string>
+
+  <!-- The space key's own label. -->
+  <string name="sonolect_voice_space_key">space</string>
+
+  <!-- What TalkBack reads for each button. -->
+  <string name="sonolect_voice_dictate">Dictate</string>
+  <string name="sonolect_voice_stop">Stop dictating</string>
+  <string name="sonolect_voice_switch_keyboard">Switch keyboard</string>
+  <string name="sonolect_voice_delete">Delete</string>
+  <string name="sonolect_voice_space">Space</string>
+  <string name="sonolect_voice_enter">Enter</string>
 </resources>

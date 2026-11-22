@@ -86,6 +86,24 @@ export function deleteNotes(
   };
 }
 
+/**
+ * Clear history's deletes for the notes it removed from the phone without
+ * showing them: notes a failed load could not read. For every device they
+ * are deleted elsewhere too, as the confirmation says; a tombstone without
+ * an HLC takes the version sync knows. None for this phone only.
+ */
+export function unreadNoteDeletes(
+  removedIds: readonly string[],
+  shown: readonly TranscriptTurn[],
+  scope: DeleteScope,
+): Tombstone[] {
+  if (scope !== "everywhere") return [];
+  const known = new Set(shown.map((turn) => turn.id));
+  return [...new Set(removedIds)]
+    .filter((id) => !known.has(id))
+    .map((id) => ({ id }));
+}
+
 const dateOf = (turn: TranscriptTurn) => {
   const ms = Date.parse(turn.createdAt);
   return Number.isFinite(ms) ? ms : 0;

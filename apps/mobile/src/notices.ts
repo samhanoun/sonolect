@@ -59,6 +59,8 @@ export const NOTICE_KINDS = [
   // Notes and settings on the phone (WP4).
   "storageReadError",
   "storageWriteError",
+  // The settings could not be read: no history and no sync this session.
+  "settingsReadError",
   ...ONLINE_NOTICE_KINDS,
 ] as const;
 export type NoticeKind = (typeof NOTICE_KINDS)[number];
@@ -67,6 +69,7 @@ export type NoticeKind = (typeof NOTICE_KINDS)[number];
 export const STORAGE_NOTICE_KINDS = [
   "storageReadError",
   "storageWriteError",
+  "settingsReadError",
 ] as const satisfies readonly NoticeKind[];
 
 export function isStorageNotice(kind: NoticeKind): boolean {
@@ -130,6 +133,7 @@ const DEFAULT_ACTIONS: Record<NoticeKind, readonly NoticeAction[]> = {
   refineFailed: ["dismiss"],
   storageReadError: ["dismiss"],
   storageWriteError: ["dismiss"],
+  settingsReadError: ["dismiss"],
   onlineSetup: ["openOnlineSettings", "dismiss"],
   onlineKeyRejected: ["openOnlineSettings", "dismiss"],
   onlineNeedsCredits: ["dismiss"],
@@ -194,6 +198,7 @@ const TEXT: Record<NoticeKind, (t: Strings, language: string) => string> = {
   refineFailed: (t) => t.capture.notices.refineFailed,
   storageReadError: (t) => t.capture.notices.storageReadError,
   storageWriteError: (t) => t.capture.notices.storageWriteError,
+  settingsReadError: (t) => t.capture.notices.settingsReadError,
   onlineSetup: (t) => t.capture.notices.onlineSetup,
   onlineKeyRejected: (t) => t.capture.notices.onlineKeyRejected,
   onlineNeedsCredits: (t) => t.capture.notices.onlineNeedsCredits,
