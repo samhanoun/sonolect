@@ -4,6 +4,7 @@ import {
   type DesktopWhisperResult,
 } from "./desktopWhisper";
 import type { TranscriptSegment } from "./segmentEditor";
+import type { ModelChoice } from "./providerSettings";
 import { isTauriRuntime } from "./desktopNative";
 import { getT } from "./i18n";
 
@@ -14,6 +15,27 @@ export function localUnavailableMessage(
   return inDesktopApp
     ? getT()("voice.localUnavailableApp")
     : getT()("voice.localUnavailablePreview");
+}
+
+/**
+ * Whether the browser preview can turn speech into text with these settings.
+ * The preview has no speech engine of its own. Only a developer build pointed
+ * at a Sonolect API (`VITE_SONOLECT_API_URL`), with Cloud enabled and the
+ * local speech choice, sends the audio to that API. An online speech model
+ * needs the app's key store, so it fails in the preview and does not fall
+ * back to the API.
+ */
+export function previewCanTranscribe(
+  {
+    privacyLevel,
+    sttProvider,
+  }: {
+    privacyLevel: "local" | "cloud";
+    sttProvider: ModelChoice["provider"];
+  },
+  apiConfigured = isVoiceApiConfigured(),
+): boolean {
+  return privacyLevel === "cloud" && sttProvider === "local" && apiConfigured;
 }
 
 export type VoiceCaptureMetadata = {
