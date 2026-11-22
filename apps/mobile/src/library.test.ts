@@ -35,6 +35,34 @@ const turn = (overrides: Partial<TranscriptTurn>): TranscriptTurn => ({
   ...overrides,
 });
 
+describe("note timings in exports", () => {
+  it("exports a dictation's segments in JSON", () => {
+    const timed = turn({
+      segments: [
+        { startMs: 0, endMs: 800, text: "raw", approx: true },
+        { startMs: 900, endMs: 1_400, text: "words" },
+      ],
+    });
+    const parsed = JSON.parse(
+      exportAsJson([timed], new Date("2026-11-20T08:00:00.000Z")),
+    ) as { formatVersion: number; notes: Record<string, unknown>[] };
+    assert.equal(parsed.formatVersion, 1);
+    assert.deepEqual(parsed.notes[0]?.segments, [
+      { startMs: 0, endMs: 800, text: "raw", approx: true },
+      { startMs: 900, endMs: 1_400, text: "words" },
+    ]);
+  });
+
+  it("names one note's file after its local date and time", () => {
+    const date = new Date(2026, 10, 9, 7, 5);
+    assert.equal(noteFileName(date), "sonolect-note-2026-11-09-0705.txt");
+    assert.equal(
+      noteFileName(date, "srt"),
+      "sonolect-note-2026-11-09-0705.srt",
+    );
+  });
+});
+
 describe("library", () => {
   const history = [
     turn({
@@ -206,6 +234,8 @@ describe("library", () => {
     });
     // No copy of the text when refining changed nothing.
     assert.equal("original" in parsed.notes[1]!, false);
+    // A note without timings has no segments.
+    assert.equal("segments" in parsed.notes[0]!, false);
     assert.equal(parsed.notes[1]!.pinned, false);
     // Nothing about sync or privacy settings leaves the phone.
     assert.equal("syncState" in parsed.notes[0]!, false);

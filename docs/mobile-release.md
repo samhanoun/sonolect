@@ -384,7 +384,9 @@ URL in the build (see [Note sync](#note-sync)).
     _Local first_ or _Ephemeral_ it happens only after the user agrees, for
     one dictation or with _Use the system speech service_ turned on in
     Settings.
-- **Notes, dictionary and snippets** stay on the phone (AsyncStorage).
+- **Notes, dictionary and snippets** stay on the phone (AsyncStorage). A
+  dictated note keeps when each part was said (text and times, no audio),
+  for its subtitles; sync does not send it.
   Android backups are off (`allowBackup: false`). _Ephemeral_ saves nothing.
   _Clear history_ and _Erase all data_ delete them. _Keep notes for_
   (forever by default; 1, 7, 30 or 90 days) deletes older notes at launch

@@ -99,8 +99,11 @@ This build runs entirely on the phone. The switch is `API_FEATURES_ENABLED`
 in `src/features.ts`, and it is `false`.
 
 - **Works**: on-device dictation, the library on the phone, local clean-up,
-  Summary, Tasks, the Reader, export (Markdown, plain text or JSON) and
-  automatic deletion of old notes (Settings, _Keep notes for_).
+  Summary, Tasks, the Reader, export (Markdown, plain text or JSON),
+  subtitles of a dictated note (SRT or WebVTT, timed by the recognizer where
+  it reports word times and by the app's clock otherwise, as the WebVTT file
+  says), Copy with the note's paragraphs and lists kept, and automatic
+  deletion of old notes (Settings, _Keep notes for_).
 - **Hidden**: the API's plaintext sync, _Rewrite_ and _Reply_ through the
   API, audio upload, and
   the Settings API section (URL, token, connection test). The library shows

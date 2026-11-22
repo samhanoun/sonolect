@@ -21,6 +21,13 @@ import {
 import { noticeText, storageBanner } from "../src/notices";
 import { useCompanionStore } from "../src/store";
 import { ttsController, useTts } from "../src/tts";
+import { exportSubtitles } from "../src/exportNotes";
+import { cleanTranscript } from "../src/refine";
+import {
+  SUBTITLE_FORMATS,
+  hasSubtitles,
+  type SubtitleFormat,
+} from "../src/subtitles";
 import { copyNote, currentShareTarget, shareText } from "../src/ui/actions";
 import {
   Button,
@@ -73,6 +80,10 @@ export default function LibraryScreen() {
   const exporting = useRef(false);
   // Export first asks for the file format, in a row under the filters.
   const [choosingFormat, setChoosingFormat] = useState(false);
+  // Subtitles first ask for the format, in a row under the note's actions.
+  const [subtitlesFor, setSubtitlesFor] = useState<string | null>(null);
+  const dictionary = useCompanionStore((s) => s.dictionary);
+  const snippets = useCompanionStore((s) => s.snippets);
   const tts = useTts();
   const clearance = useTabBarClearance();
   const reduced = useReducedMotion();
@@ -91,8 +102,8 @@ export default function LibraryScreen() {
     useLocales()[0]?.languageTag,
   );
   const listState = useMemo(
-    () => ({ expanded, copiedId, tts, captureBusy, locale, t }),
-    [expanded, copiedId, tts, captureBusy, locale, t],
+    () => ({ expanded, copiedId, subtitlesFor, tts, captureBusy, locale, t }),
+    [expanded, copiedId, subtitlesFor, tts, captureBusy, locale, t],
   );
 
   // Tabs stay mounted: leaving the Library stops what it reads (speech-4).
@@ -117,6 +128,26 @@ export default function LibraryScreen() {
     setCopiedId(item.id);
     if (copiedTimer.current) clearTimeout(copiedTimer.current);
     copiedTimer.current = setTimeout(() => setCopiedId(null), 1500);
+  };
+
+  const saveSubtitles = async (
+    item: TranscriptTurn,
+    format: SubtitleFormat,
+  ) => {
+    if (exporting.current) return;
+    exporting.current = true;
+    setSubtitlesFor(null);
+    try {
+      await exportSubtitles(item, format, t, (text) =>
+        cleanTranscript(text, {
+          language: item.language,
+          dictionary,
+          snippets,
+        }),
+      );
+    } finally {
+      exporting.current = false;
+    }
   };
 
   const exportAll = async (format: ExportFormat) => {
@@ -242,6 +273,19 @@ export default function LibraryScreen() {
               }}
             />
           )}
+          {hasSubtitles(item) ? (
+            <Button
+              compact
+              icon="share"
+              label={t.library.subtitles}
+              selected={subtitlesFor === item.id}
+              onPress={() =>
+                setSubtitlesFor((current) =>
+                  current === item.id ? null : item.id,
+                )
+              }
+            />
+          ) : null}
           <Button
             compact
             icon="pin"
@@ -268,6 +312,18 @@ export default function LibraryScreen() {
             }}
           />
         </View>
+        {subtitlesFor === item.id ? (
+          <View style={styles.actions} accessibilityRole="toolbar">
+            <Label>{t.library.subtitlesAs}</Label>
+            {SUBTITLE_FORMATS.map((format) => (
+              <Chip
+                key={format}
+                label={t.library.subtitleFormats[format]}
+                onPress={() => void saveSubtitles(item, format)}
+              />
+            ))}
+          </View>
+        ) : null}
       </Card>
     );
   };
