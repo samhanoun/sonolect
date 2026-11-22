@@ -21,7 +21,7 @@ import {
 import { noticeText, storageBanner } from "../src/notices";
 import { useCompanionStore } from "../src/store";
 import { ttsController, useTts } from "../src/tts";
-import { copyText, currentShareTarget, shareText } from "../src/ui/actions";
+import { copyNote, currentShareTarget, shareText } from "../src/ui/actions";
 import {
   Button,
   Card,
@@ -113,7 +113,7 @@ export default function LibraryScreen() {
   );
 
   const copyItem = async (item: TranscriptTurn) => {
-    if (!(await copyText(item.refinedText, t))) return;
+    if (!(await copyNote(item.refinedText, t))) return;
     setCopiedId(item.id);
     if (copiedTimer.current) clearTimeout(copiedTimer.current);
     copiedTimer.current = setTimeout(() => setCopiedId(null), 1500);

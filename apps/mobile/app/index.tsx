@@ -30,7 +30,7 @@ import {
 import { requestDictationPermission } from "../src/speech";
 import { useCompanionStore } from "../src/store";
 import {
-  copyText,
+  copyNote,
   currentShareTarget,
   openAppSettings,
   shareText,
@@ -385,7 +385,7 @@ export default function CaptureScreen() {
   const copyLatest = async () => {
     if (!latest) return;
     // A failure says so instead of failing silently (data-14).
-    if (!(await copyText(latest.refinedText, t))) return;
+    if (!(await copyNote(latest.refinedText, t))) return;
     setCopied(true);
     if (copiedTimer.current) clearTimeout(copiedTimer.current);
     copiedTimer.current = setTimeout(() => setCopied(false), 1500);

@@ -51,7 +51,8 @@
       "react-native-drawer-layout>react-native-gesture-handler": "-"
     },
     "patchedDependencies": {
-      "expo-speech-recognition@58.0.1": "patches/expo-speech-recognition@58.0.1.patch"
+      "expo-speech-recognition@58.0.1": "patches/expo-speech-recognition@58.0.1.patch",
+      "expo-clipboard@58.0.4": "patches/expo-clipboard@58.0.4.patch"
     }
   }
 }
