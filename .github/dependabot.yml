@@ -27,6 +27,11 @@ updates:
       - dependency-name: "@types/react-dom"
         update-types:
           ["version-update:semver-major", "version-update:semver-minor"]
+      # The mobile app's Babel 7 (from the Expo SDK) imports its helpers from
+      # @babel/runtime 7. With @babel/runtime 8 it copies them into every file
+      # instead. Move to 8 with the Expo SDK that moves to Babel 8.
+      - dependency-name: "@babel/runtime"
+        update-types: ["version-update:semver-major"]
       # @types/node follows the oldest Node the code runs on (Node 22: CI
       # matrix [22, 24], LOCAL-BUILD.md, esbuild target node22). Bump its
       # major by hand when that floor moves.
