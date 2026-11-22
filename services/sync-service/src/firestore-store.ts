@@ -30,6 +30,8 @@ import {
  *   syncVaults/{vaultId}/records/{rid} { rev, seq, deleted, ct (bytes), size,
  *                                        updatedAt, tombstoneAt? }
  *
+ * An id Firestore reserves (__.*__) is stored as "~" + id (toDocId).
+ *
  * Times are numbers (ms). `changes` is `where seq > since orderBy seq` and
  * `purge` is `where tombstoneAt < cutoff` (set on tombstones only), both
  * served by Firestore's automatic single-field indexes, so the store needs
@@ -61,6 +63,17 @@ export interface FirestoreStoreOptions {
   /** Root collection (tests isolate runs with their own). */
   collection?: string | undefined;
 }
+
+/**
+ * Firestore refuses document ids that match __.*__. A base64url record id
+ * matches it about once in 16 million, and the batch holding it would fail
+ * on every retry, so such an id is stored with a leading "~", which
+ * base64url never holds.
+ */
+const RESERVED_ID = /^__.*__$/;
+const toDocId = (id: string): string => (RESERVED_ID.test(id) ? `~${id}` : id);
+const fromDocId = (docId: string): string =>
+  docId.startsWith("~") ? docId.slice(1) : docId;
 
 const num = (value: unknown): number => {
   if (typeof value !== "number" || !Number.isFinite(value))
@@ -129,7 +142,7 @@ export class FirestoreStore implements VaultStore {
   }
 
   private vaultRef(vaultId: string): DocumentReference {
-    return this.db.collection(this.root).doc(vaultId);
+    return this.db.collection(this.root).doc(toDocId(vaultId));
   }
 
   private recordsOf(vaultId: string): CollectionReference {
@@ -193,7 +206,7 @@ export class FirestoreStore implements VaultStore {
         .limit(want)
         .get();
       for (const doc of snap.docs) {
-        const record = toRecord(doc.id, doc.data());
+        const record = toRecord(fromDocId(doc.id), doc.data());
         rows.push(record);
         bytes += record.size;
       }
@@ -216,7 +229,9 @@ export class FirestoreStore implements VaultStore {
     now: number,
   ): Promise<StoreWriteResult[]> {
     const vaultRef = this.vaultRef(vaultId);
-    const refs = writes.map((write) => this.recordsOf(vaultId).doc(write.rid));
+    const refs = writes.map((write) =>
+      this.recordsOf(vaultId).doc(toDocId(write.rid)),
+    );
     // One transaction per batch: the request body limit keeps it far below
     // Firestore's 10 MiB per commit, and each record below 1 MiB.
     return this.db.runTransaction(async (tx) => {
@@ -299,7 +314,7 @@ export class FirestoreStore implements VaultStore {
         let bytes = 0;
         let purgedSeq = meta.purgedSeq;
         for (const doc of found.docs) {
-          const record = toRecord(doc.id, doc.data());
+          const record = toRecord(fromDocId(doc.id), doc.data());
           if (!record.deleted) continue;
           tx.delete(doc.ref);
           count += 1;

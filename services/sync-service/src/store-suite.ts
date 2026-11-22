@@ -5,6 +5,8 @@
 import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
 
+import { RECORD_ID_PATTERN, VAULT_ID_PATTERN } from "@sonolect/sync-core/wire";
+
 import {
   type Quotas,
   type StoreWriteResult,
@@ -575,6 +577,46 @@ export function defineStoreTests(factory: StoreFactory): void {
       // A deleted vault has nothing to purge.
       await store.deleteVault(vaultId, now + 2 * DAY);
       assert.equal(await store.purge(vaultId, now + 400 * DAY, DAY, DAY), 0);
+    });
+
+    it("stores ids of any base64url, also those Firestore reserves (__…__)", async () => {
+      const store = await open();
+      const vaultId = `__${newVaultId().slice(0, 18)}__`;
+      assert.match(vaultId, VAULT_ID_PATTERN);
+      assert.equal(
+        (await store.createVault(vaultId, newVerifier(), EPOCH, T0)).outcome,
+        "created",
+      );
+      const reserved = `__${newRid().slice(0, 20)}__`;
+      const inner = `a__${newRid().slice(0, 18)}__b`;
+      for (const rid of [reserved, inner]) assert.match(rid, RECORD_ID_PATTERN);
+      const plain = newRid();
+      const results = await store.write(
+        vaultId,
+        [put(plain), put(reserved), put(inner)],
+        QUOTAS,
+        T0,
+      );
+      results.forEach(ok);
+      ok((await store.write(vaultId, [put(reserved, 1, 200)], QUOTAS, T0))[0]);
+      ok((await store.write(vaultId, [tombstone(reserved, 2)], QUOTAS, T0))[0]);
+      const page = await store.changes(vaultId, 0, 200, 1 << 20);
+      assert.deepEqual(
+        page.records.map((r) => [r.rid, r.rev, r.deleted]),
+        [
+          [plain, 1, false],
+          [inner, 1, false],
+          [reserved, 3, true],
+        ],
+      );
+      assert.equal(await store.purge(vaultId, T0 + 95 * DAY, 90 * DAY, DAY), 1);
+      assert.deepEqual(
+        (await store.changes(vaultId, 0, 200, 1 << 20)).records.map(
+          (r) => r.rid,
+        ),
+        [plain, inner],
+      );
+      assert.equal((await store.getVault(vaultId))?.records, 2);
     });
 
     it("keeps a tombstone that an edit brought back", async () => {

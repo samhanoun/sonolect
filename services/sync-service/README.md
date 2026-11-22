@@ -135,6 +135,9 @@ only when that store is chosen.
     `purgedSeq`, `purgedAt` and `deletedAt`.
   - `syncVaults/{vaultId}/records/{rid}` holds `rev`, `seq`, `deleted`, `ct`
     (bytes), `size`, `updatedAt`, and `tombstoneAt` on tombstones.
+  - Firestore reserves document ids that match `__.*__`, which a base64url
+    id can (about one record id in 16 million). Such an id is stored as
+    `~{id}`; base64url never holds `~`.
   - Each write batch is one transaction. The feed queries `seq` and the
     purge queries `tombstoneAt`, both through Firestore's automatic
     single-field indexes, so there is no composite index to deploy.
