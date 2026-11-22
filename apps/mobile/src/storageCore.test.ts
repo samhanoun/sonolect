@@ -13,17 +13,22 @@ import {
   SYNC_COMPANION_PREFIX,
   UNKNOWN_DATE,
   V01_SAMPLE_TRANSCRIPTS,
+  COMPANION_PART_BYTES,
   asRecord,
+  companionKeys,
   createJsonStore,
   createNoteStore,
   isUnreadableValueError,
   isV01Sample,
   noteKey,
   parseIndex,
+  readCompanionValue,
   sanitizeDictionary,
   sanitizeSnippets,
   sanitizeTurn,
   serializeIndex,
+  splitUtf8,
+  utf8Length,
 } from "./storageCore";
 
 const NOW = Date.parse("2026-11-10T12:00:00.000Z");
@@ -348,7 +353,7 @@ describe("single-note writes (sync)", () => {
     kv.log.length = 0;
     await store.apply({ remove: ["turn_1"] });
     assert.deepEqual(kv.writes(), [
-      `multiRemove ${noteKey("turn_1")},${companionOf("turn_1")}`,
+      `multiRemove ${[noteKey("turn_1"), ...companionKeys(companionOf("turn_1"))].join(",")}`,
     ]);
     assert.equal(kv.data.has(companionOf("turn_2")), true);
     // The index still lists it until a save or a load drops it.
@@ -387,6 +392,45 @@ describe("single-note writes (sync)", () => {
       ),
       [],
     );
+  });
+
+  it("splits a companion over one value's limit, reads it back whole, and removes every part", async () => {
+    const kv = await seeded([note(1)]);
+    const store = syncStoreOn(kv);
+    const [one] = (await store.load()).notes;
+    assert.ok(one);
+    // About 4 MiB, with characters of 1 to 4 UTF-8 bytes.
+    const big = `{"v":1,"extra":{"t":"${"aé€😀".repeat(400_000)}"}}`;
+    await store.apply({ put: [{ note: one, companion: big }] });
+    const parts = [...kv.data.keys()].filter((key) =>
+      key.startsWith(`${companionOf("turn_1")}~`),
+    );
+    assert.equal(parts.length, 3);
+    for (const key of parts)
+      assert.ok(utf8Length(kv.data.get(key)!) <= COMPANION_PART_BYTES);
+    assert.equal(await readCompanionValue(kv, companionOf("turn_1")), big);
+    // A smaller value replaces it; the note's removal takes every part.
+    const half = big.slice(0, 1_000_000) + '"}}';
+    await store.apply({ put: [{ note: one, companion: half }] });
+    assert.equal(await readCompanionValue(kv, companionOf("turn_1")), half);
+    await store.apply({ remove: ["turn_1"] });
+    assert.deepEqual(
+      [...kv.data.keys()].filter((key) =>
+        key.startsWith(SYNC_COMPANION_PREFIX),
+      ),
+      [],
+    );
+  });
+
+  it("splits text by UTF-8 bytes, never inside a surrogate pair", () => {
+    assert.equal(utf8Length("aé€😀"), 10);
+    assert.deepEqual(splitUtf8("ab😀c", 3), ["ab", "😀", "c"]);
+    assert.deepEqual(splitUtf8("😀😀", 4), ["😀", "😀"]);
+    assert.deepEqual(splitUtf8("", 4), [""]);
+    const text = "x😀é€".repeat(1000);
+    const parts = splitUtf8(text, 101);
+    assert.equal(parts.join(""), text);
+    for (const part of parts) assert.ok(utf8Length(part) <= 101);
   });
 
   it("refuses to write while degraded", async () => {

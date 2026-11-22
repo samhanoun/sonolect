@@ -22,6 +22,7 @@ import {
   asRecord,
   createJsonStore,
   createNoteStore,
+  readCompanionValue,
   sanitizeDictionary,
   sanitizeSnippets,
 } from "./storageCore";
@@ -178,7 +179,7 @@ export const mobileStorage = {
 
   /** What sync keeps of a note beyond the note itself, or null. */
   async readSyncCompanion(id: string): Promise<string | null> {
-    return AsyncStorage.getItem(`${SYNC_COMPANION_PREFIX}${id}`);
+    return readCompanionValue(AsyncStorage, `${SYNC_COMPANION_PREFIX}${id}`);
   },
 
   async clearNotes(): Promise<void> {

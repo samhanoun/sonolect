@@ -21,6 +21,7 @@ import {
   type NoteStore,
   SYNC_COMPANION_PREFIX,
   createNoteStore,
+  readCompanionValue,
 } from "../storageCore";
 import {
   type DeleteScope,
@@ -232,7 +233,8 @@ export class TestPhone {
         if ("latest" in patch) this.latest = patch.latest;
       },
       apply: (change) => this.storage.apply(change),
-      readCompanion: (id) => this.kv.getItem(`${SYNC_COMPANION_PREFIX}${id}`),
+      readCompanion: (id) =>
+        readCompanionValue(this.kv, `${SYNC_COMPANION_PREFIX}${id}`),
       generation: () => this.epoch,
       now: () => this.now(),
       onRemoved: (ids) => {

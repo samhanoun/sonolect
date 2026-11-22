@@ -5,13 +5,7 @@ import { type Hlc, type SyncNote, parseSyncNote } from "@sonolect/sync-core";
 
 import type { TranscriptTurn } from "../domain";
 import { MAX_TEXT_LENGTH } from "../storageCore";
-import {
-  MAX_COMPANION_BYTES,
-  noteToTurn,
-  parseCompanion,
-  turnToNote,
-  utf8Length,
-} from "./noteMapping";
+import { noteToTurn, parseCompanion, turnToNote } from "./noteMapping";
 
 const NOW = Date.parse("2026-11-20T12:00:00.000Z");
 const HLC: Hlc = { t: NOW - 1000, c: 2, d: "deviceA" };
@@ -265,25 +259,24 @@ describe("note mapping: the companion value", () => {
     });
   });
 
-  it("measures UTF-8 without encoding", () => {
-    assert.equal(utf8Length("abc"), 3);
-    assert.equal(utf8Length("é"), 2);
-    assert.equal(utf8Length("€"), 3);
-    assert.equal(utf8Length("😀"), 4);
-    assert.equal(utf8Length(""), 0);
-  });
-
-  it("stays under the storage limit by dropping the largest values first", () => {
-    const huge = "y".repeat(MAX_COMPANION_BYTES + 1000);
-    const note = desktopNote({ rawText: huge, title: "Kept title" });
+  it("keeps every field of a very long note, which a pin then sends back whole", () => {
+    // Over 1.5 MB of segments and a text over what the phone shows.
+    const huge = "y".repeat(MAX_TEXT_LENGTH + 500_000);
+    const segments = Array.from({ length: 6_500 }, (_, index) => ({
+      startMs: index * 6_000,
+      endMs: index * 6_000 + 5_900,
+      text: "the budget for next quarter, and the launch date we should review.",
+      speaker: index % 2 ? "Ana" : "Ben",
+    }));
+    const note = desktopNote({ rawText: huge, segments });
     const { turn, companion } = noteToTurn("note-1", note, HLC, NOW);
-    assert.ok(companion !== null);
-    assert.ok(utf8Length(companion) <= MAX_COMPANION_BYTES);
-    const parsed = parseCompanion(companion);
-    assert.equal(parsed?.kept.rawText, undefined, "the huge text went first");
-    assert.equal(parsed?.extra.title, "Kept title");
-    assert.equal(parsed?.extra.origin, "desktop");
-    // What the phone shows is what it can send back.
-    assert.equal(turnToNote(turn, parsed).rawText, turn.rawText);
+    assert.ok(companion !== null && companion.length > 1_500_000);
+    const pinned = turnToNote(
+      { ...turn, pinned: true },
+      parseCompanion(companion),
+    );
+    assert.equal(pinned.rawText, huge, "the whole transcript");
+    assert.deepEqual(pinned.segments, segments, "every segment");
+    assert.equal(pinned.pinned, true);
   });
 });

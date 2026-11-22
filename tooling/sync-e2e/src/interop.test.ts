@@ -596,6 +596,44 @@ describe("desktop and phone sync through the sync service", () => {
     await future.engine.close();
   });
 
+  it("a pin on the phone keeps every segment and the whole transcript of a long desktop note", async () => {
+    const w = await world();
+    const { desk, phone } = await paired(w);
+    // About 11 hours of speech, every segment timed: over 1.5 MB of
+    // segments, and a transcript longer than the phone shows.
+    const words = ["the", "budget", "next", "quarter", "plan", "we", "should"];
+    let seed = 1;
+    const word = () => {
+      seed = (seed * 48271) % 2147483647;
+      return words[seed % words.length]!;
+    };
+    const segments = Array.from({ length: 6_500 }, (_, index) => ({
+      startMs: index * 6_000,
+      endMs: index * 6_000 + 5_900,
+      text: `${Array.from({ length: 18 }, word).join(" ")}.`,
+      speaker: index % 2 ? "Ana" : "Ben",
+    }));
+    const transcript = segments.map((segment) => segment.text).join(" ");
+    const id = desk.native.record(transcript, {
+      segments,
+      durationMs: 6_500 * 6_000,
+    });
+    await desk.sync();
+    assert.equal(desk.view().problem, undefined);
+    await phone.sync();
+    assert.ok(phone.turn(id), "the phone has the note");
+
+    // The user pins it on the phone: a change of metadata only.
+    await w.clock.advance(10_000);
+    await phone.change(id, { pinned: true });
+    await phone.sync();
+    await desk.sync();
+    const back = desk.native.note(id);
+    assert.equal(back?.pinned, true);
+    assert.equal(back?.transcript, transcript, "the whole transcript");
+    assert.deepEqual(back?.segments, segments, "every segment");
+  });
+
   it("retention stays on each device: no deletes elsewhere, old notes not imported", async () => {
     const w = await world();
     const desk = w.desktop();

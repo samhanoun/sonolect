@@ -42,11 +42,11 @@ const SHOWN = new Set<string>(SHOWN_FIELDS);
 const TURN_SOURCES: readonly string[] = ["microphone", "typed", "remote"];
 
 /**
- * The largest companion value, in UTF-8 bytes: an AsyncStorage value over
- * about 2 MB cannot be read back on Android. Over it, the largest kept and
- * extra values go first (see fitCompanion).
+ * A companion is never cut: whatever it drops, the phone's next upload of
+ * the note (a pin, say) would erase on every device. It holds fields of one
+ * note, whose JSON sync-core keeps under 4 MiB, and storageCore splits a
+ * value over one AsyncStorage key's limit over several keys.
  */
-export const MAX_COMPANION_BYTES = 1_500_000;
 
 /** A kept field: the note's value (absent when the note had none) and what the turn showed. */
 interface KeptField {
@@ -121,46 +121,6 @@ function sameValue(left: unknown, right: unknown): boolean {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** The UTF-8 length of a string, without encoding it. */
-export function utf8Length(text: string): number {
-  let bytes = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    const code = text.charCodeAt(i);
-    // A surrogate pair is 4 bytes: 2 for each half.
-    bytes +=
-      code < 0x80 ? 1 : code < 0x800 || (code & 0xf800) === 0xd800 ? 2 : 3;
-  }
-  return bytes;
-}
-
-const jsonBytes = (value: unknown) => utf8Length(JSON.stringify(value ?? null));
-
-/** Drops the largest kept and extra values until the companion fits. */
-function fitCompanion(companion: Companion): Companion {
-  if (jsonBytes(companion) <= MAX_COMPANION_BYTES) return companion;
-  const kept = { ...companion.kept };
-  const extra = { ...companion.extra };
-  const sizes: { size: number; drop: () => void }[] = [];
-  for (const field of SHOWN_FIELDS) {
-    const entry = kept[field];
-    if (entry)
-      sizes.push({ size: jsonBytes(entry), drop: () => delete kept[field] });
-  }
-  for (const key of Object.keys(extra)) {
-    // The origin is small and required: it always stays.
-    if (key === "origin") continue;
-    sizes.push({ size: jsonBytes(extra[key]), drop: () => delete extra[key] });
-  }
-  sizes.sort((a, b) => b.size - a.size);
-  let total = jsonBytes(companion);
-  for (const { size, drop } of sizes) {
-    if (total <= MAX_COMPANION_BYTES) break;
-    drop();
-    total -= size;
-  }
-  return { v: 1, extra, kept };
-}
-
 /**
  * The turn that shows a synced note, and the companion value to store with
  * it (null when the turn says it all). `previous` is the note this replaces,
@@ -215,7 +175,7 @@ export function noteToTurn(
     );
   const companion = empty
     ? null
-    : JSON.stringify(fitCompanion({ v: 1, extra, kept }));
+    : JSON.stringify({ v: 1, extra, kept } satisfies Companion);
   return { turn, companion };
 }
 

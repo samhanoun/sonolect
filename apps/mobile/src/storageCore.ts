@@ -17,7 +17,9 @@ import type { DictionaryEntry, Snippet, TranscriptTurn } from "./domain";
  * - the v2 history value is removed only after the new index was written
  *   and read back;
  * - a note's companion value (sync's sidecar, `<companion prefix><id>`) is
- *   written with the note and removed with it.
+ *   written with the note and removed with it. One over COMPANION_PART_BYTES
+ *   is split over `<companion prefix><id>~1`, `~2`… (Android cannot read an
+ *   AsyncStorage value over about 2 MB back), its own key naming the parts.
  */
 
 /** AsyncStorage's own signatures satisfy this. */
@@ -198,6 +200,111 @@ export function noteKey(id: string): string {
   return `${NOTE_PREFIX}${id}`;
 }
 
+/**
+ * The largest companion value in one AsyncStorage key, in UTF-8 bytes: a
+ * value over about 2 MB cannot be read back on Android.
+ */
+export const COMPANION_PART_BYTES = 1_500_000;
+/**
+ * The most parts of one companion value. A companion holds fields of one
+ * synced note, whose JSON is at most 4 MiB (sync-core's
+ * maxPlaintextBytes): 3 parts at most, and one more to spare.
+ */
+export const MAX_COMPANION_PARTS = 4;
+/** A companion's own key, when the value is split: `parts:<n>`. */
+const PARTS_HEADER = "parts:";
+
+const companionPartKey = (key: string, part: number) => `${key}~${part}`;
+
+/** The UTF-8 length of one UTF-16 code unit (a surrogate half counts 2). */
+const utf8Units = (code: number) =>
+  code < 0x80 ? 1 : code < 0x800 || (code & 0xf800) === 0xd800 ? 2 : 3;
+
+/** The UTF-8 length of a string, without encoding it. */
+export function utf8Length(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i += 1)
+    bytes += utf8Units(text.charCodeAt(i));
+  return bytes;
+}
+
+/** Splits text into pieces of at most `maxBytes` UTF-8 bytes, never inside a surrogate pair. */
+export function splitUtf8(text: string, maxBytes: number): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  let bytes = 0;
+  let i = 0;
+  while (i < text.length) {
+    const code = text.charCodeAt(i);
+    const next = text.charCodeAt(i + 1);
+    const pair =
+      code >= 0xd800 && code <= 0xdbff && next >= 0xdc00 && next <= 0xdfff;
+    const size = pair ? 4 : utf8Units(code);
+    if (bytes + size > maxBytes && i > start) {
+      parts.push(text.slice(start, i));
+      start = i;
+      bytes = 0;
+    }
+    bytes += size;
+    i += pair ? 2 : 1;
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+/**
+ * The key-value pairs that store a companion value under `key`, and the
+ * part keys to remove: those a shorter value no longer uses. Null when the
+ * value is over MAX_COMPANION_PARTS parts.
+ */
+export function companionPairs(
+  key: string,
+  value: string,
+): { pairs: [string, string][]; stale: string[] } | null {
+  const parts = splitUtf8(value, COMPANION_PART_BYTES);
+  if (parts.length === 1) return { pairs: [[key, value]], stale: [] };
+  if (parts.length > MAX_COMPANION_PARTS) return null;
+  const pairs: [string, string][] = [[key, `${PARTS_HEADER}${parts.length}`]];
+  parts.forEach((part, index) =>
+    pairs.push([companionPartKey(key, index + 1), part]),
+  );
+  const stale: string[] = [];
+  for (let part = parts.length + 1; part <= MAX_COMPANION_PARTS; part += 1)
+    stale.push(companionPartKey(key, part));
+  return { pairs, stale };
+}
+
+/** A companion's key and every key of its parts. */
+export function companionKeys(key: string): string[] {
+  const keys = [key];
+  for (let part = 1; part <= MAX_COMPANION_PARTS; part += 1)
+    keys.push(companionPartKey(key, part));
+  return keys;
+}
+
+/** Reads a companion value stored by companionPairs; null when absent or a part is missing. */
+export async function readCompanionValue(
+  kv: Pick<KeyValueStore, "getItem" | "multiGet">,
+  key: string,
+): Promise<string | null> {
+  const head = await kv.getItem(key);
+  if (head === null || head === undefined || !head.startsWith(PARTS_HEADER))
+    return head ?? null;
+  const count = Number(head.slice(PARTS_HEADER.length));
+  if (!Number.isInteger(count) || count < 1 || count > MAX_COMPANION_PARTS)
+    return null;
+  const keys = Array.from({ length: count }, (_, index) =>
+    companionPartKey(key, index + 1),
+  );
+  const parts = await kv.multiGet(keys);
+  let value = "";
+  for (const [, part] of parts) {
+    if (part === null || part === undefined) return null;
+    value += part;
+  }
+  return value;
+}
+
 function isNoteKey(key: string): boolean {
   return key.startsWith(NOTE_PREFIX) && !key.endsWith(CORRUPT_SUFFIX);
 }
@@ -349,11 +456,11 @@ export function createNoteStore(
   } = {},
 ): NoteStore {
   const size = Math.max(1, Math.floor(batchSize));
-  /** A note's key and, with companions, its companion's key. */
+  /** A note's key and, with companions, its companion's keys. */
   const keysOf = (id: string): string[] =>
     companionPrefix === undefined
       ? [noteKey(id)]
-      : [noteKey(id), `${companionPrefix}${id}`];
+      : [noteKey(id), ...companionKeys(`${companionPrefix}${id}`)];
   // Until a load succeeds, the stored notes are unknown: saves then remove
   // only the notes this session read or wrote, and never write the index.
   let degraded = true;
@@ -723,8 +830,15 @@ export function createNoteStore(
       pairs.push([noteKey(note.id), json]);
       if (companionPrefix !== undefined && companion !== undefined) {
         const key = `${companionPrefix}${note.id}`;
-        if (companion === null) removedKeys.push(key);
-        else pairs.push([key, companion]);
+        const stored =
+          companion === null ? null : companionPairs(key, companion);
+        // Over every part a note can need: noteMapping never makes one.
+        if (companion !== null && !stored)
+          throw new Error("a sync companion value is too large");
+        if (stored) {
+          pairs.push(...stored.pairs);
+          removedKeys.push(...stored.stale);
+        } else removedKeys.push(...companionKeys(key));
       }
     }
     const removed = remove.filter((id) => !written.has(id));
