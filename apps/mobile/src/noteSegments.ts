@@ -36,6 +36,12 @@ export const CUE_PAUSE_MS = 700;
  * used: a session clock that does not match the app's is not trusted.
  */
 export const ENGINE_TOLERANCE_MS = 1_500;
+/**
+ * How long before the app first heard them the recognizer's words may
+ * start: the delay from speech to its first interim result. Times that
+ * start earlier are counted from another origin, such as the utterance.
+ */
+export const ENGINE_EARLY_MS = 3_000;
 /** The last word of an Android result has no length: give it this much. */
 const LAST_WORD_MS = 300;
 /**
@@ -241,6 +247,7 @@ export class SegmentRecorder {
     if (
       endMs > this.relative(now) + ENGINE_TOLERANCE_MS ||
       startMs > this.relative(heard) + ENGINE_TOLERANCE_MS ||
+      startMs < this.relative(heard) - ENGINE_EARLY_MS ||
       startMs < lastEnd - ENGINE_TOLERANCE_MS
     ) {
       return null;

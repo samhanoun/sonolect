@@ -86,6 +86,28 @@ describe("SegmentRecorder", () => {
     assert.equal(second?.startMs, 8_000);
   });
 
+  it("does not trust word times that start well before the app heard them", () => {
+    // Counted from the utterance after a short first segment: the other
+    // checks pass, and the words would land 5 s before they were said.
+    const r = new SegmentRecorder();
+    r.sessionStarted(T0);
+    r.audioStarted(T0);
+    r.result("hello", false, T0 + 800);
+    r.result("hello there", true, T0 + 2_000, [
+      word(500, 899, "hello"),
+      word(900, 900, "there"),
+    ]);
+    r.result("how", false, T0 + 6_500);
+    r.result("how now", true, T0 + 7_500, [
+      word(200, 599, "how"),
+      word(600, 600, "now"),
+    ]);
+    assert.deepEqual(r.list(), [
+      { startMs: 500, endMs: 1_200, text: "hello there" },
+      { startMs: 6_500, endMs: 7_500, text: "how now", approx: true },
+    ]);
+  });
+
   it("splits a long result into cues at pauses and sentence ends", () => {
     // iOS 17 and earlier: one final result for the whole dictation.
     const r = new SegmentRecorder();
