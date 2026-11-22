@@ -63,6 +63,38 @@ const sameWords = (saved: string | null, edited: string) => {
   return a.length === b.length && a.every((word, index) => word === b[index]);
 };
 
+/**
+ * local_history.rs `keep_segment_extras`: a segment the studio saves at the
+ * times of a saved one keeps the fields of it the studio does not know.
+ */
+function keepSegmentExtras(
+  saved: readonly CaptureSegment[],
+  edited: readonly CaptureSegment[],
+): CaptureSegment[] {
+  const used = new Set<number>();
+  return edited.map((segment) => {
+    const index = saved.findIndex(
+      (old, at) =>
+        !used.has(at) &&
+        old.startMs === segment.startMs &&
+        old.endMs === segment.endMs,
+    );
+    if (index < 0) return segment;
+    used.add(index);
+    const {
+      startMs: _startMs,
+      endMs: _endMs,
+      text: _text,
+      speaker: _speaker,
+      ...extra
+    } = saved[index]!;
+    const merged: CaptureSegment = { ...segment };
+    for (const [key, value] of Object.entries(extra))
+      if (!(key in merged)) merged[key] = value;
+    return merged;
+  });
+}
+
 /** Two entries of deletes.json are the same delete (sync.rs compares them whole). */
 const sameDelete = (a: FakeDelete, b: FakeDelete) =>
   hlcEquals(a.hlc, b.hlc) &&
@@ -148,7 +180,8 @@ export class FakeNative {
     if (!sameWords(capture.transcript ?? null, transcript))
       delete capture.refinedText;
     capture.transcript = transcript;
-    if (segments) capture.segments = segments;
+    if (segments)
+      capture.segments = keepSegmentExtras(capture.segments, segments);
     capture.updatedAtMs = this.options.now();
     this.saveLocal(capture);
   }

@@ -47,6 +47,14 @@ export const MAX_POLISH_CHARS = 20_000;
 export const MAX_DICTIONARY_ENTRIES = 200;
 const MAX_HINT_CHARS = 100;
 const MAX_OPTION_CHARS = 64;
+/**
+ * A style preset is a sentence of instructions the app sends with the text,
+ * such as "Turn this into a short, polite reply ready to send". The longest
+ * one the apps send today is 87 characters (apps/mobile/src/refine.ts). A
+ * longer or malformed preset gets a 422: dropping it would turn a Rewrite or a
+ * Reply into a plain polish without telling anyone.
+ */
+export const MAX_STYLE_PRESET_CHARS = 256;
 
 export async function transcribeAudio(
   audio: Buffer,
@@ -117,12 +125,56 @@ export async function polishTranscript(opts: {
     ],
   });
 
-  const polished = (result.response.candidates?.[0]?.content?.parts ?? [])
+  return { polished: polishedText(result.response), model: geminiModel };
+}
+
+/** The parts of a Vertex AI answer that polishTranscript reads. */
+export interface PolishModelResponse {
+  candidates?: ReadonlyArray<{
+    finishReason?: string;
+    content?: { parts?: ReadonlyArray<{ text?: string }> };
+  }>;
+}
+
+/** The model answered, but not with a complete text the route can return. */
+export class UnusablePolishError extends Error {
+  readonly code: "polish_empty" | "polish_incomplete";
+  /** The model's finish reason, for the log. Never sent to the client. */
+  readonly finishReason: string | undefined;
+
+  constructor(
+    code: "polish_empty" | "polish_incomplete",
+    finishReason?: string,
+  ) {
+    super(
+      code === "polish_empty"
+        ? "The model returned no text."
+        : "The model stopped before the answer was complete.",
+    );
+    this.name = "UnusablePolishError";
+    this.code = code;
+    this.finishReason = finishReason;
+  }
+}
+
+/**
+ * The polished text of a model answer. Only a first candidate that stopped
+ * normally (`STOP`) with some text counts. An answer cut off at the token
+ * limit, or stopped by a safety or other filter, is not a polished version of
+ * the dictation, so this throws UnusablePolishError and the route answers 502.
+ * It never falls back to the raw transcript.
+ */
+export function polishedText(response: PolishModelResponse): string {
+  const candidate = response.candidates?.[0];
+  if (!candidate) throw new UnusablePolishError("polish_empty");
+  if (candidate.finishReason !== "STOP")
+    throw new UnusablePolishError("polish_incomplete", candidate.finishReason);
+  const text = (candidate.content?.parts ?? [])
     .map((part) => part.text ?? "")
     .join("")
     .trim();
-
-  return { polished: polished || opts.transcript, model: geminiModel };
+  if (!text) throw new UnusablePolishError("polish_empty", "STOP");
+  return text;
 }
 
 const errorBody = (code: string, message: string, retryable: boolean) => ({
@@ -161,6 +213,40 @@ const isShortString = (value: unknown, max: number): value is string =>
   typeof value === "string" && value.length > 0 && value.length <= max;
 
 /**
+ * Control characters, line breaks included. The style preset and the
+ * dictionary go into the prompt's instructions, ahead of the "Raw dictation:"
+ * marker, so a line break in them could fake that marker and add instructions.
+ */
+const CONTROL_CHARACTER = /[\p{Cc}\p{Zl}\p{Zp}]/u;
+
+const isOneLine = (value: string): boolean => !CONTROL_CHARACTER.test(value);
+
+const isHint = (value: unknown): value is string =>
+  isShortString(value, MAX_HINT_CHARS) && isOneLine(value);
+
+/** The trimmed preset, `undefined` when none was sent, or `null` when invalid. */
+const readStylePreset = (value: unknown): string | undefined | null => {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") return null;
+  const preset = value.trim();
+  if (preset.length > MAX_STYLE_PRESET_CHARS || !isOneLine(preset)) return null;
+  return preset || undefined;
+};
+
+/** The Google calls behind the /v1 routes. Tests replace them. */
+export interface AiProviders {
+  configured: () => boolean;
+  transcribe: typeof transcribeAudio;
+  polish: typeof polishTranscript;
+}
+
+const googleProviders: AiProviders = {
+  configured: aiConfigured,
+  transcribe: transcribeAudio,
+  polish: polishTranscript,
+};
+
+/**
  * Registers POST /v1/transcribe and POST /v1/polish on an existing Fastify app.
  * Audio bodies are parsed by the app's audio content-type parser (Buffer).
  * The app must have @fastify/rate-limit registered (createApp does).
@@ -168,13 +254,15 @@ const isShortString = (value: unknown, max: number): value is string =>
 export function registerAiRoutes(
   app: FastifyInstance,
   limits: AiRouteLimits = DEFAULT_AI_ROUTE_LIMITS,
+  providers: Partial<AiProviders> = {},
 ): void {
+  const ai = { ...googleProviders, ...providers };
   const config = rateLimitConfig(limits);
   app.post(
     "/v1/transcribe",
     { config },
     async (request, reply): Promise<unknown> => {
-      if (!aiConfigured()) {
+      if (!ai.configured()) {
         return reply
           .status(503)
           .send(
@@ -197,7 +285,7 @@ export function registerAiRoutes(
           );
       }
       try {
-        const result = await transcribeAudio(
+        const result = await ai.transcribe(
           request.body,
           getQueryLanguage(request),
         );
@@ -254,7 +342,19 @@ export function registerAiRoutes(
             ),
           );
       }
-      if (!aiConfigured()) {
+      const stylePreset = readStylePreset(body.stylePreset);
+      if (stylePreset === null) {
+        return reply
+          .status(422)
+          .send(
+            errorBody(
+              "invalid_style_preset",
+              `stylePreset must be one line of text of at most ${MAX_STYLE_PRESET_CHARS} characters.`,
+              false,
+            ),
+          );
+      }
+      if (!ai.configured()) {
         return reply
           .status(503)
           .send(
@@ -268,24 +368,38 @@ export function registerAiRoutes(
       try {
         const dictionary = Array.isArray(body.dictionary)
           ? (body.dictionary as DictionaryHint[]).filter(
-              (entry) =>
-                entry &&
-                isShortString(entry.spoken, MAX_HINT_CHARS) &&
-                isShortString(entry.written, MAX_HINT_CHARS),
+              (entry) => entry && isHint(entry.spoken) && isHint(entry.written),
             )
           : undefined;
-        const result = await polishTranscript({
+        const result = await ai.polish({
           transcript: body.transcript,
-          ...(isShortString(body.stylePreset, MAX_OPTION_CHARS)
-            ? { stylePreset: body.stylePreset }
-            : {}),
+          ...(stylePreset ? { stylePreset } : {}),
           ...(dictionary ? { dictionary } : {}),
           ...(isShortString(body.locale, MAX_OPTION_CHARS)
             ? { locale: body.locale }
             : {}),
         });
+        // Never hand the raw transcript back as if the model had polished it.
+        if (!result.polished.trim())
+          throw new UnusablePolishError("polish_empty");
         return result;
       } catch (error) {
+        if (error instanceof UnusablePolishError) {
+          request.log.warn(
+            { code: error.code, finishReason: error.finishReason },
+            "cloud polish gave no usable text",
+          );
+          // A cut-off or filtered answer would likely end the same way again.
+          return reply
+            .status(502)
+            .send(
+              errorBody(
+                error.code,
+                error.message,
+                error.code === "polish_empty",
+              ),
+            );
+        }
         request.log.error({ err: error }, "cloud polish failed");
         return reply
           .status(503)

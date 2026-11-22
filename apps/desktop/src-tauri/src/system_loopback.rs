@@ -1,9 +1,11 @@
 //! What is playing on Windows, as a source of audio for a recording.
 //!
 //! WASAPI records a playback device when it is opened for capture
-//! ("loopback"): no driver, no virtual cable and no permission prompt. The
-//! device's own format is kept and converted here, because a loopback stream
-//! cannot ask Windows for another one.
+//! ("loopback"): no driver, no virtual cable and no permission prompt. A
+//! loopback stream cannot ask Windows for another format, so the device's own
+//! rate and channels are kept: this file only turns its samples into 16-bit
+//! ones. The recording converts the rest (`resample::Converter`), on every
+//! platform alike, where it is tested.
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -19,7 +21,10 @@ use cpal::{
     StreamConfig,
 };
 
-use super::audio_feed::{Feed, Source, ToSpeech};
+use super::{
+    audio_feed::{Feed, Source},
+    resample::PcmFormat,
+};
 
 /// How long `next` waits for audio before it reports a quiet moment.
 const WAIT: Duration = Duration::from_millis(200);
@@ -31,6 +36,7 @@ pub fn available() -> bool {
 
 pub struct Loopback {
     stream: Stream,
+    format: PcmFormat,
     audio: Receiver<Vec<i16>>,
     failed: Arc<Mutex<Option<String>>>,
     closing: Arc<AtomicBool>,
@@ -43,18 +49,27 @@ pub fn open(closing: Arc<AtomicBool>) -> Result<Loopback, String> {
     let device = cpal::default_host()
         .default_output_device()
         .ok_or("There is no playback device to record.")?;
-    let format = device
+    let output = device
         .default_output_config()
         .map_err(|error| format!("Cannot read the playback format: {error}"))?;
-    let convert = ToSpeech::new(format.sample_rate(), format.channels())?;
+    if output.sample_rate() == 0 || output.channels() == 0 {
+        return Err("The playback device reports no audio format.".into());
+    }
+    let format = PcmFormat::new(output.sample_rate(), output.channels()).map_err(|_| {
+        format!(
+            "Unsupported playback format: {} Hz, {} channels.",
+            output.sample_rate(),
+            output.channels()
+        )
+    })?;
     let (sender, audio) = mpsc::channel();
     let failed = Arc::new(Mutex::new(None));
-    let config = format.config();
-    let stream = match format.sample_format() {
-        SampleFormat::F32 => build::<f32>(&device, config, convert, sender, &failed),
-        SampleFormat::I16 => build::<i16>(&device, config, convert, sender, &failed),
-        SampleFormat::U16 => build::<u16>(&device, config, convert, sender, &failed),
-        SampleFormat::I32 => build::<i32>(&device, config, convert, sender, &failed),
+    let config = output.config();
+    let stream = match output.sample_format() {
+        SampleFormat::F32 => build::<f32>(&device, config, sender, &failed),
+        SampleFormat::I16 => build::<i16>(&device, config, sender, &failed),
+        SampleFormat::U16 => build::<u16>(&device, config, sender, &failed),
+        SampleFormat::I32 => build::<i32>(&device, config, sender, &failed),
         other => Err(format!("Unsupported playback format: {other}.")),
     }?;
     stream
@@ -62,6 +77,7 @@ pub fn open(closing: Arc<AtomicBool>) -> Result<Loopback, String> {
         .map_err(|error| format!("Cannot start recording system audio: {error}"))?;
     Ok(Loopback {
         stream,
+        format,
         audio,
         failed,
         closing,
@@ -69,28 +85,25 @@ pub fn open(closing: Arc<AtomicBool>) -> Result<Loopback, String> {
     })
 }
 
+/// Records the device in its own format and hands over its samples as
+/// 16-bit ones, interleaved as they came.
 fn build<T>(
     device: &Device,
     config: StreamConfig,
-    mut convert: ToSpeech,
     sender: Sender<Vec<i16>>,
     failed: &Arc<Mutex<Option<String>>>,
 ) -> Result<Stream, String>
 where
     T: SizedSample,
-    f32: FromSample<T>,
+    i16: FromSample<T>,
 {
     let failed = Arc::clone(failed);
     device
         .build_input_stream(
             config,
             move |data: &[T], _: &InputCallbackInfo| {
-                let mut block = Vec::with_capacity(convert.capacity(data.len()));
-                convert.push(
-                    data.iter().map(|sample| f32::from_sample(*sample)),
-                    &mut block,
-                );
-                if !block.is_empty() {
+                if !data.is_empty() {
+                    let block: Vec<i16> = data.iter().map(|s| i16::from_sample(*s)).collect();
                     // The receiver is gone once the recording has ended.
                     let _ = sender.send(block);
                 }
@@ -119,6 +132,10 @@ impl Loopback {
 }
 
 impl Source for Loopback {
+    fn format(&self) -> PcmFormat {
+        self.format
+    }
+
     fn next(&mut self) -> Feed {
         if self.done {
             return Feed::Ended(None);

@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyRequest, HTTPMethods } from "fastify";
 
 /**
  * Shared guards for the internal Sonolect services (agent, audio, billing,
@@ -258,6 +258,70 @@ export const resolveRequestUserId = (
       "userId does not match the authenticated user",
     );
   return claimedUserId;
+};
+
+/** True when `env` asks for production (`NODE_ENV=production`). */
+export const isProduction = (env: ServiceEnv = process.env): boolean =>
+  env.NODE_ENV === "production";
+
+export interface UnavailableEndpoint {
+  /** "METHOD /route/pattern", exactly as the route is registered. */
+  route: string;
+  /** 501 when the service has no implementation, 503 when it lacks config. */
+  statusCode: 501 | 503;
+  error: "not_implemented" | "not_configured";
+  message: string;
+}
+
+/**
+ * Makes each listed endpoint answer its error instead of running its handler,
+ * after the service token check, and logs the list once. Use it for endpoints
+ * that would otherwise answer with a placeholder or keep data only in memory.
+ * `notes` adds partial limits to the same log line. The app fails to start if
+ * a listed route is not registered, so the list cannot drift from the code.
+ */
+export const disableEndpoints = (
+  app: FastifyInstance,
+  endpoints: readonly UnavailableEndpoint[],
+  notes: readonly string[] = [],
+): void => {
+  if (endpoints.length === 0 && notes.length === 0) return;
+  const byRoute = new Map(
+    endpoints.map((endpoint) => [endpoint.route, endpoint]),
+  );
+  app.addHook("onRequest", async (request, reply) => {
+    // A HEAD request runs the GET handler, so it is refused the same way.
+    const method = request.method === "HEAD" ? "GET" : request.method;
+    const endpoint = byRoute.get(`${method} ${request.routeOptions.url}`);
+    if (!endpoint) return;
+    return reply
+      .status(endpoint.statusCode)
+      .send({ error: endpoint.error, message: endpoint.message });
+  });
+  app.addHook("onReady", async () => {
+    const missing = endpoints.filter((endpoint) => {
+      const [method, url] = endpoint.route.split(" ");
+      return !(
+        method &&
+        url &&
+        app.hasRoute({ method: method as HTTPMethods, url })
+      );
+    });
+    if (missing.length > 0)
+      throw new Error(
+        `disableEndpoints: no such route: ${missing.map((endpoint) => endpoint.route).join(", ")}`,
+      );
+  });
+  app.log.warn(
+    {
+      unavailable: endpoints.map(
+        (endpoint) =>
+          `${endpoint.route} -> ${endpoint.statusCode} ${endpoint.error}`,
+      ),
+      ...(notes.length > 0 ? { notes } : {}),
+    },
+    "Some endpoints are not available in production",
+  );
 };
 
 export interface ListenOptions {

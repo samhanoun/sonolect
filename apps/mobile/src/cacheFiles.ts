@@ -8,9 +8,10 @@
  * - temp_<UUID>.pcm: the file ExpoAudioRecorder creates for each continuous
  *   session on Android 13+ and never deletes when no recording is persisted.
  * - sonolect-notes-<date>.md, .txt or .json: notes exported for sharing.
+ * - sonolect-note-<date>-<time>.srt or .vtt: one note's subtitles.
  */
 export const SWEEPABLE_CACHE_FILE =
-  /^(recording_.*\.(wav|caf)|temp_.*\.pcm|sonolect-notes-.*\.(md|txt|json))$/;
+  /^(recording_.*\.(wav|caf)|temp_.*\.pcm|sonolect-notes-.*\.(md|txt|json)|sonolect-note-.*\.(srt|vtt))$/;
 
 export function isSweepableCacheFile(name: string): boolean {
   return SWEEPABLE_CACHE_FILE.test(name);

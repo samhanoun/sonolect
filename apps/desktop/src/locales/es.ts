@@ -312,4 +312,76 @@ export const es: Partial<Record<LocaleKeys, string>> = {
     "No se pudo guardar el estado de la sincronización.",
   "native.syncInterrupted": "La sincronización se interrumpió.",
   "native.syncInvalidNote": "Nota sincronizada no válida.",
+  // Speaker detection
+  "studio.speakers.detect": "Detectar hablantes",
+  "studio.speakers.count": "Hablantes",
+  "studio.speakers.auto": "Automático",
+  "studio.speakers.label": "Hablante {number}",
+  "studio.speakers.consent":
+    "¿Descargar el modelo de hablantes de {size}? Tu audio se queda en este dispositivo.",
+  "studio.speakers.download": "Descargar",
+  "studio.speakers.notNow": "Ahora no",
+  "studio.speakers.downloading":
+    "Descargando el modelo de hablantes… {progress}\u00a0%",
+  "studio.speakers.keepOrReplace":
+    "Algunos segmentos ya tienen nombre. ¿Conservarlos o reemplazarlos?",
+  "studio.speakers.keep": "Conservar nombres",
+  "studio.speakers.replace": "Reemplazar nombres",
+  "studio.speakers.cancel": "Cancelar",
+  "studio.speakers.detecting": "Detectando hablantes… {progress}\u00a0%",
+  "studio.speakers.found.one": "Se encontró {count} hablante.",
+  "studio.speakers.found.other": "Se encontraron {count} hablantes.",
+  "studio.speakers.noSpeech": "No se encontró voz en esta grabación.",
+  "studio.speakers.stale":
+    "Se abrió otra transcripción, así que no se cambió ningún nombre.",
+  "studio.speakers.legend": "Hablantes de esta transcripción",
+  "studio.speakers.rename": "Renombrar {name} en todas partes",
+  "studio.speakers.segments.one": "{count} segmento",
+  "studio.speakers.segments.other": "{count} segmentos",
+  "studio.settings.speakerModelTitle": "Modelo de hablantes",
+  "studio.settings.speakerModelMeta": "Detección de hablantes · CPU",
+  "studio.settings.speakerModelReady":
+    "El modelo de hablantes está en este equipo.",
+  "studio.settings.speakerModelMissing":
+    "Descárgalo una vez para detectar quién habla en una grabación. Tu audio se queda en este dispositivo.",
+  "studio.settings.speakerModelInstall": "Descargar el modelo de hablantes",
+  "studio.settings.speakerModelReinstall": "Reinstalar el modelo de hablantes",
+  "studio.settings.speakerModelDownloaded":
+    "Modelo de hablantes descargado y suma de verificación comprobada.",
+  "native.speakersCancelled": "Se canceló la detección de hablantes.",
+  "native.speakersBusy": "La detección de hablantes ya está en curso.",
+  "native.speakerCount": "Elige entre 2 y 8 hablantes.",
+  "native.speakerModelMissing": "Descarga primero el modelo de hablantes.",
+  "native.speakerModelDamaged":
+    "El modelo de hablantes estaba dañado y se eliminó. Descárgalo de nuevo.",
+  "native.speakersStillRecording":
+    "Termina la grabación antes de detectar hablantes.",
+  "native.speakerModelUnreadable":
+    "No se puede leer el modelo de hablantes: {reason}",
+  "native.speakerModelLoad":
+    "No se puede cargar el modelo de hablantes: {reason}",
+  "native.speakerModelFailed": "El modelo de hablantes falló: {reason}",
+  // High-quality recording
+  "studio.storage.format": "Guardar grabaciones como",
+  "studio.storage.wav": "Calidad de voz (WAV, 16 kHz mono)",
+  "studio.storage.opus": "Calidad de voz, comprimido (Opus, 10× más pequeño)",
+  "studio.storage.hq":
+    "Alta calidad (Opus, 48 kHz, estéreo si la fuente lo es)",
+  "studio.storage.savedWav":
+    "Las grabaciones nuevas se guardan en WAV, con calidad de voz. Las que ya están comprimidas siguen comprimidas.",
+  "studio.storage.savedHq":
+    "Las grabaciones nuevas se guardan a 48 kHz, en estéreo si la fuente lo es. Los archivos importados y las grabaciones anteriores se comprimen con calidad de voz.",
+  "studio.signal.meta": "16 kHz · mono · en el dispositivo",
+  "studio.signal.metaHigh":
+    "48 kHz · estéreo si está disponible · en el dispositivo",
+  "studio.library.saveAudio": "Guardar audio",
+  "studio.source.systemHint":
+    "El botón de grabar graba lo que suena en este ordenador, como una reunión o un vídeo. También lo hace un atajo de dictado pulsado mientras Sonolect está en primer plano. El dictado en otras apps y la burbuja siempre usan el micrófono.",
+  "native.invalidPcmFormat":
+    "Frecuencia de muestreo o número de canales no válidos.",
+  "native.invalidPcmFrames":
+    "Audio PCM de 16 bits o tamaño de trama no válido.",
+  "native.pcmFormatChanged": "El formato de audio cambió durante la grabación.",
+  "native.invalidQuality": "Calidad de grabación no válida.",
+  "native.cannotConvert": "No se puede convertir el audio: {reason}",
 };

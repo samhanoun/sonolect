@@ -32,8 +32,10 @@ it("untrusted user headers cannot select an anonymous identity", async () => {
   }
 });
 it("production rejects anonymous access and isolates verified accounts", async () => {
+  // Transcripts are a preview route: production has them only with the opt-in.
   const options = {
     nodeEnv: "production",
+    previewRoutes: true,
     authRequired: false,
     logger: false,
     verifyToken: async (token: string) => ({

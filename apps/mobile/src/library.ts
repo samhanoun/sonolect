@@ -162,6 +162,17 @@ export function exportAsJson(
         ...(turn.rawText && turn.rawText !== turn.refinedText
           ? { original: turn.rawText }
           : {}),
+        // When each part was said, in ms from the start of the dictation.
+        ...(turn.segments?.length
+          ? {
+              segments: turn.segments.map((segment) => ({
+                startMs: segment.startMs,
+                endMs: segment.endMs,
+                text: segment.text,
+                ...(segment.approx ? { approx: true } : {}),
+              })),
+            }
+          : {}),
       })),
     },
     null,
@@ -182,11 +193,17 @@ export function exportLibrary(
     : exportAsMarkdown(history, options);
 }
 
-/** sonolect-note-YYYY-MM-DD-HHMM.txt: one note saved from a browser, local time. */
-export function noteFileName(date: Date): string {
+/**
+ * sonolect-note-YYYY-MM-DD-HHMM.txt (or .srt, .vtt): one note, named after
+ * its local date and time.
+ */
+export function noteFileName(
+  date: Date,
+  extension: string = EXPORT_FILE_TYPES.text.extension,
+): string {
   const pad = (n: number) => n.toString().padStart(2, "0");
   const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-  return `sonolect-note-${day}-${pad(date.getHours())}${pad(date.getMinutes())}.${EXPORT_FILE_TYPES.text.extension}`;
+  return `sonolect-note-${day}-${pad(date.getHours())}${pad(date.getMinutes())}.${extension}`;
 }
 
 /** sonolect-notes-YYYY-MM-DD.md (or .txt, .json), with the local date. */

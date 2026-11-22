@@ -92,6 +92,16 @@ Rules deny all unrecognized paths. Product changes that add collections or objec
 | staging     | true                | ZONAL / medium    | 0             | true               |
 | prod        | true                | REGIONAL / larger | 1             | false              |
 
+## Production mode
+
+Every Cloud Run service in `infra/terraform` runs with `NODE_ENV=production`, and in that mode no service answers with a placeholder (see [api.md](api.md#what-production-serves)):
+
+- The API registers only `GET /health`, `POST /v1/transcribe` and `POST /v1/polish`. Its other routes keep data only in the instance, so they are off and answer 404. Leave `SONOLECT_API_PREVIEW_ROUTES` unset: with it set to `1`, those routes would accept data that a restart or a second instance loses.
+- The worker answers only `GET /health`. Its task and event endpoints answer 501 `not_implemented`. Nothing calls them: the Pub/Sub subscriptions are pull subscriptions, and Cloud Run only checks that the port opens.
+- Each service logs once at start which routes or endpoints are off.
+
+A smoke check after a deploy: `GET /health` answers 200 on each service, and `POST /v1/polish` without a token answers 401 on the API.
+
 ## Operational notes
 
 - Cloud SQL password/user creation should be handled by migrations or secret-backed operational steps; do not commit database passwords.

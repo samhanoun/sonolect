@@ -1,0 +1,143 @@
+diff --git a/android/src/main/java/expo/modules/clipboard/ClipboardModule.kt b/android/src/main/java/expo/modules/clipboard/ClipboardModule.kt
+index ea36789ee223b907e5bd7dc58f5fd50eecdc7376..73d83a39e024caaa50e233c3c299885289d24574 100644
+--- a/android/src/main/java/expo/modules/clipboard/ClipboardModule.kt
++++ b/android/src/main/java/expo/modules/clipboard/ClipboardModule.kt
+@@ -51,7 +51,8 @@ class ClipboardModule : Module() {
+         StringFormat.PLAIN -> ClipData.newPlainText(null, content)
+         StringFormat.HTML -> {
+           // HTML clip requires complementary plain text content
+-          val plainText = plainTextFromHtml(content)
++          // Sonolect patch: the caller's plain text when it gives one.
++          val plainText = options.plainText ?: plainTextFromHtml(content)
+           ClipData.newHtmlText(null, plainText, content)
+         }
+       }.applyIsSensitive(options.isSensitive)
+diff --git a/android/src/main/java/expo/modules/clipboard/ClipboardOptions.kt b/android/src/main/java/expo/modules/clipboard/ClipboardOptions.kt
+index 5860a936c7c21bbda1be39c3dc06571989523cbd..d71e5e87c3b2a89105cda75413809274a600b591 100644
+--- a/android/src/main/java/expo/modules/clipboard/ClipboardOptions.kt
++++ b/android/src/main/java/expo/modules/clipboard/ClipboardOptions.kt
+@@ -28,6 +28,11 @@ internal class SetStringOptions : Record {
+ 
+   @Field
+   var isSensitive: Boolean = false
++
++  // Sonolect patch: the plain text of an HTML copy, used instead of the
++  // text Html.fromHtml derives from it (which drops list bullets).
++  @Field
++  var plainText: String? = null
+ }
+ 
+ internal class SetImageOptions : Record {
+diff --git a/build/Clipboard.types.d.ts b/build/Clipboard.types.d.ts
+index bc8f719e9133b4393520168877f714f46504cd3b..77193e191f4440b31113d554a606bc88a24e96e5 100644
+--- a/build/Clipboard.types.d.ts
++++ b/build/Clipboard.types.d.ts
+@@ -114,6 +114,11 @@ export type SetStringOptions = {
+      * @default StringFormat.PLAIN_TEXT
+      */
+     inputFormat?: StringFormat;
++    /**
++     * Sonolect patch: with `inputFormat: StringFormat.HTML` on Android and iOS,
++     * the plain text copied along with the HTML, instead of one derived from it.
++     */
++    plainText?: string;
+     /**
+      * Android-specific options for clipboard behavior.
+      * @platform android
+diff --git a/ios/ClipboardModule.swift b/ios/ClipboardModule.swift
+index 12c7e227fccca5fcdb73c663c5f92a0ce5791f6b..9ce3bfe88ac0e46a26b7a57e0fef101a50d81510 100644
+--- a/ios/ClipboardModule.swift
++++ b/ios/ClipboardModule.swift
+@@ -20,6 +20,9 @@ public class ClipboardModule: Module {
+       }
+     }
+ 
++    // Sonolect patch: on the main queue (below), since NSAttributedString's
++    // HTML importer must not run on the background queue async functions
++    // use by default.
+     AsyncFunction("setStringAsync") { (content: String?, options: SetStringOptions) -> Bool in
+       #if !os(macOS)
+       if let content, options.localOnly || options.expiresAt != nil {
+@@ -35,7 +38,8 @@ public class ClipboardModule: Module {
+         case .plainText:
+           item = [UTType.utf8PlainText.identifier: content]
+         case .html:
+-          item = UIPasteboard.htmlItem(content) ?? [UTType.utf8PlainText.identifier: ""]
++          item = UIPasteboard.htmlItem(content, plainText: options.plainText)
++            ?? [UTType.utf8PlainText.identifier: options.plainText ?? ""]
+         }
+         UIPasteboard.general.setItems([item], options: pasteboardOptions)
+         return true
+@@ -45,11 +49,17 @@ public class ClipboardModule: Module {
+       case .plainText:
+         UIPasteboard.general.string = content
+       case .html:
+-        UIPasteboard.general.html = content
++        // Sonolect patch: keep the caller's plain text.
++        if let item = UIPasteboard.htmlItem(content, plainText: options.plainText) {
++          UIPasteboard.general.setItems([item])
++        } else {
++          UIPasteboard.general.string = options.plainText ?? ""
++        }
+       }
+ 
+       return true
+     }
++    .runOnQueue(.main) // Sonolect patch: the HTML importer needs the main thread.
+ 
+     AsyncFunction("hasStringAsync") { () -> Bool in
+       return UIPasteboard.general.hasStrings || UIPasteboard.general.hasHTML
+diff --git a/ios/ClipboardOptions.swift b/ios/ClipboardOptions.swift
+index 34a93b65f4d599ff66052bebd05bcf7473ef8485..3ec720886623ab3e2c2a142972930f2d9723c2b7 100644
+--- a/ios/ClipboardOptions.swift
++++ b/ios/ClipboardOptions.swift
+@@ -38,6 +38,11 @@ internal struct SetStringOptions: Record {
+ 
+   @Field
+   var expiresAt: Double?
++
++  // Sonolect patch: the plain text of an HTML copy, used instead of the
++  // text NSAttributedString reads from the HTML.
++  @Field
++  var plainText: String?
+ }
+ 
+ internal struct SetImageOptions: Record {}
+diff --git a/ios/UIPasteboard+html.swift b/ios/UIPasteboard+html.swift
+index 3b004bcc0901908c69a9efef09c79f76f2f0da1e..0e7bf60c9037585bbec152693175e22d0d569359 100644
+--- a/ios/UIPasteboard+html.swift
++++ b/ios/UIPasteboard+html.swift
+@@ -37,14 +37,15 @@ extension UIPasteboard {
+   }
+ 
+   /// The rich text, HTML and plain text representations of an HTML string.
+-  static func htmlItem(_ html: String?) -> [String: Any]? {
++  /// Sonolect patch: `plainText`, when given, is the plain text representation.
++  static func htmlItem(_ html: String?, plainText: String? = nil) -> [String: Any]? {
+     guard let html, let attributedString = try? NSAttributedString(htmlString: html) else {
+       return nil
+     }
+     return [
+       UTType.rtf.identifier: attributedString.rtfData as Any,
+       UTType.html.identifier: attributedString.htmlString as Any,
+-      UTType.utf8PlainText.identifier: attributedString.string
++      UTType.utf8PlainText.identifier: plainText ?? attributedString.string
+     ]
+   }
+ 
+diff --git a/src/Clipboard.types.ts b/src/Clipboard.types.ts
+index 9bef8f913b5017fda25b6e2e2c2580c721d2836c..1904702d38984efcfbafb72f19f70aebd65ad575 100644
+--- a/src/Clipboard.types.ts
++++ b/src/Clipboard.types.ts
+@@ -123,6 +123,11 @@ export type SetStringOptions = {
+    * @default StringFormat.PLAIN_TEXT
+    */
+   inputFormat?: StringFormat;
++  /**
++   * Sonolect patch: with `inputFormat: StringFormat.HTML` on Android and iOS,
++   * the plain text copied along with the HTML, instead of one derived from it.
++   */
++  plainText?: string;
+   /**
+    * Android-specific options for clipboard behavior.
+    * @platform android

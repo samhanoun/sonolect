@@ -293,6 +293,7 @@ export const en = {
   "studio.signal.listening": "Listening",
   "studio.signal.ready": "Ready",
   "studio.signal.meta": "16 kHz · mono · on device",
+  "studio.signal.metaHigh": "48 kHz · stereo when available · on device",
   "studio.overview.eyebrow": "A little less typing",
   "studio.overview.title": "Make room for your thoughts",
   "studio.overview.subtitle":
@@ -341,6 +342,10 @@ export const en = {
   "studio.transcribe.exportFormat": "Export format",
   "studio.transcribe.export": "Export transcript",
   "studio.transcribe.exportTitle": "Sonolect transcript",
+  "studio.transcribe.previewNotice":
+    "Browser preview. You can type, edit and export text here. Recording and transcription need the Sonolect desktop app.",
+  "studio.transcribe.previewImport":
+    "The browser preview cannot transcribe audio files. Open this file in the Sonolect desktop app. Nothing was sent.",
   "studio.export.txt": "Plain text (.txt)",
   "studio.export.md": "Markdown (.md)",
   "studio.export.srt": "Subtitles (.srt)",
@@ -409,7 +414,7 @@ export const en = {
   "studio.library.emptyTitle": "A fresh start.",
   "studio.library.tryOther": "Try a different word.",
   "studio.library.emptyBody":
-    "Your recordings will appear here after you dictate or import audio in the Windows app.",
+    "Your recordings will appear here after you dictate or import audio in the desktop app.",
   "studio.library.createFirst": "Create your first recording",
   "studio.library.retryNeeded": "Retry needed",
   "studio.library.savedOnDevice": "Saved on device",
@@ -486,7 +491,7 @@ export const en = {
   "studio.settings.storageHint":
     "Recordings can run up to four hours and are saved on this device for as long as you choose above. API keys use Windows Credential Manager.",
   "studio.settings.previewNotice":
-    "This is the browser preview. Model installation and local speech run in the Windows app.",
+    "This is the browser preview. Model installation and local speech run in the Sonolect desktop app.",
   "studio.privacy.title": "Privacy & retention",
   "studio.privacy.subtitle":
     "Recordings and transcripts never leave this device in Local only.",
@@ -499,7 +504,7 @@ export const en = {
     "Delete all your recordings, transcripts, dictionary, snippets, saved API keys and settings from this device? This cannot be undone.",
   "studio.privacy.partialFailure": "Some data could not be deleted: {problems}",
   "studio.privacy.keptForever": "Recordings are kept until you delete them.",
-  "studio.privacy.savedPreview": "Saved. It applies in the Windows app.",
+  "studio.privacy.savedPreview": "Saved. It applies in the desktop app.",
   "studio.privacy.savedDeleted.one":
     "Saved. Deleted {count} recording older than {period}.",
   "studio.privacy.savedDeleted.other":
@@ -607,7 +612,7 @@ export const en = {
   "studio.models.browse": "Browse models",
   "studio.models.removeKey": "Remove saved key",
   "studio.models.previewNotice":
-    "Browser preview. Open the Windows app to save keys and run native speech.",
+    "Browser preview. Local speech runs in the Sonolect desktop app. Saving API keys for online models works only in the Windows app for now.",
   "studio.models.localTitle": "Prefer to keep it local?",
   "studio.models.localBody":
     "Whisper runs on your computer. No API key. No account. No audio uploads.",
@@ -625,7 +630,7 @@ export const en = {
     "OpenCode Zen is available for text editing. Its public API does not currently advertise dedicated speech models.",
   "provider.name.local": "Local Whisper",
   "provider.previewOnly":
-    "Open the Windows app to use secure keys and native speech. This window is a browser preview.",
+    "This window is a browser preview. Local speech runs in the Sonolect desktop app. Saved API keys work only in the Windows app for now.",
   "provider.cloudRequired":
     "Choose cloud processing before sending audio or text online.",
   "provider.cloudCancelled": "Cloud processing was cancelled.",
@@ -657,7 +662,9 @@ export const en = {
   "voice.localUnavailableApp":
     "Local transcription unavailable. Check your installed model in Settings. No audio was uploaded.",
   "voice.localUnavailablePreview":
-    "Local transcription runs in the Windows app. This browser preview did not upload any audio.",
+    "The browser preview cannot transcribe speech. Use the Sonolect desktop app. This recording was not saved or sent.",
+  "voice.previewCannotTranscribe":
+    "The browser preview cannot transcribe speech. Use the Sonolect desktop app to record and transcribe. Nothing was recorded or sent.",
   "voice.notConfigured":
     "Online transcription is not configured. Your recording stayed on this device.",
   "voice.unreachable":
@@ -802,6 +809,7 @@ export const en = {
   "studio.library.noAudio": "The recording stays on the device that made it.",
   "studio.library.conflictOf": "Conflict copy of the note from {date}",
   "studio.library.conflictCopy": "Conflict copy",
+  "studio.library.saveAudio": "Save audio",
   "native.audioGone":
     "The audio of this recording is no longer on this device.",
   "native.recordingGone": "This recording is no longer in your library.",
@@ -836,8 +844,10 @@ export const en = {
   "toast.micFellBack":
     "Chosen microphone not found. Recording with the system default.",
   "studio.storage.format": "Save recordings as",
-  "studio.storage.wav": "Original quality (WAV)",
-  "studio.storage.opus": "Compressed (Opus, 10× smaller)",
+  "studio.storage.wav": "Speech quality (WAV, 16 kHz mono)",
+  "studio.storage.opus": "Speech quality, compressed (Opus, 10× smaller)",
+  "studio.storage.hq":
+    "High quality (Opus, 48 kHz, stereo when the source has it)",
   "studio.storage.compressNow": "Compress saved recordings",
   "studio.storage.compressing": "Compressing…",
   "studio.storage.compressed.one":
@@ -853,7 +863,9 @@ export const en = {
   "studio.storage.savedOpus":
     "New recordings are compressed once they are transcribed. You can still play them and transcribe them again.",
   "studio.storage.savedWav":
-    "New recordings are kept in original quality. Recordings already compressed stay compressed.",
+    "New recordings are kept as WAV, in speech quality. Recordings already compressed stay compressed.",
+  "studio.storage.savedHq":
+    "New recordings are kept at 48 kHz, in stereo when the source has it. Imported files and older recordings are compressed in speech quality.",
   "studio.transcribe.liveLabel": "Heard so far",
   "capture.keptForRetry":
     "{error} The recording is in your Library, where you can transcribe it again.",
@@ -868,7 +880,7 @@ export const en = {
   "studio.source.microphone": "The microphone",
   "studio.source.system": "This computer's sound",
   "studio.source.systemHint":
-    "The record button records what is playing on this computer, such as a meeting or a video. Dictation with the hotkeys or the bubble still uses the microphone.",
+    "The record button records what is playing on this computer, such as a meeting or a video. So does a dictation shortcut pressed while Sonolect is in front. Dictation into other apps and the bubble always use the microphone.",
   "studio.dock.recordingSystem": "Recording computer sound…",
   "native.noPlaybackDevice": "There is no playback device to record.",
   "native.playbackFormat": "Cannot read the playback format: {reason}",
@@ -890,6 +902,11 @@ export const en = {
   "native.pactlFailed": "pactl failed: {reason}",
   "native.systemAudioBusy": "System audio is unavailable.",
   "native.ffmpegNeeded": "ffmpeg is needed to record system audio.",
+  "native.invalidPcmFormat": "Invalid audio rate or channel count.",
+  "native.invalidPcmFrames": "Invalid 16-bit PCM audio or frame size.",
+  "native.pcmFormatChanged": "The audio format changed during the recording.",
+  "native.invalidQuality": "Invalid recording quality.",
+  "native.cannotConvert": "Cannot convert the audio: {reason}",
   "native.syncNotAvailable":
     "Sync is not available in this version of Sonolect.",
   "native.syncKeychainLinux":
@@ -904,6 +921,51 @@ export const en = {
   "native.syncStateFailed": "The sync state could not be saved.",
   "native.syncInterrupted": "Sync was interrupted.",
   "native.syncInvalidNote": "Invalid synced note.",
+  // Speaker detection
+  "studio.speakers.detect": "Detect speakers",
+  "studio.speakers.count": "Speakers",
+  "studio.speakers.auto": "Auto",
+  "studio.speakers.label": "Speaker {number}",
+  "studio.speakers.consent":
+    "Download the {size} speaker model? Your audio stays on this device.",
+  "studio.speakers.download": "Download",
+  "studio.speakers.notNow": "Not now",
+  "studio.speakers.downloading": "Downloading the speaker model… {progress}%",
+  "studio.speakers.keepOrReplace":
+    "Some segments already have names. Keep them or replace them?",
+  "studio.speakers.keep": "Keep names",
+  "studio.speakers.replace": "Replace names",
+  "studio.speakers.cancel": "Cancel",
+  "studio.speakers.detecting": "Detecting speakers… {progress}%",
+  "studio.speakers.found.one": "{count} speaker found.",
+  "studio.speakers.found.other": "{count} speakers found.",
+  "studio.speakers.noSpeech": "No speech was found in this recording.",
+  "studio.speakers.stale":
+    "Another transcript was opened, so no names were changed.",
+  "studio.speakers.legend": "Speakers in this transcript",
+  "studio.speakers.rename": "Rename {name} everywhere",
+  "studio.speakers.segments.one": "{count} segment",
+  "studio.speakers.segments.other": "{count} segments",
+  "studio.settings.speakerModelTitle": "Speaker model",
+  "studio.settings.speakerModelMeta": "Speaker detection · CPU",
+  "studio.settings.speakerModelReady": "The speaker model is on this computer.",
+  "studio.settings.speakerModelMissing":
+    "Download it once to detect who speaks in a recording. Your audio stays on this device.",
+  "studio.settings.speakerModelInstall": "Download speaker model",
+  "studio.settings.speakerModelReinstall": "Reinstall speaker model",
+  "studio.settings.speakerModelDownloaded":
+    "Speaker model downloaded and checksum verified.",
+  "native.speakersCancelled": "Speaker detection was cancelled.",
+  "native.speakersBusy": "Speaker detection is already running.",
+  "native.speakerCount": "Choose between 2 and 8 speakers.",
+  "native.speakerModelMissing": "Download the speaker model first.",
+  "native.speakerModelDamaged":
+    "The speaker model was damaged and has been removed. Download it again.",
+  "native.speakersStillRecording":
+    "Finish the recording before detecting speakers.",
+  "native.speakerModelUnreadable": "Cannot read the speaker model: {reason}",
+  "native.speakerModelLoad": "Cannot load the speaker model: {reason}",
+  "native.speakerModelFailed": "The speaker model failed: {reason}",
 } as const;
 
 export type LocaleKeys = keyof typeof en;

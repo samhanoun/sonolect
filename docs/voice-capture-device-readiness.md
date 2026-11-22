@@ -1,41 +1,47 @@
 # Voice capture device-readiness E2E checklist
 
-This checklist complements CI Playwright coverage that mocks browser media APIs. CI proves the app can request audio, drive `MediaRecorder`, keep real Blob bytes, append the capture to the transcript editor, and surface unsupported-device errors without requiring microphone hardware.
+This checklist complements the Playwright suite that CI runs in `apps/desktop/e2e`. The suite runs the Studio with a stand-in for the app's native side and Chromium's synthetic microphone. It checks recording, live text, saved recordings and error messages without microphone hardware. It also checks that the browser preview refuses to record. On a machine that cannot use port 5174 or Playwright's own Chromium, set `SONOLECT_E2E_PORT` and `SONOLECT_E2E_CHROMIUM` before `pnpm --filter @sonolect/desktop e2e`.
 
-Use this manual harness for real microphones, OS permission prompts, and mobile devices.
+Use this manual pass for real microphones, system permission prompts and mobile devices.
 
 ## Desktop hardware pass
 
+Run this pass in the desktop app, not in the browser preview. Only the app records and transcribes.
+
 Prerequisites:
 
-- Run from `apps/desktop` with a local browser-capable desktop: `pnpm dev --host 127.0.0.1 --port 5174 --strictPort`.
-- Optional local API: set `VITE_SONOLECT_API_URL=http://127.0.0.1:<api-port>` before launching Vite if you want backend audio-job upload coverage.
-- Optional desktop Whisper: configure `SONOLECT_DESKTOP_WHISPER_COMMAND_ARGS` and verify the model path in Settings.
+- Start the app from the repository with `pnpm --filter @sonolect/desktop tauri dev`, or install a build from CI ([release.md](release.md)).
+- For local speech, open Settings and select `Install local model` under Local Whisper, or enter the path of a Whisper `.bin` file you already have.
 
 Steps:
 
-1. Open `http://127.0.0.1:5174` in Chrome and confirm the top bar shows either `offline` or `API ready` according to your environment.
-2. Open Settings.
-   - Toggle Local and Cloud privacy modes.
-   - Select `English` and one non-English STT language.
-   - If testing Whisper, enter model path/name/command args, save, and validate the status text.
-3. Click `Record now`.
-   - Accept the OS/browser microphone permission prompt.
-   - Confirm the recorder pill appears, waveform animates, and elapsed time increments.
-4. Speak a deterministic phrase such as: `Sonolect hardware readiness test, one two three.`
-5. Click `Stop`.
-   - Confirm the recorder transitions through processing and lands on `Done`.
-   - Confirm the mic indicator disappears and the OS/browser privacy indicator turns off.
-   - Confirm the recent capture audio player appears and plays audible audio.
-6. Confirm transcript behavior:
-   - Offline/no Whisper: transcript editor receives an audio metadata marker with duration, MIME type, and size.
-   - Local API: network/devtools show `POST /audio/jobs` followed by `POST /audio/jobs/{id}/audio` with the captured audio MIME type.
-   - Desktop Whisper: deterministic phrase text appears with timestamped segments.
-7. Use keyboard capture controls:
-   - Press `Cmd/Ctrl+Shift+M` once to start and again to stop.
-   - Hold `Cmd/Ctrl+Shift+V` to push-to-talk and release to stop.
-8. Click the recorder close/reset button and verify a second capture can be started.
-9. Revoke microphone permission in the browser/site settings, reload, and verify `Record now` surfaces a clear recorder error rather than silently failing.
+1. Open Transcribe. Set Processing mode to `Local only`. Under Recognition, pick `English` or one other language.
+2. Open Settings › Microphone. Pick the input, select `Test microphone` and check that the level moves with your voice. The test records nothing.
+3. Open Transcribe and select `Record to add text`. Accept the system's microphone prompt if one appears. Check that the dock says `Listening…` and that its clock runs.
+4. Speak a fixed phrase such as `Sonolect hardware readiness test, one two three.`
+5. Select `Stop`. Check that the dock goes through `Processing…` to `Your words are ready` and that the phrase appears in the editor. Check that the system's microphone indicator turns off.
+6. Open Library. Check that the recording is listed and plays back.
+7. Use the keyboard. Press `Ctrl+Shift+M` (`Cmd+Shift+M` on macOS) once to start and again to stop. Hold `Ctrl+Shift+V` (`Cmd+Shift+V` on macOS) to talk and release it to stop.
+8. Select `Dismiss` on the dock and check that a second recording starts.
+9. Turn off microphone access for the app in the system privacy settings, then start a recording. Check that the dock shows `Recording needs attention` with a reason, instead of failing silently.
+
+## Browser preview
+
+`pnpm --filter @sonolect/desktop dev` serves the same Studio in a browser, at `http://localhost:5173` by default. It is a developer tool. It is not shipped or hosted, and it has no speech engine:
+
+- Starting a dictation, from a button or a key, shows `The browser preview cannot transcribe speech.` in the dock. The microphone does not open and nothing is sent.
+- Importing an audio file shows `The browser preview cannot transcribe audio files.` The file is not read and nothing is sent.
+- The Transcribe page says that it is the browser preview. Typing, editing and exporting text work there.
+
+One developer setup does transcribe, through a Sonolect API:
+
+1. Start Vite with `VITE_SONOLECT_API_URL=http://127.0.0.1:<api-port>`.
+2. Set Processing mode to `Cloud enabled` and keep `Local Whisper` as the speech model. The Transcribe page then no longer shows the browser preview notice.
+3. Record. On Stop, the preview sends the audio to `POST /v1/transcribe` on that API and the text to `POST /v1/polish`. If `/v1/transcribe` fails or returns no text, it falls back to `POST /audio/jobs` and `POST /audio/jobs/{id}/audio`. The API has those two routes only outside production (`NODE_ENV=development`) or with `SONOLECT_API_PREVIEW_ROUTES=1`; see [api.md](api.md#what-production-serves).
+
+With an online speech model, or in `Local only`, the preview refuses before it records, as above. If Processing mode changes to `Local only` while a recording runs, the preview drops that recording and says so.
+
+To check a microphone in the preview, use Settings › Microphone › `Test microphone`. It shows the level and records nothing. It works even while the dock still shows the refusal.
 
 ## Mobile device pass
 
@@ -66,3 +72,28 @@ Steps:
 - Screenshot or screen recording of recorder states: permission, recording, processing, done/error.
 - For API runs: request IDs/job IDs and audio MIME type/size.
 - For transcription runs: expected phrase and observed transcript.
+
+## High-quality recording pass (desktop app)
+
+CI covers the conversion maths (Rust unit tests) and the web side with a mocked desktop app. Use this pass in the packaged app on each platform, since only it shows what a real microphone, webview and playback device hand over.
+
+Prerequisites:
+
+- A packaged or `pnpm tauri dev` build, with the local speech model installed.
+- `ffprobe` (from ffmpeg) to read the saved files.
+- The captures folder: `com.sonolect.local/captures` in the user's local app-data directory.
+
+Steps:
+
+1. In Settings › Privacy & retention, choose `High quality (Opus, 48 kHz, stereo when the source has it)`. The Overview meter should read `48 kHz · stereo when available · on device`.
+2. Record a minute from the microphone in the Studio.
+   - While it records, the captures folder holds `{id}.wav` and `{id}.hq.opus`.
+   - Once it ends, only `{id}.opus` is left. `ffprobe {id}.opus` reports Opus at 48000 Hz; two channels on Windows with a stereo microphone, one on macOS and Linux (their webview reports no channel count).
+   - The transcript and its timings are as good as in speech quality.
+3. Choose `This computer's sound` in Settings › Microphone › Record from, play music with a clear stereo image, and record a minute with ten seconds of nothing playing in the middle.
+   - The saved `{id}.opus` is stereo at 48 kHz, and the quiet ten seconds are still there when played back. On Windows, try a playback device set to 44.1 kHz too.
+4. In the Library, press `Save audio` on both recordings. Each saves a `sonolect-recording-….opus` file that plays in another player. A recording made in speech quality saves a `.wav`.
+5. Start a long recording and end the app from the task manager. After relaunch, choose `Compress saved recordings` (or finish another recording): the leftover `{id}.hq.opus` becomes `{id}.opus`. The Library still plays the recording, from its WAV, which stays beside the Opus file because the crash cut the Opus file up to a second earlier; `Save audio` saves the Opus file. Pressing `Compress saved recordings` again says that every saved recording is already compressed, and answers at once.
+6. Dictation shortcuts, with Record from set to `This computer's sound`:
+   - With Sonolect in front, press `Ctrl+Shift+M` (`Cmd+Shift+M` on macOS): the dock says `Recording computer sound…`. Press it again to stop. Hold `Ctrl+Shift+V` (`Cmd+Shift+V` on macOS) for the same with hold-to-talk.
+   - With another app in front, the same shortcuts open the microphone, and the text is pasted into that app.

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { submitCapturedAudio, submitCapturedAudioCloud } from "./voiceApi";
+import {
+  localUnavailableMessage,
+  submitCapturedAudio,
+  submitCapturedAudioCloud,
+} from "./voiceApi";
 import { createDesktopWhisperRequest } from "./desktopWhisper";
 import { polishDictation } from "./wisprWorkflow";
 
@@ -26,10 +30,20 @@ describe("local processing boundary", () => {
         const result = await submit(audio, metadata, options);
         assert.equal(requests, 0);
         assert.equal(result.status, "offline");
-        assert.match(result.message ?? "", /local|model/i);
+        // Says why nothing was transcribed: here, outside the app, that the
+        // browser preview has no speech engine.
+        assert.equal(result.message, localUnavailableMessage());
       });
     }
   }
+
+  it("explains a local failure in the app and in the browser preview", () => {
+    assert.match(localUnavailableMessage(true), /installed model/);
+    assert.match(
+      localUnavailableMessage(false),
+      /browser preview cannot transcribe.*desktop app/,
+    );
+  });
 
   it("rechecks consent after waiting for local inference", async () => {
     let allowed = true;

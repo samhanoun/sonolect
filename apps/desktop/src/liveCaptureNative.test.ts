@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { LiveCaptureTransport } from "./liveCapture";
 import {
+  captureAppendHeaders,
+  captureChannels,
   loadCaptureSource,
+  openPcmSource,
   recordLive,
   recordSystemAudio,
   saveCaptureSource,
@@ -345,5 +348,285 @@ describe("the choice of what to record", () => {
     };
     assert.equal(loadCaptureSource(broken), "microphone");
     saveCaptureSource("system", broken);
+  });
+});
+
+/** A microphone stream whose track reports `channelCount`, as Chromium does. */
+function microphoneStream(channelCount?: number) {
+  return {
+    getAudioTracks: () => [
+      { getSettings: () => (channelCount ? { channelCount } : {}) },
+    ],
+  } as unknown as MediaStream;
+}
+
+const audioNode = () => ({ connect() {}, disconnect() {} });
+
+/** An audio context that records how it was made and used. */
+class FakeContext {
+  static made: FakeContext[] = [];
+  /** Rates the webview refuses, as some refuse 48 kHz. */
+  static refused = new Set<number>();
+  static worklets = true;
+  readonly sampleRate: number;
+  state = "running";
+  readonly destination = audioNode();
+  readonly modules: string[] = [];
+  processorArgs: number[] = [];
+  processor:
+    | {
+        onaudioprocess:
+          | ((event: {
+              inputBuffer: { getChannelData: (index: number) => Float32Array };
+            }) => void)
+          | null;
+      }
+    | undefined;
+  readonly audioWorklet = {
+    addModule: async (url: string) => {
+      this.modules.push(url);
+      if (!FakeContext.worklets) throw new Error("no audio worklet");
+    },
+  };
+
+  constructor(options?: { sampleRate?: number }) {
+    if (options?.sampleRate && FakeContext.refused.has(options.sampleRate))
+      throw new Error("NotSupportedError");
+    this.sampleRate = options?.sampleRate ?? 44100;
+    FakeContext.made.push(this);
+  }
+
+  createMediaStreamSource() {
+    return audioNode();
+  }
+
+  createGain() {
+    return { ...audioNode(), gain: { value: 1 } };
+  }
+
+  createScriptProcessor(size: number, inputs: number, outputs: number) {
+    this.processorArgs = [size, inputs, outputs];
+    const processor = { ...audioNode(), onaudioprocess: null };
+    this.processor = processor;
+    return processor;
+  }
+
+  async resume() {}
+
+  async close() {
+    this.state = "closed";
+  }
+}
+
+class FakeWorkletNode {
+  static made: FakeWorkletNode[] = [];
+  readonly port: {
+    onmessage: ((event: { data: Float32Array }) => void) | null;
+  } = { onmessage: null };
+
+  constructor(
+    readonly context: FakeContext,
+    readonly name: string,
+    readonly options: Record<string, unknown>,
+  ) {
+    FakeWorkletNode.made.push(this);
+  }
+
+  connect() {}
+  disconnect() {}
+}
+
+/** Runs `body` with the fake audio classes in place of the webview's. */
+async function withFakeAudio(body: () => Promise<void>) {
+  FakeContext.made = [];
+  FakeContext.refused = new Set();
+  FakeContext.worklets = true;
+  FakeWorkletNode.made = [];
+  Object.assign(globalThis, {
+    AudioContext: FakeContext,
+    AudioWorkletNode: FakeWorkletNode,
+  });
+  try {
+    await body();
+  } finally {
+    Reflect.deleteProperty(globalThis, "AudioContext");
+    Reflect.deleteProperty(globalThis, "AudioWorkletNode");
+  }
+}
+
+type Block = {
+  block: number[];
+  sampleRate: number;
+  channels: number | undefined;
+};
+
+describe("reading the microphone", () => {
+  it("records two channels only in high quality and from a stereo microphone", () => {
+    assert.equal(captureChannels(microphoneStream(2)), 1);
+    assert.equal(captureChannels(microphoneStream(2), "speech"), 1);
+    assert.equal(captureChannels(microphoneStream(2), "high"), 2);
+    assert.equal(captureChannels(microphoneStream(1), "high"), 1);
+    // WebKit reports no channel count: its microphones record mono.
+    assert.equal(captureChannels(microphoneStream(), "high"), 1);
+    assert.equal(captureChannels({} as MediaStream, "high"), 1);
+  });
+
+  it("reads speech at 16 kHz in mono, whatever the microphone has", async () => {
+    await withFakeAudio(async () => {
+      const blocks: Block[] = [];
+      const source = await openPcmSource(
+        microphoneStream(2),
+        (block, sampleRate, channels) =>
+          blocks.push({ block: [...block], sampleRate, channels }),
+      );
+      assert.equal(FakeContext.made[0]!.sampleRate, 16000);
+      assert.equal(source.sampleRate, 16000);
+      assert.equal(source.channels, 1);
+      assert.equal(source.kind, "worklet");
+      assert.deepEqual(FakeWorkletNode.made[0]!.options, {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        channelCount: 1,
+        channelCountMode: "explicit",
+        processorOptions: { channels: 1 },
+      });
+      FakeWorkletNode.made[0]!.port.onmessage!({
+        data: Float32Array.from([0.5, -0.5]),
+      });
+      assert.deepEqual(blocks, [
+        { block: [0.5, -0.5], sampleRate: 16000, channels: 1 },
+      ]);
+      await source.close();
+      assert.equal(FakeContext.made[0]!.state, "closed");
+      assert.equal(FakeWorkletNode.made[0]!.port.onmessage, null);
+    });
+  });
+
+  it("reads high quality at 48 kHz with the microphone's two channels", async () => {
+    await withFakeAudio(async () => {
+      const blocks: Block[] = [];
+      const source = await openPcmSource(
+        microphoneStream(2),
+        (block, sampleRate, channels) =>
+          blocks.push({ block: [...block], sampleRate, channels }),
+        "high",
+      );
+      assert.equal(FakeContext.made[0]!.sampleRate, 48000);
+      assert.equal(source.sampleRate, 48000);
+      assert.equal(source.channels, 2);
+      assert.deepEqual(FakeContext.made[0]!.modules, [
+        "/pcm-capture.worklet.js",
+      ]);
+      assert.equal(FakeWorkletNode.made[0]!.options.channelCount, 2);
+      assert.deepEqual(FakeWorkletNode.made[0]!.options.processorOptions, {
+        channels: 2,
+      });
+      FakeWorkletNode.made[0]!.port.onmessage!({
+        data: Float32Array.from([0.5, -0.5, 0.25, -0.25]),
+      });
+      assert.deepEqual(blocks, [
+        { block: [0.5, -0.5, 0.25, -0.25], sampleRate: 48000, channels: 2 },
+      ]);
+    });
+  });
+
+  it("takes the webview's own rate when it refuses 48 kHz", async () => {
+    await withFakeAudio(async () => {
+      FakeContext.refused.add(48000);
+      const source = await openPcmSource(microphoneStream(1), () => {}, "high");
+      assert.equal(FakeContext.made.length, 1);
+      assert.equal(source.sampleRate, 44100);
+      assert.equal(source.channels, 1);
+    });
+  });
+
+  it("interleaves the script processor's channels when there is no audio worklet", async () => {
+    await withFakeAudio(async () => {
+      FakeContext.worklets = false;
+      const blocks: Block[] = [];
+      const source = await openPcmSource(
+        microphoneStream(2),
+        (block, sampleRate, channels) =>
+          blocks.push({ block: [...block], sampleRate, channels }),
+        "high",
+      );
+      assert.equal(source.kind, "processor");
+      const context = FakeContext.made[0]!;
+      assert.deepEqual(context.processorArgs, [4096, 2, 2]);
+      const left = Float32Array.from([0.5, 0.25]);
+      const right = Float32Array.from([-0.5, -0.25]);
+      context.processor!.onaudioprocess!({
+        inputBuffer: { getChannelData: (index) => (index ? right : left) },
+      });
+      assert.deepEqual(blocks, [
+        { block: [0.5, -0.5, 0.25, -0.25], sampleRate: 48000, channels: 2 },
+      ]);
+      // The block is a copy: the webview reuses its buffers.
+      left[0] = 0;
+      assert.equal(blocks[0]!.block[0], 0.5);
+      await source.close();
+      assert.equal(context.processor!.onaudioprocess, null);
+    });
+  });
+
+  it("says the rate and channels of a high-quality piece, and nothing for speech", () => {
+    assert.deepEqual(captureAppendHeaders("17-1"), {
+      "x-sonolect-capture": "17-1",
+    });
+    assert.deepEqual(
+      captureAppendHeaders("17-1", { rate: 44100, channels: 2 }),
+      {
+        "x-sonolect-capture": "17-1",
+        "x-sonolect-rate": "44100",
+        "x-sonolect-channels": "2",
+      },
+    );
+  });
+
+  it("opens the microphone for the recording's quality and sends what it gives", async () => {
+    const { transport, calls } = fakeTransport();
+    const formats: unknown[] = [];
+    const sending: LiveCaptureTransport = {
+      ...transport,
+      begin: async (settings) => {
+        calls.push(`begin ${settings.quality}`);
+        return "17-1";
+      },
+      append: async (captureId, pcm, format) => {
+        formats.push(format);
+        return transport.append(captureId, pcm, format);
+      },
+    };
+    const qualities: unknown[] = [];
+    const open = async (
+      _stream: MediaStream,
+      onBlock: (block: Float32Array, rate: number, channels?: number) => void,
+      quality?: string,
+    ) => {
+      qualities.push(quality);
+      setTimeout(() => onBlock(new Float32Array(48000 * 2), 48000, 2), 0);
+      return {
+        sampleRate: 48000,
+        channels: 2,
+        kind: "worklet" as const,
+        close: async () => {},
+      };
+    };
+    const recording = await recordLive(
+      stream,
+      { quality: "high" },
+      {},
+      sending,
+      open,
+      500,
+    );
+    assert.ok(recording);
+    await recording.finish();
+    assert.deepEqual(qualities, ["high"]);
+    assert.equal(calls[1], "begin high");
+    assert.deepEqual(formats, [
+      { rate: 48000, channels: 2 },
+      { rate: 48000, channels: 2 },
+    ]);
   });
 });

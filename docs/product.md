@@ -1,6 +1,6 @@
 # Sonolect Product Specification
 
-Last updated: 2026-11-20
+Last updated: 2026-11-22
 
 ---
 
@@ -27,10 +27,12 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 ### Voice Capture
 
 - System and microphone audio capture with device selection. On desktop, Settings › Microphone picks the input and tests its level without recording.
-- This computer's sound as the source of a recording on desktop (a meeting, a video): Settings › Microphone › Record from. On Windows it needs nothing else, since the app records the default playback device through WASAPI loopback. On Linux it needs PulseAudio or PipeWire with `pactl` and `parec`; on macOS it needs the BlackHole audio driver and `ffmpeg`. The choice is only offered where it can work. Dictation with the hotkeys or the bubble always uses the microphone.
+- This computer's sound as the source of a recording on desktop (a meeting, a video): Settings › Microphone › Record from. On Windows it needs nothing else, since the app records the default playback device through WASAPI loopback. On Linux it needs PulseAudio or PipeWire with `pactl` and `parec`; on macOS it needs the BlackHole audio driver and `ffmpeg`. The choice is only offered where it can work. A dictation shortcut pressed while Sonolect is in front starts a Studio recording, which follows Record from. Dictation into other apps and the bubble always use the microphone: what is pasted there is your own words.
 - Real-time waveform visualisation, driven by the microphone level
 - Recordings of up to four hours on desktop. The audio is written to disk while you speak, so nothing is lost if the app stops, and it is transcribed at each pause.
-- Recordings are stored at 16 kHz mono, the format the speech engine works with, as WAV or as Ogg Opus at about a tenth of the size (Settings › Privacy & retention). Compressed recordings play back from the Opus file itself, or as WAV where the system cannot play Opus, and can be transcribed again.
+- Recordings are stored at 16 kHz mono, the format the speech engine works with, as WAV or as Ogg Opus at about a tenth of the size (Settings › Privacy & retention › Save recordings as). Compressed recordings play back from the Opus file itself, or as WAV where the system cannot play Opus, and can be transcribed again.
+- High quality, the third choice there, keeps live recordings (microphone and computer sound) as 48 kHz Ogg Opus, in stereo when the source has it: 96 kbit/s in stereo, 64 kbit/s in mono, about 175 MB for four hours of stereo. The speech engine still gets 16 kHz mono, written beside it as a WAV that is deleted when the recording ends. Should the 48 kHz copy fail to be written (a full disk, say), the recording goes on and is kept in speech quality. Microphone voice processing stays on. Imported files stay in speech quality. Online speech models still receive only 16 kHz mono; the high-quality audio never leaves the device.
+- Save audio, on each recording in the Library, downloads the file the recording is kept as (its Opus file, or its WAV), the way a transcript is exported. It is read from the device; nothing is uploaded. A note that came through sync has no audio here, so it has no Save audio.
 
 ### Dictate Anywhere
 
@@ -48,7 +50,8 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 
 - Inline text corrections with undo/redo
 - Segment merge, split, and reorder
-- Speaker label assignment and colour coding
+- Speaker label assignment and colour coding, with a legend that renames a speaker on every segment at once
+- On-device speaker detection on desktop: **Detect speakers** labels the segments of a saved recording Speaker 1, Speaker 2 and so on, in one undo step. The number of speakers is found automatically or chosen (2 to 8), and names you typed are kept unless you choose to replace them. Its 28 MB model is downloaded once, only after you agree, and the audio never leaves the device. A note that came through sync has no audio here, so it is not offered there.
 - Timestamp-linked playback (click a segment to jump to audio)
 
 ### Internationalization (i18n)
@@ -62,7 +65,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 - **No telemetry by default** — opt-in analytics only
 - Configurable audio retention (auto-delete after N days or manual purge)
 - One-click "Delete all my data" action
-- All processing local. Note sync, when the user turns it on, sends only end-to-end encrypted notes
+- All processing local unless the user turns on a cloud feature: note sync, which sends only end-to-end encrypted notes, or online editing with their own provider key, which asks before each note is sent unless the user turns on Send without asking (never in Ephemeral)
 
 ### Sync Between Your Devices
 
@@ -76,6 +79,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 
 - Plain text, Markdown, JSON
 - Subtitle formats: SRT, VTT
+- A recording's audio, as the Opus or WAV file it is kept as (desktop Library › Save audio)
 - Clipboard copy with formatting preserved
 - Future: PDF, DOCX, direct integrations
 
@@ -96,14 +100,14 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 
 ### Privacy by Default
 
-- Zero network calls on first launch
+- Zero network calls on first launch. The speech and speaker models are downloaded only when you ask for them, and each download must match the size and SHA-256 pinned in the app.
 - Audio and transcript data stored in user-local directories with OS-level permissions
 - Note sync is end-to-end encrypted: the server cannot read content, and sees only ciphertext, sizes, times, IP addresses and opaque ids
 
 ### Reliability
 
 - Crash-recovery: unsaved sessions auto-persist every 5 seconds
-- Graceful degradation when STT model files are missing or corrupt
+- Graceful degradation when model files are missing or corrupt: a speaker model that no longer matches its checksum is removed, and its download is offered again
 
 ---
 
@@ -129,7 +133,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 | **Open architecture**  | Monorepo, pluggable STT engines    | Proprietary        | Proprietary    | Proprietary                          |
 | **Price**              | Free local tier; paid cloud add-on | Subscription       | Subscription   | Free (Apple only)                    |
 
-**Key differentiator:** Sonolect is the only tool that combines **production-grade transcription editing** with **complete offline operation** and **zero-trust privacy defaults** — no account required, and nothing leaves the device unless the user turns on a cloud feature, such as end-to-end encrypted sync.
+**Key differentiator:** Sonolect is the only tool that combines **production-grade transcription editing** with **complete offline operation** and **zero-trust privacy defaults**. No account is required, and no data leaves the device unless the user turns on a cloud feature, such as end-to-end encrypted sync or online editing with their own provider key.
 
 ---
 

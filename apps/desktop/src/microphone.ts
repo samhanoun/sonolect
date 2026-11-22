@@ -4,6 +4,9 @@
  * chosen one is unplugged).
  */
 
+import type { CaptureQuality } from "./captureStorage";
+import type { RecordingState } from "./store/appStore";
+
 /** The saved microphone; absent or empty means the system default. */
 export const MIC_DEVICE_KEY = "sonolect.micDeviceId";
 
@@ -69,13 +72,26 @@ export async function listMicrophones(
   return microphones;
 }
 
-/** What to ask the browser for: the chosen microphone, or any. */
+/**
+ * What to ask the browser for: the chosen microphone, or any. A
+ * high-quality recording also asks for 48 kHz and two channels where the
+ * microphone has them. Echo cancellation, noise suppression and automatic
+ * gain stay as the browser sets them (on), as for every recording.
+ */
 export function microphoneConstraints(
   deviceId: string,
+  quality: CaptureQuality = "speech",
 ): MediaStreamConstraints {
-  return deviceId
-    ? { audio: { deviceId: { exact: deviceId } } }
-    : { audio: true };
+  const device = deviceId ? { deviceId: { exact: deviceId } } : {};
+  if (quality === "high")
+    return {
+      audio: {
+        ...device,
+        channelCount: { ideal: 2 },
+        sampleRate: { ideal: 48000 },
+      },
+    };
+  return deviceId ? { audio: device } : { audio: true };
 }
 
 function deviceIsGone(error: unknown): boolean {
@@ -97,21 +113,24 @@ export type OpenedMicrophone = {
 export async function openMicrophone(
   deviceId: string,
   devices: Pick<MediaDevices, "getUserMedia"> = navigator.mediaDevices,
+  quality: CaptureQuality = "speech",
 ): Promise<OpenedMicrophone> {
   if (!deviceId)
     return {
-      stream: await devices.getUserMedia(microphoneConstraints("")),
+      stream: await devices.getUserMedia(microphoneConstraints("", quality)),
       fellBack: false,
     };
   try {
     return {
-      stream: await devices.getUserMedia(microphoneConstraints(deviceId)),
+      stream: await devices.getUserMedia(
+        microphoneConstraints(deviceId, quality),
+      ),
       fellBack: false,
     };
   } catch (error) {
     if (!deviceIsGone(error)) throw error;
     return {
-      stream: await devices.getUserMedia(microphoneConstraints("")),
+      stream: await devices.getUserMedia(microphoneConstraints("", quality)),
       fellBack: true,
     };
   }
@@ -135,4 +154,18 @@ export function meterPosition(level: number): number {
   if (!(level > 0)) return 0;
   const decibels = 20 * Math.log10(Math.min(1, level));
   return Math.max(0, Math.min(1, (decibels + 60) / 60));
+}
+
+/**
+ * Whether a dictation keeps the microphone test from starting. One that is
+ * under way always does. In the app, one that failed also does until its
+ * message is dismissed. The browser preview refuses before the microphone
+ * opens, so its refusal leaves the test free.
+ */
+export function micTestBlocked(
+  recordingState: RecordingState,
+  native: boolean,
+): boolean {
+  if (recordingState === "idle" || recordingState === "completed") return false;
+  return recordingState !== "error" || native;
 }

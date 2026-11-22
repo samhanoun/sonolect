@@ -11,6 +11,7 @@ import {
 import {
   listMicrophones,
   meterPosition,
+  micTestBlocked,
   microphoneName,
   openMicrophone,
   type Microphone,
@@ -88,7 +89,7 @@ export function MicrophoneSettings() {
 
   // A test never outlives the page, and never competes with a dictation.
   useEffect(() => () => void stopTest(), [stopTest]);
-  const busy = recordingState !== "idle" && recordingState !== "completed";
+  const busy = micTestBlocked(recordingState, isTauriRuntime());
   useEffect(() => {
     if (busy) void stopTest();
   }, [busy, stopTest]);

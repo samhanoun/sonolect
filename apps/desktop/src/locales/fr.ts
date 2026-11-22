@@ -299,6 +299,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.signal.listening": "Écoute",
   "studio.signal.ready": "Prêt",
   "studio.signal.meta": "16 kHz · mono · sur l'appareil",
+  "studio.signal.metaHigh": "48 kHz · stéréo si disponible · sur l'appareil",
   "studio.overview.eyebrow": "Un peu moins de saisie",
   "studio.overview.title": "Faites de la place à vos idées",
   "studio.overview.subtitle":
@@ -347,6 +348,10 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.transcribe.exportFormat": "Format d'export",
   "studio.transcribe.export": "Exporter la transcription",
   "studio.transcribe.exportTitle": "Transcription Sonolect",
+  "studio.transcribe.previewNotice":
+    "Aperçu dans le navigateur. Vous pouvez saisir, modifier et exporter du texte ici. L'enregistrement et la transcription nécessitent l'application de bureau Sonolect.",
+  "studio.transcribe.previewImport":
+    "L'aperçu dans le navigateur ne peut pas transcrire de fichiers audio. Ouvrez ce fichier dans l'application de bureau Sonolect. Rien n'a été envoyé.",
   "studio.export.txt": "Texte brut (.txt)",
   "studio.export.md": "Markdown (.md)",
   "studio.export.srt": "Sous-titres (.srt)",
@@ -415,7 +420,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.library.emptyTitle": "Tout commence ici.",
   "studio.library.tryOther": "Essayez un autre mot.",
   "studio.library.emptyBody":
-    "Vos enregistrements apparaîtront ici après une dictée ou un import audio dans l'application Windows.",
+    "Vos enregistrements apparaîtront ici après une dictée ou un import audio dans l'application de bureau.",
   "studio.library.createFirst": "Créer votre premier enregistrement",
   "studio.library.retryNeeded": "À relancer",
   "studio.library.savedOnDevice": "Enregistré sur l'appareil",
@@ -493,7 +498,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.settings.storageHint":
     "Les enregistrements peuvent durer jusqu'à quatre heures et sont conservés sur cet appareil pendant la durée choisie ci-dessus. Les clés API utilisent le Gestionnaire d'identification Windows.",
   "studio.settings.previewNotice":
-    "Ceci est l'aperçu dans le navigateur. L'installation des modèles et la reconnaissance locale fonctionnent dans l'application Windows.",
+    "Ceci est l'aperçu dans le navigateur. L'installation des modèles et la reconnaissance locale fonctionnent dans l'application de bureau Sonolect.",
   "studio.privacy.title": "Confidentialité et conservation",
   "studio.privacy.subtitle":
     "En mode Local uniquement, les enregistrements et les transcriptions ne quittent jamais cet appareil.",
@@ -509,7 +514,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.privacy.keptForever":
     "Les enregistrements sont conservés jusqu'à ce que vous les supprimiez.",
   "studio.privacy.savedPreview":
-    "Enregistré. Le réglage s'applique dans l'application Windows.",
+    "Enregistré. Le réglage s'applique dans l'application de bureau.",
   "studio.privacy.savedDeleted.one":
     "Enregistré. {count} enregistrement de plus de {period} a été supprimé.",
   "studio.privacy.savedDeleted.other":
@@ -627,7 +632,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.models.browse": "Parcourir les modèles",
   "studio.models.removeKey": "Supprimer la clé enregistrée",
   "studio.models.previewNotice":
-    "Aperçu dans le navigateur. Ouvrez l'application Windows pour enregistrer des clés et utiliser la reconnaissance native.",
+    "Aperçu dans le navigateur. La reconnaissance locale fonctionne dans l'application de bureau Sonolect. L'enregistrement des clés API pour les modèles en ligne ne fonctionne pour l'instant que dans l'application Windows.",
   "studio.models.localTitle": "Vous préférez rester en local\u202f?",
   "studio.models.localBody":
     "Whisper fonctionne sur votre ordinateur. Sans clé API. Sans compte. Sans envoi d'audio.",
@@ -646,7 +651,7 @@ export const fr: Record<LocaleKeys, string> = {
     "OpenCode Zen est disponible pour la réécriture de texte. Son API publique ne propose pas actuellement de modèles vocaux dédiés.",
   "provider.name.local": "Whisper local",
   "provider.previewOnly":
-    "Ouvrez l'application Windows pour utiliser les clés sécurisées et la reconnaissance native. Cette fenêtre est un aperçu dans le navigateur.",
+    "Cette fenêtre est un aperçu dans le navigateur. La reconnaissance locale fonctionne dans l'application de bureau Sonolect. Les clés API enregistrées ne fonctionnent pour l'instant que dans l'application Windows.",
   "provider.cloudRequired":
     "Activez le traitement cloud avant d'envoyer de l'audio ou du texte en ligne.",
   "provider.cloudCancelled": "Le traitement cloud a été annulé.",
@@ -682,7 +687,9 @@ export const fr: Record<LocaleKeys, string> = {
   "voice.localUnavailableApp":
     "Transcription locale indisponible. Vérifiez le modèle installé dans Réglages. Aucun audio n'a été envoyé.",
   "voice.localUnavailablePreview":
-    "La transcription locale fonctionne dans l'application Windows. Cet aperçu dans le navigateur n'a envoyé aucun audio.",
+    "L'aperçu dans le navigateur ne peut pas transcrire la parole. Utilisez l'application de bureau Sonolect. Cet enregistrement n'a été ni conservé ni envoyé.",
+  "voice.previewCannotTranscribe":
+    "L'aperçu dans le navigateur ne peut pas transcrire la parole. Utilisez l'application de bureau Sonolect pour enregistrer et transcrire. Rien n'a été enregistré ni envoyé.",
   "voice.notConfigured":
     "La transcription en ligne n'est pas configurée. Votre enregistrement est resté sur cet appareil.",
   "voice.unreachable":
@@ -851,6 +858,7 @@ export const fr: Record<LocaleKeys, string> = {
     "L'enregistrement reste sur l'appareil qui l'a fait.",
   "studio.library.conflictOf": "Copie de conflit de la note du {date}",
   "studio.library.conflictCopy": "Copie de conflit",
+  "studio.library.saveAudio": "Enregistrer l'audio",
   "native.audioGone":
     "L'audio de cet enregistrement n'est plus sur cet appareil.",
   "native.recordingGone":
@@ -891,8 +899,10 @@ export const fr: Record<LocaleKeys, string> = {
   "toast.micFellBack":
     "Micro choisi introuvable. Enregistrement avec le micro par défaut du système.",
   "studio.storage.format": "Format des enregistrements",
-  "studio.storage.wav": "Qualité d'origine (WAV)",
-  "studio.storage.opus": "Compressé (Opus, 10× plus léger)",
+  "studio.storage.wav": "Qualité voix (WAV, 16 kHz mono)",
+  "studio.storage.opus": "Qualité voix, compressé (Opus, 10× plus léger)",
+  "studio.storage.hq":
+    "Haute qualité (Opus, 48 kHz, stéréo si la source l'est)",
   "studio.storage.compressNow": "Compresser les enregistrements",
   "studio.storage.compressing": "Compression…",
   "studio.storage.compressed.one":
@@ -908,7 +918,9 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.storage.savedOpus":
     "Les nouveaux enregistrements sont compressés une fois transcrits. Vous pouvez toujours les écouter et les transcrire à nouveau.",
   "studio.storage.savedWav":
-    "Les nouveaux enregistrements sont conservés en qualité d'origine. Ceux déjà compressés le restent.",
+    "Les nouveaux enregistrements sont conservés en WAV, en qualité voix. Ceux déjà compressés le restent.",
+  "studio.storage.savedHq":
+    "Les nouveaux enregistrements sont conservés en 48 kHz, en stéréo si la source l'est. Les fichiers importés et les anciens enregistrements sont compressés en qualité voix.",
   "studio.transcribe.liveLabel": "Entendu jusqu'ici",
   "capture.keptForRetry":
     "{error} L'enregistrement est dans votre Bibliothèque, où vous pouvez le transcrire à nouveau.",
@@ -924,7 +936,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.source.microphone": "Le microphone",
   "studio.source.system": "Le son de cet ordinateur",
   "studio.source.systemHint":
-    "Le bouton d'enregistrement capte ce qui est joué sur cet ordinateur, une réunion ou une vidéo par exemple. La dictée avec les raccourcis ou la bulle utilise toujours le microphone.",
+    "Le bouton d'enregistrement capte ce qui est joué sur cet ordinateur, une réunion ou une vidéo par exemple. Un raccourci de dictée pressé quand Sonolect est au premier plan fait de même. La dictée dans d'autres applications et la bulle utilisent toujours le microphone.",
   "studio.dock.recordingSystem": "Enregistrement du son de l'ordinateur…",
   "native.noPlaybackDevice": "Aucun périphérique de lecture à enregistrer.",
   "native.playbackFormat":
@@ -955,6 +967,13 @@ export const fr: Record<LocaleKeys, string> = {
   "native.systemAudioBusy": "Le son de l'ordinateur n'est pas disponible.",
   "native.ffmpegNeeded":
     "ffmpeg est nécessaire pour enregistrer le son de l'ordinateur.",
+  "native.invalidPcmFormat":
+    "Fréquence d'échantillonnage ou nombre de canaux non valide.",
+  "native.invalidPcmFrames": "Audio PCM 16 bits ou taille de trame non valide.",
+  "native.pcmFormatChanged":
+    "Le format audio a changé pendant l'enregistrement.",
+  "native.invalidQuality": "Qualité d'enregistrement non valide.",
+  "native.cannotConvert": "Impossible de convertir l'audio : {reason}",
   "native.syncNotAvailable":
     "La synchronisation n'est pas disponible dans cette version de Sonolect.",
   "native.syncKeychainLinux":
@@ -970,4 +989,56 @@ export const fr: Record<LocaleKeys, string> = {
     "L'état de la synchronisation n'a pas pu être enregistré.",
   "native.syncInterrupted": "La synchronisation a été interrompue.",
   "native.syncInvalidNote": "Note synchronisée non valide.",
+  // Speaker detection
+  "studio.speakers.detect": "Détecter les intervenants",
+  "studio.speakers.count": "Intervenants",
+  "studio.speakers.auto": "Auto",
+  "studio.speakers.label": "Intervenant {number}",
+  "studio.speakers.consent":
+    "Télécharger le modèle d'intervenants de {size}\u202f? Votre audio reste sur cet appareil.",
+  "studio.speakers.download": "Télécharger",
+  "studio.speakers.notNow": "Plus tard",
+  "studio.speakers.downloading":
+    "Téléchargement du modèle d'intervenants… {progress}\u00a0%",
+  "studio.speakers.keepOrReplace":
+    "Certains segments ont déjà un nom. Les garder ou les remplacer\u202f?",
+  "studio.speakers.keep": "Garder les noms",
+  "studio.speakers.replace": "Remplacer les noms",
+  "studio.speakers.cancel": "Annuler",
+  "studio.speakers.detecting": "Détection des intervenants… {progress}\u00a0%",
+  "studio.speakers.found.one": "{count} intervenant trouvé.",
+  "studio.speakers.found.other": "{count} intervenants trouvés.",
+  "studio.speakers.noSpeech":
+    "Aucune parole n'a été trouvée dans cet enregistrement.",
+  "studio.speakers.stale":
+    "Une autre transcription a été ouverte, aucun nom n'a donc été modifié.",
+  "studio.speakers.legend": "Intervenants de cette transcription",
+  "studio.speakers.rename": "Renommer {name} partout",
+  "studio.speakers.segments.one": "{count} segment",
+  "studio.speakers.segments.other": "{count} segments",
+  "studio.settings.speakerModelTitle": "Modèle d'intervenants",
+  "studio.settings.speakerModelMeta": "Détection des intervenants · CPU",
+  "studio.settings.speakerModelReady":
+    "Le modèle d'intervenants est sur cet ordinateur.",
+  "studio.settings.speakerModelMissing":
+    "Téléchargez-le une fois pour détecter qui parle dans un enregistrement. Votre audio reste sur cet appareil.",
+  "studio.settings.speakerModelInstall": "Télécharger le modèle d'intervenants",
+  "studio.settings.speakerModelReinstall":
+    "Réinstaller le modèle d'intervenants",
+  "studio.settings.speakerModelDownloaded":
+    "Modèle d'intervenants téléchargé et somme de contrôle vérifiée.",
+  "native.speakersCancelled": "La détection des intervenants a été annulée.",
+  "native.speakersBusy": "La détection des intervenants est déjà en cours.",
+  "native.speakerCount": "Choisissez entre 2 et 8 intervenants.",
+  "native.speakerModelMissing": "Téléchargez d'abord le modèle d'intervenants.",
+  "native.speakerModelDamaged":
+    "Le modèle d'intervenants était endommagé et a été supprimé. Téléchargez-le à nouveau.",
+  "native.speakersStillRecording":
+    "Terminez l'enregistrement avant de détecter les intervenants.",
+  "native.speakerModelUnreadable":
+    "Impossible de lire le modèle d'intervenants\u00a0: {reason}",
+  "native.speakerModelLoad":
+    "Impossible de charger le modèle d'intervenants\u00a0: {reason}",
+  "native.speakerModelFailed":
+    "Le modèle d'intervenants a échoué\u00a0: {reason}",
 };

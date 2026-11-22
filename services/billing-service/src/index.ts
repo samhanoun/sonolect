@@ -24,11 +24,14 @@ import type {
 import { trackUsageSchema, type TrackUsageInput } from "@sonolect/validation";
 import {
   BoundedMap,
+  disableEndpoints,
+  isProduction,
   isValidUserId,
   registerServiceSecurity,
   resolveListenOptions,
   resolveRequestUserId,
   type ServiceEnv,
+  type UnavailableEndpoint,
 } from "@sonolect/service-kit";
 
 const serviceName = "sonolect-billing-service";
@@ -36,6 +39,40 @@ const MAX_USAGE_EVENTS = 100_000;
 const MAX_TRACKED_USERS = 100_000;
 const MAX_REMEMBERED_STRIPE_EVENTS = 10_000;
 const STRIPE_WEBHOOK_BODY_LIMIT_BYTES = 1_048_576;
+
+/**
+ * Usage events, plans and the Stripe customer links live only in memory, so a
+ * restart loses them. Production refuses these endpoints instead of taking
+ * data it would lose. A non-2xx answer makes Stripe retry the event later
+ * instead of dropping it. The plan list is off too: no plan can be bought yet.
+ */
+const PRODUCTION_UNAVAILABLE: readonly UnavailableEndpoint[] = [
+  {
+    route: "GET /billing/plans",
+    message:
+      "No plan can be bought yet, so production does not publish the plan list.",
+  },
+  {
+    route: "GET /billing/users/:userId/quota",
+    message:
+      "Usage and plans are kept only in memory, so production does not report quotas.",
+  },
+  {
+    route: "POST /billing/usage",
+    message:
+      "Usage is kept only in memory, so production does not accept usage events.",
+  },
+  {
+    route: "POST /webhooks/stripe",
+    message:
+      "Plan changes are kept only in memory, so production does not accept Stripe events.",
+  },
+].map(({ route, message }) => ({
+  route,
+  statusCode: 501,
+  error: "not_implemented",
+  message,
+}));
 
 export const billingPlans: Record<SonolectPlan, BillingPlanDefinition> = {
   free: {
@@ -215,6 +252,7 @@ export async function createApp(
     // signature instead. The plan catalogue is public pricing information.
     publicRoutes: ["GET /billing/plans", "POST /webhooks/stripe"],
   });
+  if (isProduction(env)) disableEndpoints(app, PRODUCTION_UNAVAILABLE);
 
   app.get("/health", async () => ({ status: "ok", service: serviceName }));
   app.get("/billing/plans", async () => ({

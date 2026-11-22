@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   applyDictionary,
+  cleanParts,
   cleanTranscript,
   expandSnippets,
   modeNeedsModel,
@@ -210,5 +211,243 @@ describe("local refinement", () => {
       ),
       "• Book the room\n• Send the invite\n• Prepare slides",
     );
+  });
+});
+
+describe("cleanParts", () => {
+  const DICTIONARY = [
+    { id: "d1", spoken: "new york", replacement: "New York" },
+    { id: "d2", spoken: "sam lect", replacement: "Sonolect" },
+    { id: "d3", spoken: "cube", replacement: "Kube" },
+  ];
+  const SNIPPETS = [
+    { id: "s1", trigger: "insert my address", body: "1 Main Street, Paris" },
+    { id: "s2", trigger: "sign off", body: "Best, Sam" },
+  ];
+  const CONTEXT = { dictionary: DICTIONARY, snippets: SNIPPETS };
+
+  it("keeps a sentence going into the next part", () => {
+    assert.deepEqual(
+      cleanParts(["i went to the store and", "bought some milk"]),
+      [
+        { first: 0, last: 0, text: "I went to the store and" },
+        { first: 1, last: 1, text: "bought some milk." },
+      ],
+    );
+    assert.deepEqual(
+      cleanParts(["we start now.", "then we stop"]).map((run) => run.text),
+      ["We start now.", "Then we stop."],
+    );
+    assert.deepEqual(
+      cleanParts(["¿qué tal?", "¿bien?"], { language: "es-ES" }).map(
+        (run) => run.text,
+      ),
+      ["¿Qué tal?", "¿Bien?"],
+    );
+  });
+
+  it("cleans parts that a phrase spans as one run", () => {
+    assert.deepEqual(
+      cleanParts(["we moved to new", "york last year"], CONTEXT),
+      [{ first: 0, last: 1, text: "We moved to New York last year." }],
+    );
+    assert.deepEqual(
+      cleanParts(["please", "insert", "my", "address", "thanks"], CONTEXT),
+      [
+        { first: 0, last: 0, text: "Please" },
+        { first: 1, last: 3, text: "1 Main Street, Paris" },
+        { first: 4, last: 4, text: "thanks." },
+      ],
+    );
+    // A repeated word and a two-word filler said across two parts.
+    assert.deepEqual(cleanParts(["i think the", "the plan works"]), [
+      { first: 0, last: 1, text: "I think the plan works." },
+    ]);
+    assert.deepEqual(
+      cleanParts(["c'est du", "coup, réglé"], { language: "fr-FR" }),
+      [{ first: 0, last: 1, text: "C'est réglé." }],
+    );
+  });
+
+  it("cleans together what spans more words than the quick pass sees", () => {
+    // Fillers sit between the two copies of a repeated word.
+    assert.deepEqual(cleanParts(["so the", "um uh um the plan is ready"]), [
+      { first: 0, last: 1, text: "So the plan is ready." },
+    ]);
+    assert.deepEqual(
+      cleanParts(["creo que el", "eh eh eh el plan"], { language: "es-ES" }),
+      [{ first: 0, last: 1, text: "Creo que el plan." }],
+    );
+    // A phrase that overlaps itself, paired from far before the boundary.
+    const laugh = {
+      dictionary: [{ id: "d1", spoken: "ha ha", replacement: "haha" }],
+      snippets: [
+        { id: "s1", trigger: "insert my address", body: "1 Main Street" },
+      ],
+    };
+    assert.deepEqual(
+      cleanParts(["it was so funny ha ha ha ha ha", "ha anyway"], laugh)
+        .map((run) => run.text)
+        .join(" "),
+      // "ha ha" × 3 is "haha haha haha", and the repeats collapse.
+      "It was so funny haha anyway.",
+    );
+    // A replacement that a later phrase goes on from.
+    const chained = {
+      snippets: [
+        { id: "s1", trigger: "insert my home address", body: "1 Main Street" },
+      ],
+      dictionary: [
+        {
+          id: "d1",
+          spoken: "street and then go",
+          replacement: "Street, then go",
+        },
+      ],
+    };
+    assert.deepEqual(
+      cleanParts(["insert my home address and then", "go"], chained),
+      [{ first: 0, last: 1, text: "1 Main Street, then go." }],
+    );
+  });
+
+  it("keeps a dollar sign in a replacement as it is", () => {
+    const dictionary = [
+      { id: "d1", spoken: "one hundred dollars", replacement: "$100" },
+      { id: "d2", spoken: "the match", replacement: "$& and $'" },
+    ];
+    assert.equal(
+      cleanTranscript("it costs one hundred dollars", { dictionary }),
+      "It costs $100.",
+    );
+    assert.equal(applyDictionary("see the match", dictionary), "see $& and $'");
+    assert.equal(
+      expandSnippets("pay sign off", [
+        { id: "s1", trigger: "sign off", body: "$1 Sam" },
+      ]),
+      "pay $1 Sam",
+    );
+  });
+
+  it("leaves parts apart when no phrase spans them", () => {
+    assert.deepEqual(
+      cleanParts(["deploy to cube", "now"], CONTEXT).map((run) => run.text),
+      ["Deploy to Kube", "now."],
+    );
+    // Words a language says twice stay apart, as they stay in the note.
+    assert.equal(cleanParts(["he had", "had enough"]).length, 2);
+  });
+
+  it("drops parts left empty and joins a part that opens with a mark", () => {
+    assert.deepEqual(cleanParts(["it works.", "um", "next part"]), [
+      { first: 0, last: 0, text: "It works." },
+      { first: 2, last: 2, text: "Next part." },
+    ]);
+    assert.deepEqual(cleanParts(["we start", ", then stop"]), [
+      { first: 0, last: 1, text: "We start, then stop." },
+    ]);
+    assert.deepEqual(cleanParts(["", "  ", "um"]), []);
+    assert.deepEqual(cleanParts([]), []);
+  });
+
+  it("reads as cleanTranscript of the whole transcript", () => {
+    // A seeded generator, so a failure names its case.
+    let seed = 12_345;
+    const next = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    const vocabulary = [
+      "um",
+      "uh",
+      "um",
+      "euh",
+      "eh",
+      "du",
+      "coup,",
+      "the",
+      "the",
+      "the",
+      "had",
+      "new",
+      "york",
+      "sam",
+      "lect",
+      "cube",
+      "insert",
+      "my",
+      "address",
+      "sign",
+      "off",
+      "ha",
+      "ha",
+      "ha",
+      "we",
+      "ship",
+      "friday",
+      "ok.",
+      "really?",
+      "yes!",
+      "and",
+      ",",
+      "i",
+      "think",
+      "là",
+      "là",
+      "el",
+      "el",
+    ];
+    const laughs = [{ id: "d9", spoken: "ha ha", replacement: "haha" }];
+    for (let round = 0; round < 1_500; round += 1) {
+      const words = Array.from(
+        { length: 1 + Math.floor(next() * 20) },
+        () => vocabulary[Math.floor(next() * vocabulary.length)] ?? "",
+      );
+      const parts: string[] = [];
+      for (const word of words) {
+        if (parts.length === 0 || next() < 0.4) parts.push(word);
+        else parts[parts.length - 1] += ` ${word}`;
+      }
+      const language = ["en-US", "fr-FR", "es-ES"][round % 3] ?? "en-US";
+      const context = {
+        ...CONTEXT,
+        dictionary: round % 2 ? [...DICTIONARY, ...laughs] : DICTIONARY,
+        language,
+      };
+      const runs = cleanParts(parts, context);
+      const label = JSON.stringify(parts);
+      assert.equal(
+        runs.map((run) => run.text).join(" "),
+        cleanTranscript(parts.join(" "), context),
+        label,
+      );
+      let after = -1;
+      for (const run of runs) {
+        assert.ok(run.first > after && run.last >= run.first, label);
+        assert.ok(run.last < parts.length && run.text !== "", label);
+        after = run.last;
+      }
+    }
+  });
+
+  it("cleans a long dictation with many phrases quickly enough", () => {
+    const dictionary = Array.from({ length: 60 }, (_, index) => ({
+      id: `d${index}`,
+      spoken: `word${index} and more`,
+      replacement: `Word${index}`,
+    }));
+    const parts = Array.from(
+      { length: 2_000 },
+      (_, index) => `um part ${index} has word${index % 60} and more of it`,
+    );
+    const started = Date.now();
+    const runs = cleanParts(parts, { dictionary });
+    assert.equal(runs.length, 2_000);
+    assert.equal(
+      runs.map((run) => run.text).join(" "),
+      cleanTranscript(parts.join(" "), { dictionary }),
+    );
+    // Generous for CI; it takes a fraction of this here.
+    assert.ok(Date.now() - started < 20_000);
   });
 });

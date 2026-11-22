@@ -1,6 +1,6 @@
 # Sonolect Development Roadmap
 
-Last updated: 2026-05-03
+Last updated: 2026-11-21
 
 ---
 
@@ -31,7 +31,7 @@ Refine the editing experience, expand language support, and harden privacy contr
 
 **Key deliverables:**
 
-- **Transcript editing** — inline corrections, segment merge/split, speaker label assignment
+- **Transcript editing** — inline corrections, segment merge/split, speaker label assignment, on-device speaker detection (desktop, model downloaded on request)
 - **Internationalization (i18n)** — full en/fr coverage; pluggable locale system for future languages
 - **Privacy controls** — configurable audio retention, one-click purge, opt-in analytics toggle
 - **Export** — Markdown, plain text, SRT/VTT subtitle formats, JSON

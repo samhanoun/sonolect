@@ -1,11 +1,45 @@
 /**
- * Turns microphone audio into the 16 kHz mono 16-bit PCM pieces that the
- * native recorder takes, as the audio arrives. Nothing here keeps the whole
- * recording in memory, so a session can last for hours.
+ * Turns microphone audio into the 16-bit PCM pieces that the native
+ * recorder takes, as the audio arrives: 16 kHz mono, or for a high-quality
+ * recording the microphone's own rate and channels, interleaved (the native
+ * side converts those). Nothing here keeps the whole recording in memory, so
+ * a session can last for hours.
  */
 export const CAPTURE_SAMPLE_RATE = 16000;
 /** Half a second per piece: small enough for live text, few enough calls. */
 export const CAPTURE_PIECE_SAMPLES = 8000;
+
+/**
+ * Samples in half a second of interleaved audio: whole frames, so a piece
+ * never ends inside one. 24,000 frames (96 kB) at 48 kHz stereo.
+ */
+export function capturePieceSamples(sampleRate: number, channels: number) {
+  return Math.max(1, Math.round(sampleRate / 2)) * channels;
+}
+
+/** Channels side by side, one frame after another. */
+export function interleave(channels: Float32Array[]): Float32Array {
+  if (channels.length === 1) return channels[0]!;
+  const frames = Math.min(...channels.map((channel) => channel.length));
+  const interleaved = new Float32Array(frames * channels.length);
+  for (let frame = 0; frame < frames; frame++)
+    for (let index = 0; index < channels.length; index++)
+      interleaved[frame * channels.length + index] = channels[index]![frame]!;
+  return interleaved;
+}
+
+/** Interleaved frames mixed down to one channel. */
+export function mixToMono(block: Float32Array, channels: number): Float32Array {
+  if (channels <= 1) return block;
+  const mono = new Float32Array(Math.floor(block.length / channels));
+  for (let frame = 0; frame < mono.length; frame++) {
+    let sum = 0;
+    for (let index = 0; index < channels; index++)
+      sum += block[frame * channels + index] ?? 0;
+    mono[frame] = sum / channels;
+  }
+  return mono;
+}
 
 /**
  * Brings a stream of blocks at any rate to 16 kHz. Going down, each output

@@ -662,6 +662,65 @@ body,
   font-size: 11px;
   min-height: 18px;
 }
+.studio-segments-status .studio-progress {
+  width: 120px;
+  margin: 0;
+}
+.studio-speaker-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.studio-shell label.studio-speaker-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.studio-shell .studio-speaker-count select {
+  width: auto;
+  margin-top: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.studio-speaker-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  color: var(--n-text-3);
+  font-size: 11px;
+}
+.studio-speaker {
+  --speaker: var(--n-text-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.studio-speaker-swatch {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--speaker);
+}
+.studio-shell .studio-speaker input.studio-segment-speaker {
+  width: 16ch;
+  margin: 0;
+  color: var(--speaker);
+  font-weight: 500;
+}
+.studio-model-row {
+  margin-top: 18px;
+  padding-top: 15px;
+  border-top: 1px solid var(--n-line);
+}
+.studio-model-row h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
 .studio-segment-list {
   list-style: none;
   margin: 0;
@@ -685,22 +744,28 @@ body,
 .studio-segment.active {
   background: var(--n-raised);
 }
-.studio-segment.speaker-0 {
+.studio-segment.speaker-0,
+.studio-speaker.speaker-0 {
   --speaker: #d4f27a;
 }
-.studio-segment.speaker-1 {
+.studio-segment.speaker-1,
+.studio-speaker.speaker-1 {
   --speaker: #7ac8f2;
 }
-.studio-segment.speaker-2 {
+.studio-segment.speaker-2,
+.studio-speaker.speaker-2 {
   --speaker: #f2a67a;
 }
-.studio-segment.speaker-3 {
+.studio-segment.speaker-3,
+.studio-speaker.speaker-3 {
   --speaker: #c79bf2;
 }
-.studio-segment.speaker-4 {
+.studio-segment.speaker-4,
+.studio-speaker.speaker-4 {
   --speaker: #f27aa5;
 }
-.studio-segment.speaker-5 {
+.studio-segment.speaker-5,
+.studio-speaker.speaker-5 {
   --speaker: #7af2c4;
 }
 .studio-shell .studio-segment input[type="checkbox"] {

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import {
+  previewCanTranscribe,
   submitCapturedAudioCloud,
   type TranscriptJobResult,
   type VoiceCaptureMetadata,
@@ -13,6 +14,7 @@ import {
 import { resolveDesktopAuthConfig } from "../localDevAuth";
 import {
   getT,
+  inEveryLocale,
   isSupportedLocale,
   useI18nStore,
   type SupportedLocale,
@@ -30,17 +32,27 @@ import {
   saveMicDeviceId,
 } from "../microphone";
 import {
+  captureQuality,
+  loadCaptureFormat,
+  savedCaptureMetadata,
+  type CaptureFormat,
+} from "../captureStorage";
+import {
+  applySpeakerTurns,
   assignSpeakerLabel,
   mergeSegmentRun,
   moveTranscriptSegment,
+  renameSpeaker,
   resyncSegments,
   segmentsFromCapture,
   segmentsToText,
+  singleCaptureId,
   splitTranscriptSegment,
   textToSegments,
   type SavedCaptureSegment,
   type TranscriptSegment,
 } from "../segmentEditor";
+import { detectSpeakerTurns } from "../speakersNative";
 import {
   parseWhisperConfig,
   serializeWhisperConfig,
@@ -120,6 +132,16 @@ export type Toast = { id: string; message: string };
 /** A saved recording's version for sync (sync-core's `Hlc`). */
 export type CaptureVersion = { t: number; c: number; d: string };
 export type OpenedVersion = { id: string; hlc: CaptureVersion | null };
+
+export type SpeakerDetectionResult =
+  /** The segments are labelled; `speakers` voices were found. */
+  | { status: "labelled"; speakers: number }
+  /** The recording has no speech in it, so nothing changed. */
+  | { status: "silent" }
+  /** Cancelled before the turns were used; nothing changed. */
+  | { status: "cancelled" }
+  /** The transcript open is not of that recording; nothing changed. */
+  | { status: "stale" };
 
 export type DesktopState = {
   commandOpen: boolean;
@@ -215,6 +237,26 @@ export type DesktopState = {
   moveSegment: (segmentId: string, direction: "up" | "down") => void;
   /** Labels every selected segment with one speaker; empty clears the label. */
   setSpeakerForSelection: (speaker: string) => void;
+  /**
+   * Finds who speaks when in the recording the transcript belongs to, on
+   * this device, and labels its segments as one undo step. Typed names are
+   * kept unless `replaceTyped` is set; see applySpeakerTurns.
+   */
+  detectSpeakers: (options?: {
+    /**
+     * The recording to detect in. Nothing is done unless its transcript is
+     * the one open; by default, it is the open transcript's recording.
+     */
+    captureId?: string;
+    /** How many people speak, 2 to 8; counted when left out. */
+    speakers?: number | undefined;
+    replaceTyped?: boolean;
+    onProgress?: (percent: number) => void;
+    /** Asked when the turns come back: true leaves the segments as they are. */
+    cancelled?: () => boolean;
+  }) => Promise<SpeakerDetectionResult>;
+  /** Renames a speaker on every segment, as one undo step. */
+  renameSpeakerEverywhere: (from: string, to: string) => void;
   clearSegmentSelection: () => void;
   /**
    * Opens one saved recording in the editor, with its timings and audio.
@@ -243,6 +285,8 @@ let activeRecorder: MediaRecorder | undefined;
 let activeLive: LiveRecording | undefined;
 /** Whether that recorder transcribes with an online model. */
 let activeLiveOnline = false;
+/** How that recording is saved, as chosen when it started. */
+let activeLiveFormat: CaptureFormat = "wav";
 let activeStream: MediaStream | undefined;
 let activeChunks: BlobPart[] = [];
 let activeStartedAt = 0;
@@ -707,6 +751,25 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       return;
     }
 
+    // The browser preview has no speech engine. Every way to start a
+    // recording (buttons, keys, the bubble) comes here, so it says so before
+    // the microphone opens instead of recording for nothing.
+    if (
+      !isTauriRuntime() &&
+      !previewCanTranscribe({
+        privacyLevel: get().privacyLevel,
+        sttProvider: useProviderStore.getState().preferences.stt.provider,
+      })
+    ) {
+      set({
+        recordingState: "error",
+        voiceError: "voice.previewCannotTranscribe",
+        voiceCapture: undefined,
+        liveTranscript: "",
+      });
+      return;
+    }
+
     // A recording started in the Studio can take what is playing on this
     // computer instead of the microphone. A dictation is always spoken.
     if (
@@ -729,10 +792,12 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
         const online =
           stt.provider !== "local" && get().privacyLevel === "cloud";
         if (online) await setProviderMode(true);
+        const format = loadCaptureFormat();
         const live = await recordSystemAudio(
           {
             language: get().sttLanguage,
             modelPath: get().whisperConfig.modelPath,
+            quality: captureQuality(format),
             ...(online ? { provider: stt.provider, model: stt.model } : {}),
           },
           {
@@ -759,6 +824,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
         }
         activeLive = live;
         activeLiveOnline = online;
+        activeLiveFormat = format;
         activeStartedAt = Date.now();
         set({ recordingState: "recording" });
       } catch (error) {
@@ -803,8 +869,15 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       liveTranscript: "",
     });
 
+    // Only the app's own recorder keeps a high-quality copy; the browser
+    // preview records what MediaRecorder gives.
+    const liveFormat = isTauriRuntime() ? loadCaptureFormat() : "wav";
     try {
-      const { stream, fellBack } = await openMicrophone(get().micDeviceId);
+      const { stream, fellBack } = await openMicrophone(
+        get().micDeviceId,
+        undefined,
+        captureQuality(liveFormat),
+      );
       if (fellBack) get().addToast("toast.micFellBack");
       if (permissionCancelled) {
         stream.getTracks().forEach((track) => track.stop());
@@ -823,6 +896,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
           {
             language: captureSettings.language,
             modelPath: captureSettings.modelPath,
+            quality: captureQuality(liveFormat),
             ...(online
               ? { provider: onlineChoice.provider, model: onlineChoice.model }
               : {}),
@@ -851,6 +925,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
         if (live) {
           activeLive = live;
           activeLiveOnline = online;
+          activeLiveFormat = liveFormat;
           activeStream = stream;
           activeStartedAt = Date.now();
           startLevelMeter(stream);
@@ -966,6 +1041,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       const elapsedMs = Date.now() - activeStartedAt;
       const generation = captureGeneration;
       const online = activeLiveOnline;
+      const format = activeLiveFormat;
       // Closing the audio feed comes first, then the microphone itself.
       const finishing = live.finish();
       stopActiveStream();
@@ -984,8 +1060,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
                 online ? "voice.onlineModel" : "voice.localWhisper",
               ),
             },
-            // 16 kHz mono 16-bit WAV: 32 bytes a millisecond.
-            { durationMs, mimeType: "audio/wav", sizeBytes: durationMs * 32 },
+            savedCaptureMetadata(durationMs, format),
             "",
           );
         })
@@ -1449,6 +1524,60 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
         state.selectedSegmentIds,
       );
       return withUndoSnapshot(state, next);
+    }),
+  detectSpeakers: async ({
+    captureId,
+    speakers,
+    replaceTyped = false,
+    onProgress,
+    cancelled,
+  } = {}) => {
+    const open = () => singleCaptureId(get().transcriptSegments);
+    const id = captureId ?? open();
+    if (!id || open() !== id) return { status: "stale" };
+    const turns = await detectSpeakerTurns(id, speakers, onProgress);
+    // Cancel can come after the last of the audio was read.
+    if (cancelled?.()) return { status: "cancelled" };
+    if (!turns.length) return { status: "silent" };
+    // Another recording may have been opened while the audio was read.
+    if (open() !== id) return { status: "stale" };
+    const t = getT();
+    set((state) => {
+      const labelled = applySpeakerTurns(
+        state.transcriptSegments,
+        turns,
+        (number) => t("studio.speakers.label", { number }),
+        {
+          replaceTyped,
+          // A detection run before the language changed gave these.
+          otherLabels: (number) =>
+            inEveryLocale("studio.speakers.label", { number }),
+        },
+      );
+      if (
+        labelled.every(
+          (segment, index) => segment === state.transcriptSegments[index],
+        )
+      )
+        return state;
+      return withUndoSnapshot(
+        state,
+        syncSegments(labelled, state.selectedSegmentIds),
+      );
+    });
+    return {
+      status: "labelled",
+      speakers: new Set(turns.map((turn) => turn.speaker)).size,
+    };
+  },
+  renameSpeakerEverywhere: (from, to) =>
+    set((state) => {
+      const renamed = renameSpeaker(state.transcriptSegments, from, to);
+      if (renamed === state.transcriptSegments) return state;
+      return withUndoSnapshot(
+        state,
+        syncSegments(renamed, state.selectedSegmentIds),
+      );
     }),
   clearSegmentSelection: () => set({ selectedSegmentIds: [] }),
   setOpenedVersion: (id, hlc) => set({ openedVersion: { id, hlc } }),

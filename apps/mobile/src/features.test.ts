@@ -93,6 +93,13 @@ describe("phone-only switch", () => {
     assert.deepEqual(availableRefinementModesFor(true), REFINEMENT_MODES);
   });
 
+  it("offers Rewrite and Reply once online editing is set up", () => {
+    assert.deepEqual(
+      availableRefinementModesFor(false, true),
+      REFINEMENT_MODES,
+    );
+  });
+
   it("turns sync off and clears the API URL, and nothing else", () => {
     assert.deepEqual(effectiveSettingsFor(false, settings), {
       ...settings,

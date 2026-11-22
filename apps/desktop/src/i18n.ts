@@ -165,6 +165,24 @@ export function getT(): Translator {
   return translatorFor(getLocale());
 }
 
+/**
+ * A string in every language the app has, the active one first. Text the app
+ * wrote in one language, such as a detected speaker's label, can then still
+ * be recognised after the language changes.
+ */
+export function inEveryLocale(key: LocaleKeys, params?: Params): string[] {
+  const active = getLocale();
+  const order = [
+    active,
+    ...(Object.keys(locales) as SupportedLocale[]).filter(
+      (locale) => locale !== active,
+    ),
+  ];
+  return [
+    ...new Set(order.map((locale) => translatorFor(locale)(key, params))),
+  ];
+}
+
 /** The language's own name in the given locale, e.g. "allemand" for de/fr. */
 export function languageName(
   code: string,

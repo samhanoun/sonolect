@@ -1,6 +1,9 @@
 import type { Hlc } from "@sonolect/sync-core";
 import type { SonolectMode } from "@sonolect/types";
 
+import type { OnlineEditing } from "./onlineRefine";
+import { normalizeOnlineEditing } from "./onlineRefine";
+
 export type CaptureStatus =
   "idle" | "listening" | "processing" | "ready" | "error";
 export type PrivacyLevel = "standard" | "local_first" | "ephemeral";
@@ -16,6 +19,22 @@ export const DICTATION_LANGUAGES = [
 export type DictationLanguage = (typeof DICTATION_LANGUAGES)[number];
 
 export type UiLanguage = "en" | "fr";
+
+/**
+ * One stretch of a dictation: what the recognizer heard and when. Times are
+ * milliseconds from the start of the dictation's first recognizer session.
+ */
+export interface NoteSegment {
+  startMs: number;
+  endMs: number;
+  /** As heard, before clean-up, like rawText. */
+  text: string;
+  /**
+   * The app timed it when the words arrived; the recognizer gave no usable
+   * times.
+   */
+  approx?: true;
+}
 
 export interface TranscriptTurn {
   id: string;
@@ -39,6 +58,15 @@ export interface TranscriptTurn {
   hlc?: Hlc;
   /** A conflict copy made by sync: the id of the note it was copied from. */
   conflictOf?: string;
+  /**
+   * When each part was said, for subtitles. Dictations from this version on,
+   * and a synced note's segments when they all fit and have times
+   * (sync/noteMapping.ts). Typed notes have none. An older note has none,
+   * unless the desktop's studio saved it: its times are then estimates,
+   * marked approx. Never changed after the capture: a refine leaves them as
+   * they are.
+   */
+  segments?: NoteSegment[];
 }
 
 export interface CaptureSession {
@@ -95,6 +123,11 @@ export interface CompanionSettings {
   hapticsEnabled: boolean;
   speechRate: number;
   onboarded: boolean;
+  /**
+   * Rewrite and Reply with the user's own provider key. Undefined (the
+   * default) keeps every refinement on the phone.
+   */
+  onlineEditing?: OnlineEditing | undefined;
 }
 
 /** Refinement modes offered after a capture, in display order. */
@@ -203,6 +236,10 @@ export function normalizeSettings(
     merged.speechRate = 1;
   }
   merged.speechRate = Math.min(2, Math.max(0.5, merged.speechRate));
+  // Anything but a valid provider and model turns online editing off.
+  const onlineEditing = normalizeOnlineEditing(merged.onlineEditing);
+  if (onlineEditing) merged.onlineEditing = onlineEditing;
+  else delete merged.onlineEditing;
   return merged;
 }
 

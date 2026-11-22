@@ -16,6 +16,17 @@ base64 = "0.23"
 # Saved recordings as Ogg Opus. libopus is bundled and built with cmake, which whisper-rs already needs.
 opus = "0.4"
 ogg = "0.9"
+# On-device speaker detection: the speaker-embedding model runs in pure Rust
+# (no native library, nothing downloaded at build time), with an FFT for the
+# filterbank features and hierarchical clustering of the embeddings. The
+# default "transformers" feature only adds attention operators the model
+# does not use.
+tract-onnx = { version = "=0.23.10", default-features = false }
+realfft = "=3.5.1"
+kodama = "=0.3.0"
+# High-quality recordings: device rates to 48 kHz for Opus and to 16 kHz for the speech engine.
+rubato = { version = "=5.1.0", default-features = false, features = ["fft_resampler"] }
+audioadapter-buffers = "=5.2.0"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 # OS keychains: provider API keys (Windows) and the sync key (every platform).

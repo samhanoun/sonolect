@@ -3,7 +3,8 @@ import { Platform } from "react-native";
 import type { CapturedAudioPayload } from "./audioCapture";
 import type { LoopEnd } from "./captureLoop";
 import { createCaptureLoop } from "./captureLoop";
-import type { DictationLanguage } from "./domain";
+import type { DictationLanguage, NoteSegment } from "./domain";
+import type { EnginePart } from "./noteSegments";
 import type { NoticeKind } from "./notices";
 import { deleteRecordings } from "./recordings";
 import type {
@@ -387,6 +388,8 @@ export interface SpeechSessionHandlers {
     text: string;
     audio?: CapturedAudioPayload;
     notice?: NoticeKind;
+    /** When each part of the text was said; empty when nothing was. */
+    segments: NoteSegment[];
   }): void;
 }
 
@@ -525,6 +528,7 @@ export function startSpeechSession(
     deleteRecordings(end.recordings);
     handlers.onEnd({
       text: end.text,
+      segments: end.segments,
       ...(audio ? { audio } : {}),
       ...(end.notice ? { notice: end.notice } : {}),
     });
@@ -570,9 +574,16 @@ export function startSpeechSession(
   subscriptions.push(
     mod.addListener("result", ((event: {
       isFinal: boolean;
-      results: { transcript: string }[];
+      results: { transcript: string; segments?: EnginePart[] }[];
     }) => {
-      loop.result(event.results[0]?.transcript ?? "", event.isFinal);
+      const best = event.results[0];
+      loop.result(best?.transcript ?? "", event.isFinal, best?.segments);
+    }) as (payload: never) => void),
+    mod.addListener("audiostart", ((event: { timestamp?: number }) => {
+      loop.audioStarted(event?.timestamp);
+    }) as (payload: never) => void),
+    mod.addListener("speechstart", (() => {
+      loop.speechStarted();
     }) as (payload: never) => void),
     mod.addListener("volumechange", ((event: { value: number }) => {
       handlers.onLevel(levelFromVolume(event.value));

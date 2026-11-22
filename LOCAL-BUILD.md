@@ -19,7 +19,7 @@ Saved audio and raw transcripts live under the current Windows user's local app-
 - Real embedded `whisper-rs` CPU recognition, with no production fake transcript backend.
 - Selected model/language passed into inference; no external Whisper command or environment variable required.
 - Verified model download in the app, plus a bundled model for this local working copy.
-- Mono 16 kHz PCM conversion; model context reused between recordings.
+- Mono 16 kHz PCM conversion; model context reused between recordings. In high quality, live recordings also keep a 48 kHz Opus copy (stereo when the source has it), converted with `rubato`, which becomes the saved recording when it ends.
 - Local-only submission policy, including failure cases and consent revocation before cloud requests.
 - Local recording retention before inference, saved error state, retry and deletion.
 - Conservative local formatting that preserves meaningful words and paragraphs.
