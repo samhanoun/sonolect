@@ -360,16 +360,19 @@ describe("a note that goes away during the request", () => {
   });
 
   it("sends nothing when the note was deleted while the key was read", async () => {
-    let erase = () => undefined as void;
-    const harness = setup({
-      readKey: async () => {
-        erase();
-        return undefined;
-      },
-    });
-    erase = harness.erase;
-    assert.deepEqual(await runOnlineEdit(harness.input), { kind: "stale" });
-    assert.equal(harness.calls.length, 0);
+    // The key is found, or not: either way the note is gone and not sent.
+    for (const found of [KEY, undefined]) {
+      let erase = () => undefined as void;
+      const harness = setup({
+        readKey: async () => {
+          erase();
+          return found;
+        },
+      });
+      erase = harness.erase;
+      assert.deepEqual(await runOnlineEdit(harness.input), { kind: "stale" });
+      assert.equal(harness.calls.length, 0);
+    }
   });
 });
 

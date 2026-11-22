@@ -135,11 +135,10 @@ export async function runOnlineEdit(
   } catch {
     key = undefined;
   }
-  if (!key) {
-    return input.current()
-      ? { kind: "failed", notice: "onlineSetup" }
-      : { kind: "stale" };
-  }
+  // The note may have been deleted, or the data erased, while the key was
+  // read: then it is not sent at all.
+  if (!input.current()) return { kind: "stale" };
+  if (!key) return { kind: "failed", notice: "onlineSetup" };
   const result = await refineOnline({
     choice: editing,
     key,
