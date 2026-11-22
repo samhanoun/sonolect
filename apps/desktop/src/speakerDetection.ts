@@ -9,7 +9,7 @@
  * recording is opened, and nothing is ever labelled but that recording.
  */
 import { create } from "zustand";
-import { getT } from "./i18n";
+import { getT, inEveryLocale } from "./i18n";
 import { singleCaptureId, typedSpeakerNames } from "./segmentEditor";
 import { useDesktopStore, type SpeakerDetectionResult } from "./store/appStore";
 import {
@@ -47,6 +47,10 @@ export type SpeakerDetectionState = {
 
 export const speakerLabel = (number: number) =>
   getT()("studio.speakers.label", { number });
+
+/** "Speaker 2" in every language, for labels detected before a switch. */
+export const speakerLabelsEverywhere = (number: number) =>
+  inEveryLocale("studio.speakers.label", { number });
 
 const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -141,7 +145,11 @@ export const useSpeakerDetection = create<SpeakerDetectionState>((set, get) => {
     // A download takes a while: another recording may be open by now.
     if (!stillOpen()) return finishStale();
     const segments = useDesktopStore.getState().transcriptSegments;
-    if (typedSpeakerNames(segments, speakerLabel).length)
+    if (
+      typedSpeakerNames(segments, speakerLabel, {
+        otherLabels: speakerLabelsEverywhere,
+      }).length
+    )
       set({ current: { step: "choose" } });
     else await detect(false);
   };

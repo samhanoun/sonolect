@@ -14,6 +14,7 @@ import {
 import { resolveDesktopAuthConfig } from "../localDevAuth";
 import {
   getT,
+  inEveryLocale,
   isSupportedLocale,
   useI18nStore,
   type SupportedLocale,
@@ -1526,7 +1527,12 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
         state.transcriptSegments,
         turns,
         (number) => t("studio.speakers.label", { number }),
-        { replaceTyped },
+        {
+          replaceTyped,
+          // A detection run before the language changed gave these.
+          otherLabels: (number) =>
+            inEveryLocale("studio.speakers.label", { number }),
+        },
       );
       if (
         labelled.every(

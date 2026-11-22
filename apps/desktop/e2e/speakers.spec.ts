@@ -346,3 +346,50 @@ test.describe("speaker detection", () => {
     ).toBeEnabled();
   });
 });
+
+test.describe("speaker detection after a change of language", () => {
+  test.use({ locale: "fr-FR" });
+
+  test("replaces the labels a detection gave in English", async ({ page }) => {
+    // Detected while the app was in English, then saved.
+    const earlier: MockCapture = {
+      ...talk,
+      id: "1700000000000-10",
+      segments: [
+        {
+          startMs: 0,
+          endMs: 2000,
+          text: "Good morning.",
+          speaker: "Speaker 1",
+        },
+        {
+          startMs: 2000,
+          endMs: 4000,
+          text: "Let us begin.",
+          speaker: "Speaker 2",
+        },
+      ],
+    };
+    await installMockTauri(page, [earlier], {
+      speakerTurns: { [earlier.id]: [{ startMs: 0, endMs: 4000, speaker: 1 }] },
+    });
+    await page.goto("/");
+    await nav(page, "Bibliothèque").click();
+    await page
+      .locator(".studio-card", { hasText: "Good morning." })
+      .getByRole("button", { name: /^Ouvrir l'éditeur/ })
+      .click();
+    await page.getByRole("button", { name: "Segments", exact: true }).click();
+    const frenchSpeakers = () => values(page, /^Intervenant du segment \d+$/);
+    await expect.poll(frenchSpeakers).toEqual(["Speaker 1", "Speaker 2"]);
+
+    // Those labels are the detection's own, not typed names: no question.
+    await page
+      .getByRole("button", { name: "Détecter les intervenants", exact: true })
+      .click();
+    await expect(status(page)).toHaveText("1 intervenant trouvé.");
+    await expect
+      .poll(frenchSpeakers)
+      .toEqual(["Intervenant 1", "Intervenant 1"]);
+  });
+});

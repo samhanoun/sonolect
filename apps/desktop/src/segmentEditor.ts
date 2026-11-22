@@ -479,10 +479,22 @@ export type SpeakerTurn = {
 /** Labels "Speaker 1" to "Speaker 99" count as detected, not typed. */
 const DETECTED_LABELS = 99;
 
-function detectedLabels(labelFor: (speaker: number) => string, most = 0) {
+/**
+ * The other texts that also count as a detected label for a speaker number,
+ * such as "Intervenant 2" for a detection run while the app was in French.
+ */
+export type OtherSpeakerLabels = (speaker: number) => string[];
+
+function detectedLabels(
+  labelFor: (speaker: number) => string,
+  otherLabels: OtherSpeakerLabels | undefined,
+  most = 0,
+) {
   const labels = new Set<string>();
-  for (let speaker = 1; speaker <= Math.max(DETECTED_LABELS, most); speaker++)
+  for (let speaker = 1; speaker <= Math.max(DETECTED_LABELS, most); speaker++) {
     labels.add(labelFor(speaker));
+    for (const label of otherLabels?.(speaker) ?? []) labels.add(label);
+  }
   return labels;
 }
 
@@ -493,13 +505,15 @@ function recorded(segment: TranscriptSegment) {
 
 /**
  * The names someone typed on recorded segments, by first appearance. Labels
- * that speaker detection gave ("Speaker 2") are not typed names.
+ * that speaker detection gave ("Speaker 2") are not typed names, and neither
+ * are the `otherLabels` it may have given in another language.
  */
 export function typedSpeakerNames(
   segments: TranscriptSegment[],
   labelFor: (speaker: number) => string,
+  { otherLabels }: { otherLabels?: OtherSpeakerLabels } = {},
 ): string[] {
-  const detected = detectedLabels(labelFor);
+  const detected = detectedLabels(labelFor, otherLabels);
   return speakerNames(segments.filter(recorded)).filter(
     (name) => !detected.has(name),
   );
@@ -543,17 +557,21 @@ function detectedSpeaker(
  * Detected speakers are called `labelFor(number)`. Unless `replaceTyped` is
  * set, a name someone typed stays on its segment, and a detected speaker
  * whose named segments mostly carry one typed name is called by that name.
- * Labels an earlier detection gave are always replaced.
+ * Labels an earlier detection gave are always replaced, also when it gave
+ * them in another language (`otherLabels`).
  */
 export function applySpeakerTurns(
   segments: TranscriptSegment[],
   turns: SpeakerTurn[],
   labelFor: (speaker: number) => string,
-  { replaceTyped = false }: { replaceTyped?: boolean } = {},
+  {
+    replaceTyped = false,
+    otherLabels,
+  }: { replaceTyped?: boolean; otherLabels?: OtherSpeakerLabels } = {},
 ): TranscriptSegment[] {
   if (!turns.length) return segments;
   const most = Math.max(...turns.map((turn) => turn.speaker));
-  const detected = detectedLabels(labelFor, most);
+  const detected = detectedLabels(labelFor, otherLabels, most);
   const typed = (segment: TranscriptSegment) => {
     const name = segment.speaker?.trim();
     return name && !replaceTyped && !detected.has(name) ? name : undefined;

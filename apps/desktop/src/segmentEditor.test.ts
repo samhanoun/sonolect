@@ -491,6 +491,49 @@ describe("detected speakers", () => {
     ]);
   });
 
+  it("treats the labels of a detection in another language as its own", () => {
+    // Detected while the app was in English, then the language changed.
+    const earlier = applySpeakerTurns(meeting(), turns, label);
+    earlier[0] = assignSpeakerLabel(earlier[0]!, "Ana");
+    const french = (number: number) => `Intervenant ${number}`;
+    const otherLabels = (number: number) => [label(number), french(number)];
+    // Without the other language, "Speaker 1" and "Speaker 2" look typed.
+    assert.deepEqual(typedSpeakerNames(earlier, french), [
+      "Ana",
+      "Speaker 1",
+      "Speaker 2",
+    ]);
+    assert.deepEqual(typedSpeakerNames(earlier, french, { otherLabels }), [
+      "Ana",
+    ]);
+    // Now one voice is heard: the English labels go, the typed name stays.
+    const again = applySpeakerTurns(
+      earlier,
+      [{ startMs: 0, endMs: 10_000, speaker: 1 }],
+      french,
+      { otherLabels },
+    );
+    assert.deepEqual(speakers(again), ["Ana", "Ana", "Ana", "Ana", "Ana"]);
+    earlier[0] = assignSpeakerLabel(earlier[0]!, "");
+    assert.deepEqual(
+      speakers(
+        applySpeakerTurns(
+          earlier,
+          [{ startMs: 0, endMs: 10_000, speaker: 1 }],
+          french,
+          { otherLabels },
+        ),
+      ),
+      [
+        "Intervenant 1",
+        "Intervenant 1",
+        "Intervenant 1",
+        "Intervenant 1",
+        "Intervenant 1",
+      ],
+    );
+  });
+
   it("renames a speaker on every segment", () => {
     const list = applySpeakerTurns(meeting(), turns, label);
     const renamed = renameSpeaker(list, "Speaker 2", "  Ben ");
