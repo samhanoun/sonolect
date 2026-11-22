@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { submitCapturedAudio } from "./voiceApi";
+import { previewCanTranscribe, submitCapturedAudio } from "./voiceApi";
 
 function createDeterministicWavBytes() {
   const data = new Uint8Array([0, 64, 255, 127, 0, 128, 255, 191]);
@@ -213,5 +213,46 @@ describe("desktop voice API client", () => {
 
     assert.equal(result.status, "offline");
     assert.match(result.message ?? "", /connection refused/);
+  });
+});
+
+describe("what the browser preview can transcribe", () => {
+  const privacyLevels = ["local", "cloud"] as const;
+  const sttProviders = ["local", "openrouter"] as const;
+  const apiConfigured = [false, true] as const;
+
+  for (const privacyLevel of privacyLevels) {
+    for (const sttProvider of sttProviders) {
+      for (const api of apiConfigured) {
+        // Only Cloud enabled, local speech and a Sonolect API work today.
+        const expected =
+          privacyLevel === "cloud" && sttProvider === "local" && api;
+        it(`${privacyLevel} privacy, ${sttProvider} speech, ${api ? "with" : "without"} an API: ${expected ? "transcribes" : "refuses"}`, () => {
+          assert.equal(
+            previewCanTranscribe({ privacyLevel, sttProvider }, api),
+            expected,
+          );
+        });
+      }
+    }
+  }
+
+  it("covers every combination, and exactly one transcribes", () => {
+    const results = privacyLevels.flatMap((privacyLevel) =>
+      sttProviders.flatMap((sttProvider) =>
+        apiConfigured.map((api) =>
+          previewCanTranscribe({ privacyLevel, sttProvider }, api),
+        ),
+      ),
+    );
+    assert.equal(results.length, 8);
+    assert.equal(results.filter(Boolean).length, 1);
+  });
+
+  it("reads the build's API URL, which unit tests run without", () => {
+    assert.equal(
+      previewCanTranscribe({ privacyLevel: "cloud", sttProvider: "local" }),
+      false,
+    );
   });
 });

@@ -341,6 +341,10 @@ export const en = {
   "studio.transcribe.exportFormat": "Export format",
   "studio.transcribe.export": "Export transcript",
   "studio.transcribe.exportTitle": "Sonolect transcript",
+  "studio.transcribe.previewNotice":
+    "Browser preview. You can type, edit and export text here. Recording and transcription need the Sonolect desktop app.",
+  "studio.transcribe.previewImport":
+    "The browser preview cannot transcribe audio files. Open this file in the Sonolect desktop app. Nothing was sent.",
   "studio.export.txt": "Plain text (.txt)",
   "studio.export.md": "Markdown (.md)",
   "studio.export.srt": "Subtitles (.srt)",
@@ -409,7 +413,7 @@ export const en = {
   "studio.library.emptyTitle": "A fresh start.",
   "studio.library.tryOther": "Try a different word.",
   "studio.library.emptyBody":
-    "Your recordings will appear here after you dictate or import audio in the Windows app.",
+    "Your recordings will appear here after you dictate or import audio in the desktop app.",
   "studio.library.createFirst": "Create your first recording",
   "studio.library.retryNeeded": "Retry needed",
   "studio.library.savedOnDevice": "Saved on device",
@@ -486,7 +490,7 @@ export const en = {
   "studio.settings.storageHint":
     "Recordings can run up to four hours and are saved on this device for as long as you choose above. API keys use Windows Credential Manager.",
   "studio.settings.previewNotice":
-    "This is the browser preview. Model installation and local speech run in the Windows app.",
+    "This is the browser preview. Model installation and local speech run in the Sonolect desktop app.",
   "studio.privacy.title": "Privacy & retention",
   "studio.privacy.subtitle":
     "Recordings and transcripts never leave this device in Local only.",
@@ -499,7 +503,7 @@ export const en = {
     "Delete all your recordings, transcripts, dictionary, snippets, saved API keys and settings from this device? This cannot be undone.",
   "studio.privacy.partialFailure": "Some data could not be deleted: {problems}",
   "studio.privacy.keptForever": "Recordings are kept until you delete them.",
-  "studio.privacy.savedPreview": "Saved. It applies in the Windows app.",
+  "studio.privacy.savedPreview": "Saved. It applies in the desktop app.",
   "studio.privacy.savedDeleted.one":
     "Saved. Deleted {count} recording older than {period}.",
   "studio.privacy.savedDeleted.other":
@@ -607,7 +611,7 @@ export const en = {
   "studio.models.browse": "Browse models",
   "studio.models.removeKey": "Remove saved key",
   "studio.models.previewNotice":
-    "Browser preview. Open the Windows app to save keys and run native speech.",
+    "Browser preview. Local speech runs in the Sonolect desktop app. Saving API keys for online models works only in the Windows app for now.",
   "studio.models.localTitle": "Prefer to keep it local?",
   "studio.models.localBody":
     "Whisper runs on your computer. No API key. No account. No audio uploads.",
@@ -625,7 +629,7 @@ export const en = {
     "OpenCode Zen is available for text editing. Its public API does not currently advertise dedicated speech models.",
   "provider.name.local": "Local Whisper",
   "provider.previewOnly":
-    "Open the Windows app to use secure keys and native speech. This window is a browser preview.",
+    "This window is a browser preview. Local speech runs in the Sonolect desktop app. Saved API keys work only in the Windows app for now.",
   "provider.cloudRequired":
     "Choose cloud processing before sending audio or text online.",
   "provider.cloudCancelled": "Cloud processing was cancelled.",
@@ -657,7 +661,9 @@ export const en = {
   "voice.localUnavailableApp":
     "Local transcription unavailable. Check your installed model in Settings. No audio was uploaded.",
   "voice.localUnavailablePreview":
-    "Local transcription runs in the Windows app. This browser preview did not upload any audio.",
+    "The browser preview cannot transcribe speech. Use the Sonolect desktop app. This recording was not saved or sent.",
+  "voice.previewCannotTranscribe":
+    "The browser preview cannot transcribe speech. Use the Sonolect desktop app to record and transcribe. Nothing was recorded or sent.",
   "voice.notConfigured":
     "Online transcription is not configured. Your recording stayed on this device.",
   "voice.unreachable":

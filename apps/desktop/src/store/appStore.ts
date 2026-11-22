@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import {
+  previewCanTranscribe,
   submitCapturedAudioCloud,
   type TranscriptJobResult,
   type VoiceCaptureMetadata,
@@ -701,6 +702,25 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       set({
         recordingState: "error",
         voiceError: "error.importInProgress",
+        voiceCapture: undefined,
+        liveTranscript: "",
+      });
+      return;
+    }
+
+    // The browser preview has no speech engine. Every way to start a
+    // recording (buttons, keys, the bubble) comes here, so it says so before
+    // the microphone opens instead of recording for nothing.
+    if (
+      !isTauriRuntime() &&
+      !previewCanTranscribe({
+        privacyLevel: get().privacyLevel,
+        sttProvider: useProviderStore.getState().preferences.stt.provider,
+      })
+    ) {
+      set({
+        recordingState: "error",
+        voiceError: "voice.previewCannotTranscribe",
         voiceCapture: undefined,
         liveTranscript: "",
       });

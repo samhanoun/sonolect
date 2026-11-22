@@ -30,6 +30,11 @@ test.describe("dictation with the app's recorder", () => {
     await installMockTauri(page, []);
     await page.goto("/");
     await nav(page, "Transcribe").click();
+    // The app records and transcribes: no browser preview notice.
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "Find your flow",
+    );
+    await expect(page.getByText(/^Browser preview\./)).toHaveCount(0);
 
     await page.getByRole("button", { name: "Record to add text" }).click();
     const dock = page.locator(".studio-recording-dock");

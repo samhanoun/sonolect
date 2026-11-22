@@ -6,6 +6,7 @@ import {
   loadMicDeviceId,
   microphoneConstraints,
   meterPosition,
+  micTestBlocked,
   microphoneName,
   openMicrophone,
   saveMicDeviceId,
@@ -146,5 +147,31 @@ describe("microphone choice", () => {
     assert.equal(meterPosition(4), 1);
     assert.ok(Math.abs(meterPosition(0.1) - 2 / 3) < 1e-9);
     assert.ok(Math.abs(meterPosition(0.01) - 1 / 3) < 1e-9);
+  });
+
+  it("keeps the test off during a dictation, and after a failed one in the app", () => {
+    const states = [
+      "idle",
+      "requesting-permission",
+      "recording",
+      "uploading",
+      "completed",
+      "error",
+    ] as const;
+    const blocked = (native: boolean) =>
+      states.filter((state) => micTestBlocked(state, native));
+    assert.deepEqual(blocked(true), [
+      "requesting-permission",
+      "recording",
+      "uploading",
+      "error",
+    ]);
+    // The browser preview refuses before the microphone opens: after that
+    // refusal, the test is still the way to check a microphone.
+    assert.deepEqual(blocked(false), [
+      "requesting-permission",
+      "recording",
+      "uploading",
+    ]);
   });
 });
