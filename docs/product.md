@@ -48,7 +48,8 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 
 - Inline text corrections with undo/redo
 - Segment merge, split, and reorder
-- Speaker label assignment and colour coding
+- Speaker label assignment and colour coding, with a legend that renames a speaker on every segment at once
+- On-device speaker detection on desktop: **Detect speakers** labels the segments of a saved recording Speaker 1, Speaker 2 and so on, in one undo step. The number of speakers is found automatically or chosen (2 to 8), and names you typed are kept unless you choose to replace them. Its 28 MB model is downloaded once, only after you agree, and the audio never leaves the device. A note that came through sync has no audio here, so it is not offered there.
 - Timestamp-linked playback (click a segment to jump to audio)
 
 ### Internationalization (i18n)
@@ -96,14 +97,14 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 
 ### Privacy by Default
 
-- Zero network calls on first launch
+- Zero network calls on first launch. The speech and speaker models are downloaded only when you ask for them, and each download must match the size and SHA-256 pinned in the app.
 - Audio and transcript data stored in user-local directories with OS-level permissions
 - Note sync is end-to-end encrypted: the server cannot read content, and sees only ciphertext, sizes, times, IP addresses and opaque ids
 
 ### Reliability
 
 - Crash-recovery: unsaved sessions auto-persist every 5 seconds
-- Graceful degradation when STT model files are missing or corrupt
+- Graceful degradation when model files are missing or corrupt: a speaker model that no longer matches its checksum is removed, and its download is offered again
 
 ---
 

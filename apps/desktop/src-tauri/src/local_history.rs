@@ -107,7 +107,7 @@ pub(super) fn directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 /// Recording ids: this device's own (digits and '-') and those of synced
 /// notes, `[A-Za-z0-9_-]{1,64}`. Nothing else, so a path never leaves the
 /// folder.
-fn valid_id(id: &str) -> Result<(), String> {
+pub(super) fn valid_id(id: &str) -> Result<(), String> {
     if id.is_empty()
         || id.len() > 64
         || !id

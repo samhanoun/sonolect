@@ -976,4 +976,56 @@ export const fr: Record<LocaleKeys, string> = {
     "L'état de la synchronisation n'a pas pu être enregistré.",
   "native.syncInterrupted": "La synchronisation a été interrompue.",
   "native.syncInvalidNote": "Note synchronisée non valide.",
+  // Speaker detection
+  "studio.speakers.detect": "Détecter les intervenants",
+  "studio.speakers.count": "Intervenants",
+  "studio.speakers.auto": "Auto",
+  "studio.speakers.label": "Intervenant {number}",
+  "studio.speakers.consent":
+    "Télécharger le modèle d'intervenants de {size}\u202f? Votre audio reste sur cet appareil.",
+  "studio.speakers.download": "Télécharger",
+  "studio.speakers.notNow": "Plus tard",
+  "studio.speakers.downloading":
+    "Téléchargement du modèle d'intervenants… {progress}\u00a0%",
+  "studio.speakers.keepOrReplace":
+    "Certains segments ont déjà un nom. Les garder ou les remplacer\u202f?",
+  "studio.speakers.keep": "Garder les noms",
+  "studio.speakers.replace": "Remplacer les noms",
+  "studio.speakers.cancel": "Annuler",
+  "studio.speakers.detecting": "Détection des intervenants… {progress}\u00a0%",
+  "studio.speakers.found.one": "{count} intervenant trouvé.",
+  "studio.speakers.found.other": "{count} intervenants trouvés.",
+  "studio.speakers.noSpeech":
+    "Aucune parole n'a été trouvée dans cet enregistrement.",
+  "studio.speakers.stale":
+    "Une autre transcription a été ouverte, aucun nom n'a donc été modifié.",
+  "studio.speakers.legend": "Intervenants de cette transcription",
+  "studio.speakers.rename": "Renommer {name} partout",
+  "studio.speakers.segments.one": "{count} segment",
+  "studio.speakers.segments.other": "{count} segments",
+  "studio.settings.speakerModelTitle": "Modèle d'intervenants",
+  "studio.settings.speakerModelMeta": "Détection des intervenants · CPU",
+  "studio.settings.speakerModelReady":
+    "Le modèle d'intervenants est sur cet ordinateur.",
+  "studio.settings.speakerModelMissing":
+    "Téléchargez-le une fois pour détecter qui parle dans un enregistrement. Votre audio reste sur cet appareil.",
+  "studio.settings.speakerModelInstall": "Télécharger le modèle d'intervenants",
+  "studio.settings.speakerModelReinstall":
+    "Réinstaller le modèle d'intervenants",
+  "studio.settings.speakerModelDownloaded":
+    "Modèle d'intervenants téléchargé et somme de contrôle vérifiée.",
+  "native.speakersCancelled": "La détection des intervenants a été annulée.",
+  "native.speakersBusy": "La détection des intervenants est déjà en cours.",
+  "native.speakerCount": "Choisissez entre 2 et 8 intervenants.",
+  "native.speakerModelMissing": "Téléchargez d'abord le modèle d'intervenants.",
+  "native.speakerModelDamaged":
+    "Le modèle d'intervenants était endommagé et a été supprimé. Téléchargez-le à nouveau.",
+  "native.speakersStillRecording":
+    "Terminez l'enregistrement avant de détecter les intervenants.",
+  "native.speakerModelUnreadable":
+    "Impossible de lire le modèle d'intervenants\u00a0: {reason}",
+  "native.speakerModelLoad":
+    "Impossible de charger le modèle d'intervenants\u00a0: {reason}",
+  "native.speakerModelFailed":
+    "Le modèle d'intervenants a échoué\u00a0: {reason}",
 };

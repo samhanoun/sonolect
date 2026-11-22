@@ -288,4 +288,49 @@ export const ar: Partial<Record<LocaleKeys, string>> = {
   "native.syncStateFailed": "تعذّر حفظ حالة المزامنة.",
   "native.syncInterrupted": "انقطعت المزامنة.",
   "native.syncInvalidNote": "ملاحظة متزامنة غير صالحة.",
+  // Speaker detection
+  "studio.speakers.detect": "اكتشاف المتحدثين",
+  "studio.speakers.count": "المتحدثون",
+  "studio.speakers.auto": "تلقائي",
+  "studio.speakers.label": "المتحدث {number}",
+  "studio.speakers.consent":
+    "هل تريد تنزيل نموذج المتحدثين بحجم {size}؟ يبقى صوتك على هذا الجهاز.",
+  "studio.speakers.download": "تنزيل",
+  "studio.speakers.notNow": "ليس الآن",
+  "studio.speakers.downloading": "جارٍ تنزيل نموذج المتحدثين… {progress}%",
+  "studio.speakers.keepOrReplace":
+    "بعض المقاطع لها أسماء بالفعل. هل تريد الاحتفاظ بها أم استبدالها؟",
+  "studio.speakers.keep": "الاحتفاظ بالأسماء",
+  "studio.speakers.replace": "استبدال الأسماء",
+  "studio.speakers.cancel": "إلغاء",
+  "studio.speakers.detecting": "جارٍ اكتشاف المتحدثين… {progress}%",
+  "studio.speakers.found.one": "تم العثور على متحدث واحد.",
+  "studio.speakers.found.other":
+    "عدد المتحدثين الذين تم العثور عليهم: {count}.",
+  "studio.speakers.noSpeech": "لم يُعثر على كلام في هذا التسجيل.",
+  "studio.speakers.stale": "فُتح تفريغ آخر، لذلك لم يتغير أي اسم.",
+  "studio.speakers.legend": "المتحدثون في هذا التفريغ",
+  "studio.speakers.rename": "إعادة تسمية {name} في كل مكان",
+  "studio.speakers.segments.one": "مقطع واحد",
+  "studio.speakers.segments.other": "عدد المقاطع: {count}",
+  "studio.settings.speakerModelTitle": "نموذج المتحدثين",
+  "studio.settings.speakerModelMeta": "اكتشاف المتحدثين · المعالج",
+  "studio.settings.speakerModelReady":
+    "نموذج المتحدثين موجود على هذا الكمبيوتر.",
+  "studio.settings.speakerModelMissing":
+    "نزّله مرة واحدة لمعرفة من يتحدث في التسجيل. يبقى صوتك على هذا الجهاز.",
+  "studio.settings.speakerModelInstall": "تنزيل نموذج المتحدثين",
+  "studio.settings.speakerModelReinstall": "إعادة تثبيت نموذج المتحدثين",
+  "studio.settings.speakerModelDownloaded":
+    "تم تنزيل نموذج المتحدثين والتحقق من المجموع الاختباري.",
+  "native.speakersCancelled": "أُلغي اكتشاف المتحدثين.",
+  "native.speakersBusy": "اكتشاف المتحدثين قيد التشغيل بالفعل.",
+  "native.speakerCount": "اختر عددًا من المتحدثين بين 2 و8.",
+  "native.speakerModelMissing": "نزّل نموذج المتحدثين أولًا.",
+  "native.speakerModelDamaged":
+    "كان نموذج المتحدثين تالفًا وتمت إزالته. نزّله مرة أخرى.",
+  "native.speakersStillRecording": "أنهِ التسجيل قبل اكتشاف المتحدثين.",
+  "native.speakerModelUnreadable": "تعذّرت قراءة نموذج المتحدثين: {reason}",
+  "native.speakerModelLoad": "تعذّر تحميل نموذج المتحدثين: {reason}",
+  "native.speakerModelFailed": "فشل نموذج المتحدثين: {reason}",
 };

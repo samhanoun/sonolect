@@ -453,6 +453,158 @@ export function speakerNames(segments: TranscriptSegment[]): string[] {
   return names;
 }
 
+/** Gives every segment of speaker `from` the name `to`; an empty name clears it. */
+export function renameSpeaker(
+  segments: TranscriptSegment[],
+  from: string,
+  to: string,
+): TranscriptSegment[] {
+  const old = from.trim();
+  if (!old || old === to.trim()) return segments;
+  if (!segments.some((segment) => segment.speaker?.trim() === old))
+    return segments;
+  return segments.map((segment) =>
+    segment.speaker?.trim() === old ? assignSpeakerLabel(segment, to) : segment,
+  );
+}
+
+/** Who speaks when in a recording, as speaker detection finds it. */
+export type SpeakerTurn = {
+  startMs: number;
+  endMs: number;
+  /** 1 for the first voice heard, 2 for the next new one, and so on. */
+  speaker: number;
+};
+
+/** Labels "Speaker 1" to "Speaker 99" count as detected, not typed. */
+const DETECTED_LABELS = 99;
+
+/**
+ * The other texts that also count as a detected label for a speaker number,
+ * such as "Intervenant 2" for a detection run while the app was in French.
+ */
+export type OtherSpeakerLabels = (speaker: number) => string[];
+
+function detectedLabels(
+  labelFor: (speaker: number) => string,
+  otherLabels: OtherSpeakerLabels | undefined,
+  most = 0,
+) {
+  const labels = new Set<string>();
+  for (let speaker = 1; speaker <= Math.max(DETECTED_LABELS, most); speaker++) {
+    labels.add(labelFor(speaker));
+    for (const label of otherLabels?.(speaker) ?? []) labels.add(label);
+  }
+  return labels;
+}
+
+/** Segments with audio of their own, which detection can label. */
+function recorded(segment: TranscriptSegment) {
+  return Boolean(segment.captureId) && !segment.mixed;
+}
+
+/**
+ * The names someone typed on recorded segments, by first appearance. Labels
+ * that speaker detection gave ("Speaker 2") are not typed names, and neither
+ * are the `otherLabels` it may have given in another language.
+ */
+export function typedSpeakerNames(
+  segments: TranscriptSegment[],
+  labelFor: (speaker: number) => string,
+  { otherLabels }: { otherLabels?: OtherSpeakerLabels } = {},
+): string[] {
+  const detected = detectedLabels(labelFor, otherLabels);
+  return speakerNames(segments.filter(recorded)).filter(
+    (name) => !detected.has(name),
+  );
+}
+
+/** The detected speaker a segment overlaps most, or the nearest one. */
+function detectedSpeaker(
+  segment: TranscriptSegment,
+  turns: SpeakerTurn[],
+): number | undefined {
+  const overlaps = new Map<number, number>();
+  let nearest: number | undefined;
+  let gap = Infinity;
+  for (const turn of turns) {
+    const overlap =
+      Math.min(segment.endMs, turn.endMs) -
+      Math.max(segment.startMs, turn.startMs);
+    if (overlap > 0)
+      overlaps.set(turn.speaker, (overlaps.get(turn.speaker) ?? 0) + overlap);
+    const distance = Math.max(0, -overlap);
+    if (distance < gap) {
+      gap = distance;
+      nearest = turn.speaker;
+    }
+  }
+  let best = nearest;
+  let most = 0;
+  for (const [speaker, overlap] of overlaps)
+    if (overlap > most) {
+      most = overlap;
+      best = speaker;
+    }
+  return best;
+}
+
+/**
+ * Labels the recorded segments of a transcript with the detected speaker
+ * each one overlaps most; one that falls between turns takes the nearest.
+ * Typed segments without audio are left as they are.
+ *
+ * Detected speakers are called `labelFor(number)`. Unless `replaceTyped` is
+ * set, a name someone typed stays on its segment, and a detected speaker
+ * whose named segments mostly carry one typed name is called by that name.
+ * Labels an earlier detection gave are always replaced, also when it gave
+ * them in another language (`otherLabels`).
+ */
+export function applySpeakerTurns(
+  segments: TranscriptSegment[],
+  turns: SpeakerTurn[],
+  labelFor: (speaker: number) => string,
+  {
+    replaceTyped = false,
+    otherLabels,
+  }: { replaceTyped?: boolean; otherLabels?: OtherSpeakerLabels } = {},
+): TranscriptSegment[] {
+  if (!turns.length) return segments;
+  const most = Math.max(...turns.map((turn) => turn.speaker));
+  const detected = detectedLabels(labelFor, otherLabels, most);
+  const typed = (segment: TranscriptSegment) => {
+    const name = segment.speaker?.trim();
+    return name && !replaceTyped && !detected.has(name) ? name : undefined;
+  };
+  const speakers = segments.map((segment) =>
+    recorded(segment) ? detectedSpeaker(segment, turns) : undefined,
+  );
+  // How often each typed name sits on each detected speaker.
+  const votes = new Map<number, Map<string, number>>();
+  segments.forEach((segment, index) => {
+    const speaker = speakers[index];
+    const name = typed(segment);
+    if (speaker === undefined || !name) return;
+    const counts = votes.get(speaker) ?? new Map<string, number>();
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+    votes.set(speaker, counts);
+  });
+  const names = new Map<number, string>();
+  for (const [speaker, counts] of votes) {
+    const total = [...counts.values()].reduce((sum, count) => sum + count, 0);
+    for (const [name, count] of counts)
+      if (count * 2 > total) names.set(speaker, name);
+  }
+  return segments.map((segment, index) => {
+    const speaker = speakers[index];
+    if (speaker === undefined) return segment;
+    const name = typed(segment) ?? names.get(speaker) ?? labelFor(speaker);
+    return name === segment.speaker
+      ? segment
+      : assignSpeakerLabel(segment, name);
+  });
+}
+
 /** How many colours the studio has for speakers. */
 export const SPEAKER_COLOR_COUNT = 6;
 

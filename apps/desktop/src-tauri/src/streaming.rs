@@ -47,7 +47,9 @@ pub struct Chunk {
     pub silent: bool,
 }
 
-fn frame_levels(samples: &[i16]) -> Vec<f32> {
+/// The loudness of each whole 20 ms frame of `samples`, as an RMS of the
+/// 16-bit values. A partial frame at the end is left out.
+pub(crate) fn frame_levels(samples: &[i16]) -> Vec<f32> {
     samples
         .as_chunks::<FRAME>()
         .0
@@ -57,6 +59,12 @@ fn frame_levels(samples: &[i16]) -> Vec<f32> {
             (energy / FRAME as f64).sqrt() as f32
         })
         .collect()
+}
+
+/// Frames under this level count as a pause. Quiet is relative to the
+/// loudest speech around it, so a noisy room still has pauses.
+pub(crate) fn quiet_level(loudest: f32) -> f32 {
+    (loudest * 0.08).max(SILENCE_RMS * 2.0)
 }
 
 /// Cuts a stream of samples into chunks at pauses in the speech.
@@ -105,9 +113,7 @@ impl Chunker {
             // Only silence so far: hand it over so a long pause never piles up.
             return Some(levels.len() * FRAME);
         }
-        // Quiet is relative to the speech around it, so a noisy room still
-        // has pauses.
-        let quiet = (loudest * 0.08).max(SILENCE_RMS * 2.0);
+        let quiet = quiet_level(loudest);
         let earliest = MIN_CHUNK / FRAME;
         let mut run = 0;
         for (index, level) in levels.iter().enumerate() {

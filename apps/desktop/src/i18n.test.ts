@@ -5,6 +5,7 @@ import {
   detectLocale,
   getLocale,
   getT,
+  inEveryLocale,
   isSupportedLocale,
   languageName,
   setLocale,
@@ -185,6 +186,19 @@ describe("i18n", () => {
       assert.equal(getT().message("Disk is full"), "Disk is full");
       assert.equal(getT().message("constructor"), "constructor");
       assert.equal(getT().message(""), "");
+    });
+
+    it("gives a string in every language, the active one first", () => {
+      const labels = inEveryLocale("studio.speakers.label", { number: 2 });
+      assert.equal(labels[0], "Speaker 2");
+      assert.ok(labels.includes("Intervenant 2"));
+      // One entry per distinct text: no duplicates from English fallbacks.
+      assert.equal(new Set(labels).size, labels.length);
+      const french = withLocale("fr", () =>
+        inEveryLocale("studio.speakers.label", { number: 2 }),
+      );
+      assert.equal(french[0], "Intervenant 2");
+      assert.deepEqual([...french].sort(), [...labels].sort());
     });
 
     it("names dictation languages in the interface language", () => {

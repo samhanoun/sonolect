@@ -31,11 +31,34 @@ The jobs then perform installer sanity checks:
 
 Linux `.deb` and `.AppImage` are already covered by the existing desktop Tauri build path.
 
+After its build, each job also runs the speaker detection tests (`speakers`, `fbank`, `model_download`), including the ones that need the speaker model, with `cargo test --release` and the same `tauri/custom-protocol` feature as the build. Its compiled dependencies are reused, so this is much cheaper than a separate test job: on Linux, the test build after a release build took 19 s, and the 28 tests 4 s. It matters because tract chooses its SIMD code per CPU, and only Ubuntu runs Rust tests otherwise.
+
 ## Note sync in release builds
 
 Sync is compiled in but hidden unless the build sets `SONOLECT_SYNC_URL`, the `https://` URL of the hosted sync server ([sync-setup.md](sync-setup.md)). Both the webview build (`apps/desktop/vite.config.ts`) and the Rust build (`option_env!` in `apps/desktop/src-tauri/src/sync.rs`) read it at build time, so set it in the environment of the whole `tauri build`. A release build ignores a URL that is not https and then has no sync. The URL is public, so a repository variable is enough: to ship sync from CI, add `SONOLECT_SYNC_URL: ${{ vars.SONOLECT_SYNC_URL }}` to the `env` of the release job. Today's `Release package validation` job builds without it, so its packages have no sync.
 
 The phone reads `EXPO_PUBLIC_SONOLECT_SYNC_URL` instead; see [mobile-release.md](mobile-release.md). All devices that should sync together need builds with the same server.
+
+## Downloadable models
+
+The installers ship no model. The app downloads two, each only when the user asks, and only into its local data folder (`models/`):
+
+| Model                                                                                                | Size              | Where the pin is                                            | Asked for                                  |
+| ---------------------------------------------------------------------------------------------------- | ----------------- | ----------------------------------------------------------- | ------------------------------------------ |
+| Whisper Base (`ggml-base.bin`)                                                                       | 147,951,465 bytes | `MODEL` in `apps/desktop/src-tauri/src/local_engine.rs`     | Settings                                   |
+| Speaker model, CAM++ from 3D-Speaker (`3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx`) | 28,281,165 bytes  | `SPEAKER_MODEL` in `apps/desktop/src-tauri/src/speakers.rs` | Settings, or the first **Detect speakers** |
+
+Each pin is a `PinnedModel`: the URL, the size and the SHA-256. A download that does not match both is thrown away, and the speaker model is checked again before every load.
+
+The speaker model URL today is the sherpa-onnx release on GitHub: `https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx` (the upstream tag really is spelt `recongition`). To serve it from a mirror, such as an asset on a release of this repository:
+
+1. Upload the exact same file. Check it first: `sha256sum` must print `53cab20ba8f2eb2f6e2d89ecc18e88ef3222169b61b4419cbc13666744a4574b`.
+2. Change only `url` in `SPEAKER_MODEL`. Keep `sha256` and `size`: they pin the file, not the host.
+3. CI reads the URL and the SHA-256 from that constant (the `Find the pinned speaker model` steps in `.github/workflows/ci.yml`), so its model tests then download from the mirror too.
+
+A new model file is a different change: it needs a new `sha256` and `size`, new reference fixtures (`apps/desktop/src-tauri/fixtures/make-speaker-fixtures.py`) and a check of its licence.
+
+Before the first release with speaker detection, confirm that the model's licence allows redistribution if it is mirrored. The 3D-Speaker code is Apache-2.0; the model card on modelscope.cn could not be checked when the feature was built.
 
 ## Optional signing and updater readiness
 
@@ -82,3 +105,4 @@ Before publishing a release:
 9. Confirm app version shown by the installer/artifact matches the release tag.
 10. For signed releases, verify platform signature/notarization status before publication.
 11. For updater-enabled releases, publish update metadata only after installer smoke tests pass.
+12. Speaker detection, on Windows, macOS and Linux: open a saved recording of an hour or so with several voices, choose **Segments**, then **Detect speakers**. Confirm the download question gives the size, that the status line shows progress, that **Cancel** stops it and changes no names, even when pressed at 99%, and note the time taken and the app's peak memory. For comparison, `sonolect_desktop --detect-speakers` took about 41 s and 141 MB of memory for 59 minutes of audio on 4 Linux cores. Rename a speaker in the legend, save, and check that an export carries the names.

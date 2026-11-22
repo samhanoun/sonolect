@@ -314,4 +314,55 @@ export const de: Partial<Record<LocaleKeys, string>> = {
     "Der Synchronisierungsstatus konnte nicht gespeichert werden.",
   "native.syncInterrupted": "Die Synchronisierung wurde unterbrochen.",
   "native.syncInvalidNote": "Ungültige synchronisierte Notiz.",
+  // Speaker detection
+  "studio.speakers.detect": "Sprecher erkennen",
+  "studio.speakers.count": "Sprecher",
+  "studio.speakers.auto": "Automatisch",
+  "studio.speakers.label": "Sprecher {number}",
+  "studio.speakers.consent":
+    "Das Sprechermodell ({size}) herunterladen? Ihr Audio bleibt auf diesem Gerät.",
+  "studio.speakers.download": "Herunterladen",
+  "studio.speakers.notNow": "Nicht jetzt",
+  "studio.speakers.downloading":
+    "Sprechermodell wird heruntergeladen… {progress}\u00a0%",
+  "studio.speakers.keepOrReplace":
+    "Einige Segmente haben schon Namen. Behalten oder ersetzen?",
+  "studio.speakers.keep": "Namen behalten",
+  "studio.speakers.replace": "Namen ersetzen",
+  "studio.speakers.cancel": "Abbrechen",
+  "studio.speakers.detecting": "Sprecher werden erkannt… {progress}\u00a0%",
+  "studio.speakers.found.one": "{count} Sprecher gefunden.",
+  "studio.speakers.found.other": "{count} Sprecher gefunden.",
+  "studio.speakers.noSpeech":
+    "In dieser Aufnahme wurde keine Sprache gefunden.",
+  "studio.speakers.stale":
+    "Ein anderes Transkript wurde geöffnet, daher wurden keine Namen geändert.",
+  "studio.speakers.legend": "Sprecher in diesem Transkript",
+  "studio.speakers.rename": "{name} überall umbenennen",
+  "studio.speakers.segments.one": "{count} Segment",
+  "studio.speakers.segments.other": "{count} Segmente",
+  "studio.settings.speakerModelTitle": "Sprechermodell",
+  "studio.settings.speakerModelMeta": "Sprechererkennung · CPU",
+  "studio.settings.speakerModelReady":
+    "Das Sprechermodell ist auf diesem Computer.",
+  "studio.settings.speakerModelMissing":
+    "Laden Sie es einmal herunter, um zu erkennen, wer in einer Aufnahme spricht. Ihr Audio bleibt auf diesem Gerät.",
+  "studio.settings.speakerModelInstall": "Sprechermodell herunterladen",
+  "studio.settings.speakerModelReinstall": "Sprechermodell neu installieren",
+  "studio.settings.speakerModelDownloaded":
+    "Sprechermodell heruntergeladen und Prüfsumme bestätigt.",
+  "native.speakersCancelled": "Die Sprechererkennung wurde abgebrochen.",
+  "native.speakersBusy": "Die Sprechererkennung läuft bereits.",
+  "native.speakerCount": "Wählen Sie zwischen 2 und 8 Sprechern.",
+  "native.speakerModelMissing": "Laden Sie zuerst das Sprechermodell herunter.",
+  "native.speakerModelDamaged":
+    "Das Sprechermodell war beschädigt und wurde entfernt. Laden Sie es erneut herunter.",
+  "native.speakersStillRecording":
+    "Beenden Sie die Aufnahme, bevor Sie Sprecher erkennen.",
+  "native.speakerModelUnreadable":
+    "Das Sprechermodell kann nicht gelesen werden: {reason}",
+  "native.speakerModelLoad":
+    "Das Sprechermodell kann nicht geladen werden: {reason}",
+  "native.speakerModelFailed":
+    "Das Sprechermodell ist fehlgeschlagen: {reason}",
 };

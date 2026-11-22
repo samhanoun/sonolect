@@ -1,0 +1,4 @@
+# Test data read byte for byte: never convert line endings.
+*.f32 binary
+*.opus binary
+*.wav binary

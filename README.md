@@ -52,6 +52,8 @@ Sonolect is local/offline-first on desktop. If `VITE_SONOLECT_API_URL` is set, n
 
 The Tauri app can also transcribe offline by invoking a local Whisper-compatible command that prints either plain transcript text or JSON with `text`, `language`, and `segments` to stdout. Sonolect does **not** bundle large Whisper models. Install a binary/wrapper and download a model yourself.
 
+Speaker detection (**Segments** → **Detect speakers** on a saved recording) also runs on the device. Its 28 MB model is downloaded once, only after you agree, and must match the size and SHA-256 pinned in the app. See [docs/release.md](docs/release.md#downloadable-models) to serve it from a mirror.
+
 Non-technical setup outline:
 
 - Install one Whisper option:
