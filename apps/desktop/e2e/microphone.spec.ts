@@ -93,6 +93,52 @@ test.describe("microphone choice", () => {
     await page.getByRole("button", { name: "Stop test" }).click();
   });
 
+  test("opens the microphone once, and lets it go when the page closes", async ({
+    page,
+  }) => {
+    // The microphone takes a moment to open, as a permission prompt does.
+    await page.addInitScript(() => {
+      const devices = navigator.mediaDevices;
+      const original = devices.getUserMedia.bind(devices);
+      const opened: MediaStream[] = [];
+      (window as typeof window & { __opened?: MediaStream[] }).__opened =
+        opened;
+      devices.getUserMedia = async (constraints) => {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        const stream = await original(constraints);
+        opened.push(stream);
+        return stream;
+      };
+    });
+    const tracks = () =>
+      page.evaluate(() =>
+        (window as typeof window & { __opened?: MediaStream[] })
+          .__opened!.flatMap((stream) => stream.getTracks())
+          .map((track) => track.readyState),
+      );
+    await page.goto("/");
+    await nav(page, "Settings").click();
+    const card = page.locator("section", {
+      has: page.getByRole("heading", { name: "Microphone", exact: true }),
+    });
+
+    // A second click while it opens does not open it again.
+    await card.getByRole("button", { name: "Test microphone" }).dblclick();
+    await expect(card.getByRole("button", { name: "Stop test" })).toBeVisible();
+    expect(await tracks()).toEqual(["live"]);
+    await card.getByRole("button", { name: "Stop test" }).click();
+    expect(await tracks()).toEqual(["ended"]);
+
+    // Leaving the page while it opens stops the microphone as soon as it is
+    // open, rather than when the test would have ended by itself.
+    await card.getByRole("button", { name: "Test microphone" }).click();
+    await nav(page, "Overview").click();
+    await expect.poll(async () => (await tracks()).length).toBe(2);
+    await expect
+      .poll(tracks, { timeout: 2_000, intervals: [50] })
+      .toEqual(["ended", "ended"]);
+  });
+
   test("the microphone settings are in French when the interface is", async ({
     page,
   }) => {

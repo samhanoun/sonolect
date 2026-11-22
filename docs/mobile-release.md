@@ -24,6 +24,11 @@ after the user turns sync on (see [Note sync](#note-sync)).
 Development builds, `expo start`, the web export and the CI jobs run without
 these variables. They build normally and show no policy link and no sync.
 
+A build bundled for production (`NODE_ENV=production`, which Expo sets for an
+EAS `preview` build, a release variant and an export) is not a development
+build: the app ignores a plain `http://` sync URL there, so the config check
+fails on one. Use `https://`, or a debug build with `expo run`.
+
 ## Why a release build fails without the policy URL
 
 The app records the microphone and can hand audio to the system speech
@@ -230,9 +235,34 @@ last one: `versionCode` on Android, `CFBundleVersion` on iOS.
 - **Signature** (Android): `apksigner verify --print-certs app-release.apk`,
   or `keytool -printcert -jarfile app-release.aab` for a bundle, shows the
   owner's upload certificate, never `CN=Android Debug`.
-- **Permissions**: the merged Android manifest has `RECORD_AUDIO` and no
-  `USE_BIOMETRIC` or `USE_FINGERPRINT`; the iOS `Info.plist` has no
-  `NSFaceIDUsageDescription`.
+- **Permissions**: the merged Android manifest (Android Studio's APK
+  Analyzer, or `bundletool dump manifest --bundle app-release.aab`) has
+  `RECORD_AUDIO` and `CAMERA`, the camera features `android.hardware.camera`
+  and `android.hardware.camera.autofocus` with `required="false"`, and no
+  `USE_BIOMETRIC` or `USE_FINGERPRINT`; the iOS `Info.plist` has
+  `NSCameraUsageDescription` and no `NSFaceIDUsageDescription`.
+  `config/permissions.test.cjs` checks what app.json and the config plugins
+  give; only a native build shows what the libraries add.
+- **Camera libraries** (Android): `expo-camera` reads QR codes with Google
+  ML Kit (`com.google.mlkit:barcode-scanning`, through CameraX) and also
+  links Google's code scanner and ML Kit's document scanner client, which
+  Sonolect never opens. ML Kit sends usage data to Google through Google's
+  `datatransport` library (see
+  [Store privacy declarations](#store-privacy-declarations-what-the-build-does)).
+  Expect entries like these from them in the merged manifest: the permission
+  `ACCESS_NETWORK_STATE` (and `INTERNET`, which the app already has), the
+  meta-data `com.google.mlkit.vision.DEPENDENCIES` and
+  `com.google.android.gms.version`, ML Kit's `MlKitInitProvider` and
+  `MlKitComponentDiscoveryService`, the `datatransport` services and
+  receiver (`TransportBackendDiscovery`, `JobInfoSchedulerService`,
+  `AlarmManagerSchedulerBroadcastReceiver`) and Google's `GoogleApiActivity`,
+  all with `exported="false"`. For any other new entry, find the library
+  that adds it in `android/app/build/outputs/logs/manifest-merger-release-report.txt`.
+  A new permission goes in `android.blockedPermissions` (app.json) only once
+  a release build still scans the desktop's QR code without it; keep
+  `ACCESS_NETWORK_STATE`, which Google's upload code uses to check the
+  network. iOS reads QR codes with Apple's own camera framework and adds no
+  Google library.
 - **Native code** (Android): CI checks that its test APK ships only
   `arm64-v8a` libraries, so an x86_64 emulator refuses it with
   `INSTALL_FAILED_NO_MATCHING_ABIS` instead of crashing at launch.
@@ -261,6 +291,11 @@ decisions.
    text of that note goes from the phone to the provider they picked,
    under that provider's terms and billed to their account. The developer
    never receives it. The key stays on the phone.
+   For a build with a sync URL, it must say that the camera only scans
+   another device's sync code on the phone, with no image kept or sent.
+   For Android, it must say that the app includes Google ML Kit for that
+   scanner, which sends Google usage data (see
+   [QR code scanner on Android](#store-privacy-declarations-what-the-build-does)).
 2. Host it at an `https://` URL.
 3. Set `SONOLECT_PRIVACY_POLICY_URL` in the EAS production environment
    (`eas env:set`), and in CI if CI ever builds releases.
@@ -281,6 +316,13 @@ decisions.
    explicit permission before personal data goes to a third-party AI). The
    dialog shown before each note names the provider and the model; keep a
    screenshot of it ready for the review notes.
+4. On Play Data safety, declare what Google ML Kit collects in the Android
+   build (its data disclosure page lists it; see
+   [QR code scanner on Android](#store-privacy-declarations-what-the-build-does)).
+   After the first Android release build, check its merged manifest as
+   _Permissions_ and _Camera libraries_ in
+   [How to check a release](#how-to-check-a-release) say, and note any
+   entry that is not listed there.
 
 ### Sync server (optional)
 
@@ -373,8 +415,10 @@ Facts for Play Data safety and App Store App Privacy. They describe this
 phone-only build; turning the API back on changes them, and so does a sync
 URL in the build (see [Note sync](#note-sync)).
 
-- **No Sonolect servers**, unless the build has a sync URL. The build has no
-  account, no analytics, no crash reporting and no ads. Without sync, no
+- **No Sonolect servers**, unless the build has a sync URL. Sonolect has no
+  account, no analytics, no crash reporting and no ads of its own; on
+  Android, the QR code scanner's library (Google ML Kit) sends Google usage
+  data (see _QR code scanner on Android_ below). Without sync, no
   transcript, note, dictionary entry or recording is sent to the developer.
 - **Microphone audio** goes to the speech recognizer of the phone:
   - on the device, when the phone can recognize the chosen language there;
@@ -388,7 +432,10 @@ URL in the build (see [Note sync](#note-sync)).
   dictated note keeps when each part was said (text and times, no audio),
   for its subtitles. With sync on, those times go with the note, end-to-end
   encrypted like its text (see [Note sync](#note-sync)).
-  Android backups are off (`allowBackup: false`). _Ephemeral_ saves nothing.
+  Android backups are off (`allowBackup: false`). _Ephemeral_ saves nothing,
+  and a launch that can't read the settings saves no new note and syncs
+  nothing until settings are saved; changes to the notes already saved are
+  kept.
   _Clear history_ and _Erase all data_ delete them. _Keep notes for_
   (forever by default; 1, 7, 30 or 90 days) deletes older notes at launch
   and whenever the app comes back to the foreground; pinned notes stay.
@@ -409,13 +456,32 @@ URL in the build (see [Note sync](#note-sync)).
   this phone only, and _Erase all data_ deletes it. Loading the model list
   sends no key and no note.
 - **Permissions**: microphone (`RECORD_AUDIO` on Android), and on iOS
-  microphone and speech recognition, with English and French prompts.
+  microphone and speech recognition, with English and French prompts. The
+  camera (`CAMERA` on Android), only to scan another device's sync code in
+  Settings › Sync › _Scan code_, asked the first time the user taps it: the
+  code is read on the phone, no image is kept or sent, and the camera runs
+  only while the scanner is open. A build without a sync URL has no Sync
+  section, so it never asks for the camera or opens it, though its manifest
+  and `Info.plist` still declare it. On Android the camera is optional,
+  so devices without one can still install the app.
+- **QR code scanner on Android**: `expo-camera` reads the code with Google
+  ML Kit, a library inside the app that runs on the phone, in every Android
+  build. Google says ML Kit sends Google usage and diagnostic data (such as
+  device and app details, and performance and error metrics), not the
+  camera images or what they show, so the sync code stays on the phone. Play
+  Data safety must include what ML Kit collects, as Google's
+  [ML Kit data disclosure](https://developers.google.com/ml-kit/android-data-disclosure)
+  lists it, for every Android build: the library is in each one, even in a
+  build without a sync URL, which never opens the scanner. iOS uses Apple's
+  own camera framework and adds no third-party library.
 
 ### Note sync
 
 Only in a build with `EXPO_PUBLIC_SONOLECT_SYNC_URL`, and only after the user
 turns sync on in Settings or joins with a code. Until then the app sends
-nothing to the sync server. Sync adds no permission.
+nothing to the sync server. Sync is the only feature that uses the camera:
+_Scan code_ asks for it to read another device's sync code on the phone (see
+Permissions above); typing the code needs none.
 
 - **Where it goes**: the sync server at the build's URL, which the owner (the
   developer) runs on Google Cloud: Cloud Run and Firestore in the region the

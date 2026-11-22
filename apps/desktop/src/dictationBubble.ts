@@ -136,17 +136,22 @@ export function previewDetail(text: string, max = DETAIL_MAX): string {
   return `${flat.slice(0, max - 1).trimEnd()}…`;
 }
 
+/**
+ * The line under the pill. `pasteKey` is the paste shortcut as this platform
+ * shows it: "Ctrl+V", or "⌘V" on macOS.
+ */
 export function bubbleDetailFor(
   phase: BubblePhase,
   outcome: DictationOutcome | undefined,
   voiceError: string | undefined,
   t: Translator,
+  pasteKey = "Ctrl+V",
 ): string | null {
   if (phase === "inserted" && outcome?.kind === "inserted") {
     return previewDetail(outcome.text);
   }
   if (phase === "copied" && outcome?.kind === "copied") {
-    return t("bubble.copiedDetail");
+    return t("bubble.copiedDetail", { key: pasteKey });
   }
   if (phase === "error") {
     if (outcome?.kind === "error") return previewDetail(outcome.message);
@@ -257,4 +262,14 @@ export function displayAccelerator(
           : p,
     )
     .join("+");
+}
+
+/**
+ * The short form for a small key cap: ⌘⇧M on macOS, "Ctrl ⇧ M" elsewhere.
+ */
+export function compactAccelerator(accelerator: string, mac = false): string {
+  if (mac) return displayAccelerator(accelerator, true);
+  return displayAccelerator(accelerator, false, { Shift: "⇧" })
+    .split("+")
+    .join(" ");
 }

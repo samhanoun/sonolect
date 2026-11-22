@@ -22,9 +22,9 @@ import {
   LEGACY_V1_KEY,
   LEGACY_V2_KEY,
   SYNC_COMPANION_PREFIX,
-  asRecord,
   createJsonStore,
   createNoteStore,
+  createSettingsStore,
   readCompanionValue,
   sanitizeDictionary,
   sanitizeSnippets,
@@ -57,6 +57,13 @@ const notes = createNoteStore(
   SYNC_URL ? { companionPrefix: SYNC_COMPANION_PREFIX } : {},
 );
 const values = createJsonStore(AsyncStorage);
+// Nothing stored: a first run follows the device.
+const settingsStore = createSettingsStore(
+  AsyncStorage,
+  values,
+  KEYS.settings,
+  deviceDefaultSettings,
+);
 const webSecrets = new Map<string, string>();
 const providerKeys = createProviderKeyStore(
   Platform.OS === "web" ? null : SecureStore,
@@ -141,27 +148,22 @@ export const mobileStorage = {
   /**
    * stored: settings were found on the phone. False on a first run, after
    * Erase all data, and after a reinstall, when the iOS keychain may still
-   * hold an earlier install's provider keys.
+   * hold an earlier install's provider keys. ok false: settings are stored
+   * but could not be read, so the session stores no new note and nothing
+   * syncs (settingsFromRead), at every launch until settings are saved
+   * (createSettingsStore); a value that failed to read is never
+   * overwritten.
    */
   async loadSettings(): Promise<
     Loaded<CompanionSettings> & { stored: boolean }
   > {
     await migrateLegacySecureStore();
-    const read = await values.read(KEYS.settings);
-    const saved = read.ok ? asRecord(read.value) : undefined;
-    return {
-      ok: read.ok,
-      stored: saved !== undefined,
-      // Nothing stored (or nothing usable): a first run follows the device.
-      value: saved
-        ? normalizeSettings(saved as Partial<CompanionSettings>)
-        : deviceDefaultSettings(),
-    };
+    return settingsStore.load();
   },
 
   /** Rejects, writing nothing, when the settings could not be read. */
   async saveSettings(settings: CompanionSettings): Promise<void> {
-    await values.write(KEYS.settings, settings);
+    await settingsStore.save(settings);
   },
 
   /** The notes, newest first, with every one kept (no cap, data-2). */
@@ -184,6 +186,14 @@ export const mobileStorage = {
   },
 
   /**
+   * Saves the changes to the notes already stored, and their deletes,
+   * without storing a new note (NoteStore.saveExisting).
+   */
+  async saveExistingNotes(history: readonly TranscriptTurn[]): Promise<void> {
+    await notes.saveExisting(history);
+  },
+
+  /**
    * Sync's writes: notes with their companion values, and notes another
    * device deleted. Rejects while some notes could not be read.
    */
@@ -199,11 +209,13 @@ export const mobileStorage = {
     return readCompanionValue(AsyncStorage, `${SYNC_COMPANION_PREFIX}${id}`);
   },
 
-  async clearNotes(): Promise<void> {
-    await notes.clear();
+  /** Removes every note; resolves with the ids of the notes removed. */
+  async clearNotes(): Promise<string[]> {
+    const removed = await notes.clear();
     if (Platform.OS !== "web") {
       await SecureStore.deleteItemAsync(LEGACY_V1_KEY).catch(() => undefined);
     }
+    return removed;
   },
 
   async loadDictionary(): Promise<Loaded<DictionaryEntry[]>> {
@@ -299,7 +311,9 @@ export const mobileStorage = {
     };
     // Through the note store first: it waits for saves in progress and
     // forgets the notes it knew.
-    await attempt(() => notes.clear());
+    await attempt(async () => {
+      await notes.clear();
+    });
     await attempt(async () => {
       const keys = (await AsyncStorage.getAllKeys()).filter((key) =>
         key.startsWith(APP_KEY_PREFIX),

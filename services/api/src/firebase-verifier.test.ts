@@ -45,6 +45,20 @@ it("rejects expired, wrong-project, wrong-issuer and invalid identity tokens", a
     await assert.rejects(verify(await sign(claims)));
   }
 });
+it("accepts a fresh token from a clock a little ahead of the server's", async () => {
+  // Google stamps iat and auth_time with its own clock. A server clock a few
+  // seconds behind must not reject a token that was just minted.
+  assert.equal(
+    (await verify(await sign({ iat: now + 5, auth_time: now + 5 }))).uid,
+    "alice",
+  );
+  assert.equal(
+    (await verify(await sign({ iat: now + 60, auth_time: now + 60 }))).uid,
+    "alice",
+  );
+  await assert.rejects(verify(await sign({ iat: now + 120 })));
+  await assert.rejects(verify(await sign({ auth_time: now + 120 })));
+});
 it("rejects a forged token and unsigned identity headers", async () => {
   const token = await sign();
   const parts = token.split(".");

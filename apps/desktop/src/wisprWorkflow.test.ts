@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
 import {
+  applyDictionary,
   buildInsertionPlan,
   expandSnippets,
   isOnboardingComplete,
@@ -26,6 +27,55 @@ describe("Wispr-style dictation workflow helpers", () => {
         ],
       }),
       "Send it to Ismail Hanoun.",
+    );
+  });
+
+  it("applies entries that start or end with an accented letter or a symbol", () => {
+    const entry = (spoken: string, replacement: string) => ({
+      id: spoken,
+      spoken,
+      replacement,
+    });
+    assert.equal(
+      applyDictionary("je bois un café ce matin", [
+        entry("café", "Café Lumière"),
+      ]),
+      "je bois un Café Lumière ce matin",
+    );
+    assert.equal(
+      applyDictionary("Éric est là, éric aussi", [
+        entry("Éric", "Eric Dupont"),
+      ]),
+      "Eric Dupont est là, Eric Dupont aussi",
+    );
+    assert.equal(
+      applyDictionary("I write C++ daily. C++.", [entry("C++", "C plus plus")]),
+      "I write C plus plus daily. C plus plus.",
+    );
+    assert.equal(
+      polishDictation("je bois un café", {
+        dictionary: [entry("café", "Café Lumière")],
+      }),
+      "Je bois un Café Lumière.",
+    );
+  });
+
+  it("only replaces whole words, in any script", () => {
+    const entries = [{ id: "1", spoken: "café", replacement: "X" }];
+    assert.equal(
+      applyDictionary("cafés, décafé et café", entries),
+      "cafés, décafé et X",
+    );
+    // A combining accent is part of the word before it.
+    assert.equal(
+      applyDictionary("café", [{ id: "2", spoken: "cafe", replacement: "X" }]),
+      "café",
+    );
+    assert.equal(
+      applyDictionary("sonolectx sonolect_ sonolect", [
+        { id: "3", spoken: "sonolect", replacement: "Sonolect" },
+      ]),
+      "sonolectx sonolect_ Sonolect",
     );
   });
 

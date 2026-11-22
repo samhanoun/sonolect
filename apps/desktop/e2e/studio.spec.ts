@@ -82,6 +82,53 @@ test.describe("Sonolect studio", () => {
     );
   });
 
+  test("undo in another field stays in that field", async ({ page }) => {
+    await nav(page, "Transcribe").click();
+    const editor = page.getByLabel("Transcript editor");
+    await editor.fill("hello  world");
+    await page.getByRole("button", { name: "Clean up locally" }).click();
+    await expect(editor).toHaveValue("Hello world.");
+
+    // The browser's own undo runs in the dictionary field, and the
+    // transcript is left as it was.
+    await nav(page, "Dictionary").click();
+    const spoken = page.getByPlaceholder("A word that needs correcting");
+    await spoken.pressSequentially("sono");
+    await spoken.press("ControlOrMeta+z");
+    await expect(spoken).toHaveValue("");
+    await nav(page, "Transcribe").click();
+    await expect(editor).toHaveValue("Hello world.");
+
+    // In the transcript editor the shortcut undoes the transcript.
+    await editor.press("ControlOrMeta+z");
+    await expect(editor).toHaveValue("hello  world");
+    await editor.press("ControlOrMeta+Shift+z");
+    await expect(editor).toHaveValue("Hello world.");
+  });
+
+  test("undo from a list or a checkbox undoes the transcript", async ({
+    page,
+  }) => {
+    await nav(page, "Transcribe").click();
+    const editor = page.getByLabel("Transcript editor");
+    await editor.fill("hello  world");
+    await page.getByRole("button", { name: "Clean up locally" }).click();
+    await expect(editor).toHaveValue("Hello world.");
+
+    // Neither has an undo of its own: the transcript's runs.
+    const format = page.getByLabel("Export format");
+    await format.focus();
+    await format.press("ControlOrMeta+z");
+    await expect(editor).toHaveValue("hello  world");
+
+    await page.getByRole("button", { name: "Segments", exact: true }).click();
+    const tick = page.getByRole("checkbox", { name: "Select segment 1" });
+    await tick.check();
+    await tick.press("ControlOrMeta+Shift+z");
+    await page.getByRole("button", { name: "Text", exact: true }).click();
+    await expect(editor).toHaveValue("Hello world.");
+  });
+
   test("transcripts export as subtitles with timed cues", async ({ page }) => {
     await nav(page, "Transcribe").click();
     await page

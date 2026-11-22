@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { previewCanTranscribe, submitCapturedAudio } from "./voiceApi";
+import {
+  previewCanTranscribe,
+  requestSignal,
+  submitCapturedAudio,
+} from "./voiceApi";
 
 function createDeterministicWavBytes() {
   const data = new Uint8Array([0, 64, 255, 127, 0, 128, 255, 191]);
@@ -184,7 +188,10 @@ describe("desktop voice API client", () => {
 
     assert.equal(result.status, "submitted");
     assert.equal(result.jobId, "job-1");
-    assert.equal(result.transcript, "transcript-1");
+    // The id of a transcript still to be written is not its text: nothing
+    // would otherwise stop it being pasted into the app in front.
+    assert.equal(result.transcriptId, "transcript-1");
+    assert.equal(result.transcript, undefined);
     assert.equal(seen.length, 2);
     assert.equal(seen[0]?.url, "http://localhost:4321/audio/jobs");
     assert.equal(seen[0]?.init.method, "POST");
@@ -254,5 +261,93 @@ describe("what the browser preview can transcribe", () => {
       previewCanTranscribe({ privacyLevel: "cloud", sttProvider: "local" }),
       false,
     );
+  });
+});
+
+describe("the signal a request is sent with", () => {
+  const settled = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+  it("uses AbortSignal.timeout and AbortSignal.any where they exist", () => {
+    const made: string[] = [];
+    const caller = new AbortController();
+    const statics = {
+      timeout: (ms: number) => {
+        made.push(`timeout ${ms}`);
+        return AbortSignal.timeout(ms);
+      },
+      any: (signals: AbortSignal[]) => {
+        made.push(`any ${signals.length}`);
+        return AbortSignal.any(signals);
+      },
+    };
+    requestSignal(caller.signal, 60_000, statics).settle();
+    assert.deepEqual(made, ["timeout 60000", "any 2"]);
+  });
+
+  it("aborts when the caller does, in a webview without them", () => {
+    const caller = new AbortController();
+    const { signal, settle } = requestSignal(caller.signal, 60_000, {});
+    assert.equal(signal.aborted, false);
+    caller.abort(new Error("cancelled"));
+    assert.equal(signal.aborted, true);
+    assert.equal((signal.reason as Error).message, "cancelled");
+    settle();
+    const before = new AbortController();
+    before.abort();
+    const already = requestSignal(before.signal, 60_000, {});
+    assert.equal(already.signal.aborted, true);
+    already.settle();
+  });
+
+  it("times out in a webview without them, unless the request is done", async () => {
+    const late = requestSignal(undefined, 5, {});
+    await settled();
+    assert.equal(late.signal.aborted, true);
+    assert.equal((late.signal.reason as DOMException).name, "TimeoutError");
+
+    const done = requestSignal(undefined, 5, {});
+    done.settle();
+    await settled();
+    assert.equal(done.signal.aborted, false);
+  });
+
+  it("lets go of the caller's signal once settled, timed out or aborted", async () => {
+    // A caller's signal that counts who listens to it.
+    const listening = new Set<unknown>();
+    const caller = () =>
+      ({
+        aborted: false,
+        reason: undefined,
+        addEventListener: (_type: string, listener: unknown) =>
+          listening.add(listener),
+        removeEventListener: (_type: string, listener: unknown) =>
+          listening.delete(listener),
+      }) as unknown as AbortSignal;
+
+    requestSignal(caller(), 60_000, {}).settle();
+    assert.equal(listening.size, 0);
+
+    const late = requestSignal(caller(), 5, {});
+    assert.equal(listening.size, 1);
+    await settled();
+    assert.equal(late.signal.aborted, true);
+    assert.equal(listening.size, 0);
+
+    const real = new AbortController();
+    const done = requestSignal(real.signal, 60_000, {});
+    done.settle();
+    real.abort();
+    assert.equal(done.signal.aborted, false);
+  });
+
+  it("keeps a timeout with a caller's signal where only timeout exists", async () => {
+    // macOS 11: AbortSignal.timeout, but no AbortSignal.any.
+    const caller = new AbortController();
+    const { signal, settle } = requestSignal(caller.signal, 60_000, {
+      timeout: AbortSignal.timeout,
+    });
+    caller.abort();
+    assert.equal(signal.aborted, true);
+    settle();
   });
 });

@@ -1,6 +1,7 @@
 {
   "ios": {
     "NSMicrophoneUsageDescription": "Sonolect utilise le micro pour transformer votre voix en texte.",
-    "NSSpeechRecognitionUsageDescription": "Sonolect utilise la reconnaissance vocale pour transcrire ce que vous dictez."
+    "NSSpeechRecognitionUsageDescription": "Sonolect utilise la reconnaissance vocale pour transcrire ce que vous dictez.",
+    "NSCameraUsageDescription": "Sonolect utilise l'appareil photo uniquement pour scanner le code de synchronisation affiché sur votre autre appareil."
   }
 }

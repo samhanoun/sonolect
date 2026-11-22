@@ -43,8 +43,14 @@ variable "bucket_location" {
   default     = "EU"
 }
 
+variable "enable_cloud_sql" {
+  description = "Create the Cloud SQL PostgreSQL instance and its database. Off until a service needs relational state. Needs private_network_self_link."
+  type        = bool
+  default     = false
+}
+
 variable "private_network_self_link" {
-  description = "Self-link of the VPC network used for private Cloud SQL connectivity."
+  description = "Self-link of the VPC network used for private Cloud SQL connectivity. Required when enable_cloud_sql is true."
   type        = string
   default     = null
 }
@@ -113,6 +119,19 @@ variable "allowed_origins" {
   ]
 }
 
+variable "vertex_location" {
+  description = "Vertex AI region of the API's polish requests (SONOLECT_VERTEX_LOCATION). Defaults to region, so transcripts stay in the platform's region. It must offer gemini_model."
+  type        = string
+  default     = null
+}
+
+variable "gemini_model" {
+  description = "Gemini model of the API's polish requests (SONOLECT_GEMINI_MODEL). The default, gemini-2.5-flash, was retired on Vertex AI on October 16, 2026, so polish needs a current model and a vertex_location that serves it (see docs/api.md). Keep it the same as DEFAULT_GEMINI_MODEL in services/api/src/ai.ts. Null means the default."
+  type        = string
+  default     = "gemini-2.5-flash"
+  nullable    = false
+}
+
 variable "api_image" {
   description = "Container image for the API service. Replace placeholder before apply."
   type        = string
@@ -141,6 +160,17 @@ variable "api_max_instances" {
   description = "API Cloud Run max instance count."
   type        = number
   default     = 10
+}
+
+variable "api_concurrency" {
+  description = "Requests one API instance serves at once. /v1/transcribe buffers bodies of up to 10 MiB, so 20 keeps a 512Mi instance clear of running out of memory; raise it with api_memory."
+  type        = number
+  default     = 20
+
+  validation {
+    condition     = var.api_concurrency >= 1 && var.api_concurrency <= 1000
+    error_message = "api_concurrency must be between 1 and 1000."
+  }
 }
 
 variable "worker_cpu" {

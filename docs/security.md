@@ -38,7 +38,7 @@
 
 ## API cost controls
 
-The paid `/v1/transcribe` and `/v1/polish` routes are limited per verified account (30 requests per minute by default, `aiRouteLimits` in `createApp`), polish input is capped at 20,000 characters, 200 dictionary entries and a one-line style preset of 256 characters (a longer preset, or one with a line break, gets 422, never a silent drop), and provider errors are logged rather than returned. The limit is held in memory per instance, so with several Cloud Run instances the effective budget is per instance; move it to a shared store (Firestore or Redis) before relying on it for billing.
+The paid `/v1/transcribe` and `/v1/polish` routes are limited per verified account (30 requests per minute by default, `aiRouteLimits` in `createApp`). The limit is checked before the request body is read, and `/v1/transcribe` stops reading at 10 MiB, Google's limit for synchronous recognition (413 `audio_too_large` past it). Polish input is capped at 20,000 characters, 200 dictionary entries and a one-line style preset of 256 characters (a longer preset, or one with a line break, gets 422, never a silent drop), and provider errors are logged rather than returned. The limit is held in memory per instance, so with several Cloud Run instances the effective budget is per instance; move it to a shared store (Firestore or Redis) before relying on it for billing.
 
 ## Production mode
 
@@ -60,7 +60,8 @@ Note sync is end-to-end encrypted. The apps call `services/sync-service` directl
 - **The server only ever sees:** vaultId, the bearer authToken (one per vault, shared by every device in it; the server stores only its SHA-256), record ids (rids), revisions, sequence numbers, the vault's epoch, which records are deletes (tombstones) and when they were written, sizes, timestamps, the apps' user agent, IP addresses and ciphertext. Nothing sends or logs the root key, `encKey` or `idKey`, and nothing logs request bodies or tokens.
 - **Each note is one sealed record:** XChaCha20-Poly1305, padded to 256 bytes and bound to its vault and record id. A record id is an HMAC of the note id, so the server never learns note ids.
 - **A dishonest server can** withhold, delay or delete records, and learn how many notes a vault holds, their rounded sizes, when notes are deleted and when devices sync. It cannot read, forge or move a record. A replayed older version of a note is refused, and a vault rolled back as a whole is detected by its head and epoch and answered with a full resync.
-- **Whoever holds the pairing link, QR code or typed code can read and change every synced note.** Every screen that shows or accepts a code says so in one line. There is no revocation in v1: deleting the server copy ends the vault, and the other devices then turn sync off and keep their notes. Erase-all also forgets the key and the sync state, and first offers to delete the server copy.
+- **Whoever holds the QR code or typed code can read and change every synced note.** Every screen that shows or accepts a code says so in one line. There is no revocation in v1: deleting the server copy ends the vault, and the other devices then turn sync off and keep their notes. Erase-all also forgets the key and the sync state, and first offers to delete the server copy.
+- **The key never goes through a link.** Any app on a phone can claim a custom URL scheme such as `sonolect://`, and the phone then picks which app opens the link, so a link with the key could reach another app. The QR code therefore holds plain text (`SONOLECT SYNC 1 ` and the code), which the phone has nothing to open; the phone reads it with Sonolect's own scanner (Settings › Sync › Scan code), and no build reads a key from a link. A camera app that reads the QR code shows the text and may offer a web search with it, which would send the key to a search engine, so the caption under the QR code says to scan it with Sonolect, not with the camera app. The camera is used only for that scan, on the phone: no image is kept or sent. On Android the scan runs in Google ML Kit, a library inside the app; Google says ML Kit sends Google only usage and diagnostic data, not the images or what they show (see [mobile-release.md](mobile-release.md#store-privacy-declarations-what-the-build-does)).
 - **Sync stays invisible and inert unless the build sets a server URL** (`SONOLECT_SYNC_URL` on desktop, `EXPO_PUBLIC_SONOLECT_SYNC_URL` on mobile). Release builds accept only https. Development builds may also use plain http to `127.0.0.1`, `localhost` or, from the Android emulator, `10.0.2.2`. Pairing never carries a URL.
 - **Recordings do not sync in v1.** Local retention never deletes remotely, and a device does not import notes past its own retention window.
 - **What the network sees.** The apps reach the server over HTTPS only (release builds refuse any other URL). Someone on the network path sees the server's host name and IP address, the device's IP address, and when and how much data moves, but not the request paths (which carry the vault id), the bearer token or the records. A TLS-intercepting proxy that the device trusts sees what the server sees, the bearer token included: it could then delete or overwrite the vault's records, but still not read or forge a note.
@@ -74,15 +75,18 @@ Note sync is end-to-end encrypted. The apps call `services/sync-service` directl
 
 Rules live in `infra/firebase`:
 
-- `firestore.rules`: denies by default, permits user-owned documents and tenant documents only to members/admins.
-- `storage.rules`: denies by default, permits user-owned and tenant-owned object paths with size limits.
+- `firestore.rules`: denies by default, permits user-owned documents and tenant documents only to members/admins. The user who creates a tenant adds themself as its first owner; admins manage admins and members, and only an owner can make an owner, change a tenant's owner or delete the tenant.
+- `storage.rules`: denies by default, permits user-owned and tenant-owned object paths with size limits on uploads.
+- `rules.test.mjs`: CI checks both rule files on the Firebase emulators ("Sync service (Firestore emulator)" job).
 - `firestore.indexes.json`: expected composite indexes for sessions, transcripts, agent runs, and projects.
+
+No app or service uses these rules today: the shipped apps keep notes on the device, the sync service reaches its own Firestore database with a service account (rules do not apply to it), and the API keeps transcripts in memory or a file. They matter once a client reads Firestore or Storage directly.
 
 ## Secret handling
 
 1. Add new secret names to Terraform only as Secret Manager metadata.
 2. Populate secret versions outside Git using the GCP console, `gcloud secrets versions add`, or an approved vault integration.
-3. Grant access to runtime service accounts only when needed.
+3. Grant `roles/secretmanager.secretAccessor` on the secret itself, and only to the runtime service account whose service mounts it. Never grant it on the whole project.
 4. Rotate provider keys and webhook secrets on role changes, suspected compromise, or at least every 180 days.
 
 ## CI and supply chain

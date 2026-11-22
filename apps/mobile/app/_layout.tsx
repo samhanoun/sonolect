@@ -191,17 +191,6 @@ export default function RootLayout() {
             tabBarStyle: { display: "none" },
           }}
         />
-        <Tabs.Screen
-          name="sync/join"
-          options={{
-            // The pairing link (sonolect://sync/join?v=1&k=…), never a tab.
-            // In builds without sync it opens Capture.
-            tabBarButton: () => null,
-            tabBarItemStyle: { display: "none" },
-            title: t.sync.joinScreenTitle,
-            tabBarStyle: { display: "none" },
-          }}
-        />
         {/* Unknown links redirect to Capture; never a tab. */}
         <Tabs.Screen name="+not-found" options={{ href: null }} />
       </Tabs>

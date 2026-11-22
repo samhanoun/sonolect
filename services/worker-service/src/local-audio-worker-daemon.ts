@@ -30,6 +30,7 @@ export type LocalAudioWorkerDaemonLogEntry =
   | ({
       event: "local-audio-worker-daemon.tick";
     } & LocalAudioWorkerDaemonSummary)
+  | { event: "local-audio-worker-daemon.error"; message: string }
   | ({
       event: "local-audio-worker-daemon.stop";
       reason: string;
@@ -113,21 +114,23 @@ export function parseLocalAudioWorkerDaemonConfig(
   };
 }
 
+// The daemon passes one signal to every sleep, so the abort listener is
+// removed when the timer fires instead of piling up on the signal.
 const defaultSleep = (ms: number, signal?: AbortSignal): Promise<void> =>
-  new Promise((resolve, reject) => {
+  new Promise((resolve) => {
     if (signal?.aborted) {
       resolve();
       return;
     }
-    const timeout = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timeout);
-        resolve();
-      },
-      { once: true },
-    );
+    const onAbort = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 
 const summarize = (
@@ -157,14 +160,31 @@ export async function runLocalAudioWorkerDaemon(
 
   let stopReason = "signal";
   while (!options.signal?.aborted) {
-    const result = await processNextQueuedAudioJob({
-      storePath: options.config.storePath,
-      ...(options.config.localSttCommandArgs
-        ? { localSttCommandArgs: options.config.localSttCommandArgs }
-        : {}),
-      ...(options.signal ? { signal: options.signal } : {}),
-    });
-    const results = result ? [result] : [];
+    const results: LocalAudioWorkerResult[] = [];
+    try {
+      // Each tick works through every job that is queued now.
+      for (;;) {
+        const result = await processNextQueuedAudioJob({
+          storePath: options.config.storePath,
+          ...(options.config.localSttCommandArgs
+            ? { localSttCommandArgs: options.config.localSttCommandArgs }
+            : {}),
+          ...(options.signal ? { signal: options.signal } : {}),
+        });
+        if (!result) break;
+        results.push(result);
+        // An aborted job goes back to the queue: stop rather than take it again.
+        if (options.signal?.aborted || result.job.status === "queued") break;
+      }
+    } catch (error) {
+      // A store that cannot be read or written now may work at the next
+      // poll. Exiting would leave a claimed job in "processing" until the
+      // worker sees that its claim is stale.
+      log({
+        event: "local-audio-worker-daemon.error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
     const tick = summarize(results);
     summary.ticks += 1;
     summary.processed += tick.processed;

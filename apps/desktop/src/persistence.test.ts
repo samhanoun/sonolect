@@ -70,6 +70,44 @@ describe("persistence", () => {
     assert.equal(loadTranscriptDraft(), null);
   });
 
+  it("keeps the version of the recording a draft was opened from", () => {
+    const draft = {
+      activeSessionId: null,
+      transcript: "Edited",
+      transcriptSegments: [
+        {
+          id: "seg-1",
+          text: "Edited",
+          startMs: 0,
+          endMs: 1000,
+          captureId: "50-1",
+        },
+      ],
+      selectedSegmentIds: [],
+      savedAt: "2026-05-05T07:00:00.000Z",
+    };
+    const version = { id: "50-1", hlc: { t: 1700, c: 2, d: "desk" } };
+    saveTranscriptDraft({ ...draft, openedVersion: version });
+    assert.deepEqual(loadTranscriptDraft()?.openedVersion, version);
+    // A recording opened before sync was on has no version, which is kept.
+    saveTranscriptDraft({ ...draft, openedVersion: { id: "50-1", hlc: null } });
+    assert.deepEqual(loadTranscriptDraft()?.openedVersion, {
+      id: "50-1",
+      hlc: null,
+    });
+    // None, or one that is not a version, is left out.
+    saveTranscriptDraft({ ...draft, openedVersion: null });
+    assert.deepEqual(loadTranscriptDraft(), draft);
+    saveSettings(
+      SETTINGS_KEYS.transcriptDraft,
+      JSON.stringify({
+        ...draft,
+        openedVersion: { id: "50-1", hlc: { t: 1 } },
+      }),
+    );
+    assert.deepEqual(loadTranscriptDraft(), draft);
+  });
+
   it("ignores corrupt autosave draft payloads", () => {
     saveSettings(SETTINGS_KEYS.transcriptDraft, "{not-json");
     assert.equal(loadTranscriptDraft(), null);

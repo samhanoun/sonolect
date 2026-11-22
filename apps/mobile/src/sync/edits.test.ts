@@ -9,7 +9,13 @@ import {
   SYNC_COMPANION_PREFIX,
   SYNC_STATE_PREFIX,
 } from "../storageCore";
-import { type Tombstone, addNote, changeNote, deleteNotes } from "./edits";
+import {
+  type Tombstone,
+  addNote,
+  changeNote,
+  deleteNotes,
+  unreadNoteDeletes,
+} from "./edits";
 import { SYNC_KEY_MARKER } from "./keyStore";
 import { createTestVault, makeTurn } from "./testSupport";
 
@@ -159,6 +165,49 @@ describe("the store's note changes: tombstones", () => {
     await b.engine.sync();
     assert.deepEqual(b.phone.history, []);
     assert.equal(b.phone.latest, undefined);
+  });
+
+  it("deletes the notes it could not read too, only for every device", () => {
+    const shown = makeTurn();
+    assert.deepEqual(
+      unreadNoteDeletes(
+        [shown.id, "turn_unread", "turn_unread"],
+        [shown],
+        "everywhere",
+      ),
+      [{ id: "turn_unread" }],
+    );
+    assert.deepEqual(
+      unreadNoteDeletes([shown.id, "turn_unread"], [shown], "here"),
+      [],
+    );
+  });
+
+  it("clears on the other phone the notes Clear history removed unread", async () => {
+    const v = createTestVault(NOW);
+    const a = await v.device();
+    const b = await v.device();
+    await a.phone.add(makeTurn(), a.stamp);
+    await a.phone.add(makeTurn(), a.stamp);
+    await a.engine.sync();
+    await b.engine.sync();
+    assert.equal(b.phone.history.length, 2);
+
+    // A launch that can't read the notes: the library is empty and the
+    // notes stay stored.
+    a.phone.kv.fail = (op) => op === "multiGet";
+    await a.phone.restart();
+    a.phone.writable = false;
+    assert.deepEqual(a.phone.history, []);
+    a.phone.kv.fail = () => false;
+
+    await a.phone.clearHistory("everywhere", (tombstones) =>
+      a.engine.recordDeletes(tombstones),
+    );
+    await a.engine.sync();
+    await b.engine.sync();
+    assert.deepEqual(b.phone.history, [], "deleted on the other phone too");
+    assert.deepEqual(a.phone.history, []);
   });
 
   it("keeps the notes on the other phone when retention or the recovery screen removes them here", async () => {

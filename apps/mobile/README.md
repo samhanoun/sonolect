@@ -39,16 +39,24 @@ Studio palette (forest `#1F3429`, lime `#DDF39A`), drawn as glass (see
   recordings are kept: each one is deleted once read, and what is left in
   the app cache is deleted at each start, on _Clear history_ and on _Erase
   all data_. A value that can't be read is never deleted: the app says so
-  and reads it again at the next launch. Choosing _Ephemeral_ or turning
-  history off deletes the stored notes, after a confirmation that says how
-  many. On Android the AsyncStorage database may grow to 64 MB
+  and reads it again at the next launch. When the settings can't be read,
+  the app saves no new note and syncs nothing until settings are saved, so
+  a choice such as _Ephemeral_ still holds; edits, pins and deletes of the
+  notes already saved are kept. Settings whose value is broken stay unread
+  at each launch until then (`createSettingsStore` in
+  `src/storageCore.ts`).
+  _Clear history_ with sync on also deletes on the other devices the notes
+  it could not read. Choosing _Ephemeral_ or turning history off deletes
+  the stored notes, after a confirmation that says how many. On Android
+  the AsyncStorage database may grow to 64 MB
   (`plugins/withAsyncStorageSize.js`).
 - **Languages**: on a first run (and after _Erase all data_) the app
   language and the dictation language follow the phone's preferred
-  languages (`src/firstRun.ts`). The iOS microphone and speech prompts are
-  translated in `locales/fr.json`. The layout stays left-to-right on phones
-  set to a right-to-left language, because the app has no right-to-left UI
-  yet (`expo-localization` plugin, `supportsRTL: false`).
+  languages (`src/firstRun.ts`). The iOS microphone, speech and camera
+  prompts are translated in `locales/fr.json`. The layout stays
+  left-to-right on phones set to a right-to-left language, because the app
+  has no right-to-left UI yet (`expo-localization` plugin,
+  `supportsRTL: false`).
 - **Privacy policy**: Settings and the onboarding card link to the policy at
   `SONOLECT_PRIVACY_POLICY_URL`. Development builds may leave it unset and
   show no link; release builds fail without it (`config/release.cjs`, see
@@ -75,15 +83,26 @@ server stores only ciphertext. Recordings don't sync (the phone keeps none).
 - **Off unless the build sets a server**: `EXPO_PUBLIC_SONOLECT_SYNC_URL`
   (`src/features.ts`, checked by `config/release.cjs`). It must be https;
   development builds may also use `http://127.0.0.1`, `http://localhost` or,
-  from the Android emulator, `http://10.0.2.2`. Without it, and on the web,
-  the app shows no sync and makes no sync request. It does not depend on
-  `API_FEATURES_ENABLED`.
+  from the Android emulator, `http://10.0.2.2`. A build bundled for
+  production (an EAS `preview` build, a release variant) needs https too:
+  its config check fails on plain http, which the app would ignore. Without
+  it, and on the web, the app shows no sync and makes no sync request. It
+  does not depend on `API_FEATURES_ENABLED`.
 - **Settings › Sync** turns sync on (QR code and the 56-character code),
-  joins with a code, shows the code again and turns sync off (keeping or
-  deleting the server copy). The camera app opens the QR code's link,
-  `sonolect://sync/join?v=1&k=…`, on `app/sync/join.tsx`, which asks first.
-  Every screen with a code says that joining shares every note with
-  whoever holds it.
+  joins by scanning another device's QR code or by typing its code, shows
+  the code again and turns sync off (keeping or deleting the server copy).
+  **Scan code** asks for the camera (CAMERA only, no audio; optional on
+  Android, `plugins/withOptionalCamera.js`), then opens a full-screen
+  scanner (`src/ui/SyncScanner.tsx`, expo-camera) that reads QR codes only
+  and takes only a Sonolect sync code; it closes, releasing the camera,
+  when it has one or when the user leaves Settings or the app. On Android,
+  expo-camera reads the code with Google ML Kit, on the phone:
+  [docs/mobile-release.md](../../docs/mobile-release.md) says what it adds
+  to the build and what it sends Google. The QR code holds
+  plain text (`SONOLECT SYNC 1 ` and the code), not a link: no screen reads
+  a key from a URL, and `sonolect://sync/join` opens Capture. Either way the
+  phone asks before joining. Every screen with a code says that joining
+  shares every note with whoever holds it.
 - **Code** (`src/sync/`): `keyStore.ts` keeps the key in SecureStore
   (`WHEN_UNLOCKED_THIS_DEVICE_ONLY`); `noteStore.ts` and `noteMapping.ts`
   map notes to note/1, keeping other devices' fields whole in

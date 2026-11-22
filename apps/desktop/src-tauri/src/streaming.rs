@@ -945,8 +945,14 @@ pub async fn capture_finish(app: tauri::AppHandle, id: String) -> Result<Whisper
             local_history::discard(&app, &id)?;
             return Err("No audio was recorded.".into());
         }
-        let result = finished(&mut record, outcome);
-        local_history::write_record(&app, &mut record)?;
+        let mut result = finished(&mut record, outcome);
+        // Taken from LIVE, the note is listed, so the user can delete it
+        // while its last words are transcribed. It then stays deleted.
+        if !local_history::write_record_if_kept(&app, &mut record)? {
+            if let Ok(output) = &mut result {
+                output.capture_id = None;
+            }
+        }
         result
     })
     .await
@@ -970,6 +976,9 @@ pub fn retranscribe(
 ) -> Result<WhisperResult, String> {
     let directory = local_history::directory(app)?;
     let _hold = compact_audio::hold(id);
+    // Audio whose record could not be read gets a new one. A note that the
+    // user deletes while this runs stays deleted.
+    let had_record = local_history::read_record(&directory, id).is_some();
     let wav = compact_audio::audio_file(&directory, id)
         .unwrap_or_else(|| directory.join(format!("{id}.wav")));
     let transcribe = transcriber(app, language.clone(), model_path, None, None)?;
@@ -978,11 +987,13 @@ pub fn retranscribe(
     local_history::change_record(
         app,
         id,
-        || local_history::Capture {
-            id: id.to_owned(),
-            created_at_ms: modified_ms(&wav),
-            language,
-            ..Default::default()
+        || {
+            (!had_record).then(|| local_history::Capture {
+                id: id.to_owned(),
+                created_at_ms: modified_ms(&wav),
+                language,
+                ..Default::default()
+            })
         },
         |record| match outcome {
             Ok(outcome) => finished(record, outcome),
@@ -992,6 +1003,7 @@ pub fn retranscribe(
             }
         },
     )?
+    .unwrap_or_else(|| Err(local_history::NOT_IN_LIBRARY.into()))
 }
 
 fn modified_ms(path: &Path) -> u64 {

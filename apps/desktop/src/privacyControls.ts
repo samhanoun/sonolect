@@ -66,6 +66,27 @@ export function saveCaptureRetentionDays(
   }
 }
 
+const DAY_MS = 86_400_000;
+
+/**
+ * How many of these recordings a retention of `days` deletes now: those
+ * made more than that many days ago, except pinned ones, as
+ * `purge_local_captures` picks them. It also deletes old system-audio files
+ * that an earlier version left without a record. The library does not list
+ * them, so they are not counted here.
+ */
+export function countExpiredCaptures(
+  captures: readonly { createdAtMs: number; pinned?: boolean | undefined }[],
+  days: RetentionDays,
+  nowMs = Date.now(),
+): number {
+  if (days === 0) return 0;
+  const cutoffMs = nowMs - days * DAY_MS;
+  return captures.filter(
+    (capture) => capture.pinned !== true && capture.createdAtMs < cutoffMs,
+  ).length;
+}
+
 /** Deletes recordings older than the retention setting. Returns the count. */
 export async function applyCaptureRetention(
   call: NativeCall,

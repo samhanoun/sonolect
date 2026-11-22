@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createKeyValueStateStore, type NoteStore } from "@sonolect/sync-core";
 import { getRandomValues } from "expo-crypto";
+import { fetch as expoFetch } from "expo/fetch";
 import * as SecureStore from "expo-secure-store";
 
 import { SYNC_STATE_PREFIX } from "../storageCore";
@@ -11,8 +12,9 @@ import { createFetchRequester } from "./transport";
 
 /**
  * The phone's sync, wired to the platform: AsyncStorage for the sync state,
- * SecureStore for the key, expo-crypto for randomness, fetch for HTTP. Only
- * builds with a sync server create it (features.ts SYNC_URL, never on web).
+ * SecureStore for the key, expo-crypto for randomness, Expo's fetch for
+ * HTTP. Only builds with a sync server create it (features.ts SYNC_URL,
+ * never on web).
  */
 
 /** Out of backups and never moved to another device. */
@@ -43,7 +45,11 @@ export function createAppSync(options: {
   return new SyncController({
     request: createFetchRequester({
       baseUrl: options.serverUrl,
-      fetch: (url, init) => fetch(url, init),
+      // Not React Native's global fetch, which follows redirects whatever
+      // `redirect` says: Expo's honours "error", so a redirect fails the
+      // request before the token or a note is sent anywhere else
+      // (providerFetch.ts does the same for online editing).
+      fetch: (url, init) => expoFetch(url, init),
       timers: systemTimers,
     }),
     keyStore: createSyncKeyStore(secrets, AsyncStorage),

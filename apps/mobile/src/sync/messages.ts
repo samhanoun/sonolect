@@ -19,7 +19,7 @@ export function pairingErrorText(t: Strings, error: unknown): string {
     case "typo":
       return t.sync.pairingErrors.typo;
     default:
-      // key, length, character
+      // length, character
       return t.sync.pairingErrors.length;
   }
 }

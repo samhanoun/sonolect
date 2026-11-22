@@ -85,6 +85,17 @@ variable "max_instances" {
   }
 }
 
+variable "trust_proxy_hops" {
+  description = "Proxy hops to trust for X-Forwarded-For. Leave null when callers reach Cloud Run directly (the service trusts one hop there). Set 2 behind an external Application Load Balancer, so that each caller keeps a rate limit of its own."
+  type        = number
+  default     = null
+
+  validation {
+    condition     = var.trust_proxy_hops == null ? true : (var.trust_proxy_hops >= 0 && var.trust_proxy_hops <= 99 && floor(var.trust_proxy_hops) == var.trust_proxy_hops)
+    error_message = "trust_proxy_hops must be a whole number from 0 to 99."
+  }
+}
+
 variable "max_concurrency" {
   description = "Requests one instance handles at a time. A request may carry a 5 MiB body; raise memory before raising this."
   type        = number

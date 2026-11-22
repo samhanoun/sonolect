@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
+import { parse } from "yaml";
 
 const rootPackage = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
@@ -95,5 +106,65 @@ describe("release and package readiness", () => {
     assert.doesNotMatch(ciWorkflow, /node-version:\s*20\b/);
     assert.doesNotMatch(ciWorkflow, /node-version:\s*\[20,/);
     assert.match(ciWorkflow, /node-version:\s*\[22, 24\]/);
+  });
+});
+
+const workflowsDir = new URL("../.github/workflows/", import.meta.url);
+const workflows = readdirSync(workflowsDir)
+  .filter((name) => /\.ya?ml$/.test(name))
+  .map((name) => ({
+    name,
+    workflow: parse(readFileSync(new URL(name, workflowsDir), "utf8")),
+  }));
+
+const osvScannerJob = parse(
+  readFileSync(new URL("security.yml", workflowsDir), "utf8"),
+).jobs["osv-scanner"];
+
+// Runs the "Scan lockfiles" step the way GitHub runs a step without a
+// shell (bash -e), with a stand-in scanner that exits with the given code.
+const runOsvScanStep = (scannerExitCode) => {
+  const step = osvScannerJob.steps.find(
+    (candidate) => candidate.name === "Scan lockfiles",
+  );
+  assert.ok(step, "The osv-scanner job has a Scan lockfiles step");
+  const dir = mkdtempSync(join(tmpdir(), "sonolect-osv-step-"));
+  try {
+    writeFileSync(
+      join(dir, "osv-scanner"),
+      `#!/usr/bin/env bash\necho '{}' > osv.sarif\nexit ${scannerExitCode}\n`,
+    );
+    chmodSync(join(dir, "osv-scanner"), 0o755);
+    writeFileSync(join(dir, "step.sh"), step.run);
+    return spawnSync("bash", ["-e", "step.sh"], { cwd: dir, encoding: "utf8" })
+      .status;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+describe("CI workflows", () => {
+  it("gives every job a timeout, so a hung step cannot hold a runner for 6 hours", () => {
+    const missing = workflows.flatMap(({ name, workflow }) =>
+      Object.entries(workflow.jobs)
+        .filter(([, job]) => job["timeout-minutes"] === undefined)
+        .map(([id]) => `${name}: ${id}`),
+    );
+    assert.deepEqual(missing, []);
+  });
+
+  it("tolerates only the osv-scanner exit code for vulnerabilities found", () => {
+    assert.equal(runOsvScanStep(0), 0, "no vulnerabilities");
+    assert.equal(runOsvScanStep(1), 0, "vulnerabilities found");
+    assert.equal(runOsvScanStep(127), 127, "general error");
+    assert.equal(runOsvScanStep(128), 128, "no packages found");
+  });
+
+  it("fails the osv-scanner job when the scan wrote no SARIF", () => {
+    const keep = osvScannerJob.steps.find(
+      (step) => step.name === "Keep SARIF as artifact",
+    );
+    assert.equal(keep?.with?.path, "osv.sarif");
+    assert.equal(keep.with["if-no-files-found"], "error");
   });
 });

@@ -28,6 +28,33 @@ An off route is not registered. A signed-in caller gets 404. A caller without a 
 
 No shipped app calls an off route. Desktop release builds set no `VITE_SONOLECT_API_URL`, and the mobile API switch (`API_FEATURES_ENABLED` in `apps/mobile/src/features.ts`) is off.
 
+#### `/v1` limits and errors
+
+Each signed-in account gets 30 requests per minute on each `/v1` route, counted per API instance (429 `rate_limited`, with `Retry-After`). The budget is checked before the body is read, so an account over budget never makes the API buffer its upload.
+
+The errors the API sends on these routes, the codes in the table below included, are `{error: {code, message, retryable}}`. Provider errors are logged, never returned. `retryable: false` means the same request will fail the same way. Fastify's own request errors keep Fastify's `{statusCode, code, error, message}` body, where `error` is a string: for example 400 `FST_ERR_CTP_INVALID_JSON_BODY` for malformed JSON, or 415 `FST_ERR_CTP_INVALID_MEDIA_TYPE` for a Content-Type that is not `audio/*`.
+
+| Status | `code`                               | Retryable | Meaning                                                                                                                                          |
+| ------ | ------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 413    | `audio_too_large`                    | No        | The audio is over 10 MiB (10,485,760 bytes), Google's limit for synchronous recognition. The API stops reading the body at the limit.            |
+| 422    | `audio_rejected`                     | No        | Google refused the audio (`INVALID_ARGUMENT`), most often because it is longer than one minute.                                                  |
+| 422    | `polish_rejected`                    | No        | Vertex AI refused the text (`INVALID_ARGUMENT`).                                                                                                 |
+| 502    | `model_not_found`                    | No        | The configured model or recognizer does not exist (`NOT_FOUND`), for example a retired Gemini model. It stays this way until the config changes. |
+| 503    | `transcribe_failed`, `polish_failed` | Yes       | Any other provider error, such as quota or a timeout.                                                                                            |
+
+#### `POST /v1/transcribe` input
+
+The body is the audio itself, with an `audio/*` Content-Type. Parameters are allowed, so `audio/webm;codecs=opus` from a Chromium recorder works. The `language` query parameter is the language tag (default `en-US`). Synchronous recognition takes at most one minute of audio. Longer dictations are not supported yet.
+
+#### `POST /v1/polish` model
+
+The model is `SONOLECT_GEMINI_MODEL`, `gemini-2.5-flash` when it is unset or blank. Vertex AI retired `gemini-2.5-flash` on October 16, 2026, after `gemini-2.0-flash`, so with the default model `/v1/polish` is expected to answer 502 `model_not_found`. A deploy that sets `GCP_PROJECT_ID` must also set a current model. Keep `infra/terraform` on the same model id.
+
+Choosing that model is an owner decision, because it is tied to the location:
+
+- The Gemini 3.x Flash models may not be served in a single region such as `europe-west1`, the Terraform default for `SONOLECT_VERTEX_LOCATION`. Check the model's page for its locations. The `eu` and `us` multi-regions keep data in one area; `global` does not.
+- The installed `@google-cloud/vertexai` SDK, which Google has deprecated, builds the host as `<location>-aiplatform.googleapis.com`. That is not the host of the global endpoint (`aiplatform.googleapis.com`), so a location that is not a single region needs the SDK's `apiEndpoint` option, set to the host Google documents for it, or a move to `@google/genai`.
+
 #### `POST /v1/polish` input
 
 | Field         | Rule                                                                                                                                                                                                       |
@@ -40,6 +67,13 @@ No shipped app calls an off route. Desktop release builds set no `VITE_SONOLECT_
 A model answer with no text gets 502 `polish_empty`, marked retryable. An answer the model did not finish, because it reached the token limit or a safety or other filter stopped it, gets 502 `polish_incomplete`, marked not retryable. The API never returns the raw transcript or a cut-off text as if it were polished.
 
 The mobile app sends one preset per mode (`stylePresetForMode` in `apps/mobile/src/refine.ts`, 57 to 87 characters). The desktop app sends no preset. A test in `services/api` reads the mobile presets and fails if one ever exceeds the cap.
+
+#### Preview route details
+
+- `GET /transcripts` takes `limit` (1 to 100, default 25), `includeDeleted` (`true` or `false`, also `1` or `0`, in any letter case; any other value, such as `yes` or `off`, gets 400) and `cursor`, the `nextCursor` of the previous page. The next page starts after that transcript's place in the list, also when it was deleted in between. A cursor that names none of the caller's transcripts gets 400 `invalid_cursor`.
+- `POST /audio/jobs` takes an optional `language` tag for the transcript (default `en`). The local audio worker passes it to its `{language}` placeholder. `mimeType` may carry parameters such as `;codecs=opus`; the job keeps the bare media type.
+- With `SONOLECT_API_STORE_PATH`, the requests that change the file run one at a time in the API process. Run one API instance per file.
+- A server error (5xx) answers `{error: "internal_error", message: "Internal server error"}`. The details are only logged.
 
 ### Internal services
 
@@ -100,9 +134,13 @@ threat model.
 - **`GET …/changes`** returns records with `seq > since` in seq order, each
   `{rid, rev, seq, deleted, ct}`, at most 200 records and 4 MiB of
   ciphertext per page (a page always takes its first record). `next` is the
-  cursor for the next page, `head` the vault's latest seq. A `since` above
-  `head` answers 410 `cursor_reset`; one older than purged tombstones answers
-  410 `cursor_expired`. Both mean: start again from 0.
+  cursor for the next page, `head` the vault's latest seq, and `purgedSeq` how far deleted records'
+  tombstones have been purged. A `since` above `head` answers 410
+  `cursor_reset` (start again from 0). A `since` below `purgedSeq` is still
+  served: the device may have missed deletes, so after a finished pull from a
+  saved cursor below `purgedSeq` it reads the vault again from 0. On the last
+  page (`hasMore` false) a device moves its cursor up to `purgedSeq`. Older
+  servers answered 410 `cursor_expired` instead, which devices still accept.
 - **`POST …/records`** is a compare-and-swap per write: `baseRev` is the
   revision the device last saw, 0 for a new record. Results are
   `{rid, status: "ok", rev, seq}`, `{rid, status: "conflict", current}`

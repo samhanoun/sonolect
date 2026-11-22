@@ -8,7 +8,7 @@ Sonolect is a premium voice-first desktop and mobile SaaS application for intell
 
 - Desktop: Windows, macOS via Tauri + React + TypeScript + Rust
 - Mobile: iOS, Android via React Native + Expo
-- Backend: GCP Cloud Run services with Firebase Auth, Firestore, Cloud SQL PostgreSQL, Vertex AI Gemini, Google Cloud Speech-to-Text, Stripe billing, Terraform infrastructure
+- Backend: GCP Cloud Run services with Firebase Auth, Firestore, Cloud SQL PostgreSQL (off until a service needs it), Vertex AI Gemini, Google Cloud Speech-to-Text, Stripe billing, Terraform infrastructure
 
 ## Repository Layout
 

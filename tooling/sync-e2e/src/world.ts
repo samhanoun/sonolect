@@ -54,6 +54,7 @@ import {
   type FetchLike,
   createFetchRequester,
 } from "../../../apps/mobile/src/sync/transport";
+import type { ServiceLimits } from "../../../services/sync-service/src/config";
 import { createApp } from "../../../services/sync-service/src/index";
 import { MemoryStore } from "../../../services/sync-service/src/memory-store";
 
@@ -147,13 +148,17 @@ export interface Exchange {
 }
 
 /** The real sync service on its memory store, reached in process. */
-export async function startServer(clock: SharedClock) {
+export async function startServer(
+  clock: SharedClock,
+  limits?: Partial<ServiceLimits>,
+) {
   const logs: string[] = [];
   const exchanges: Exchange[] = [];
   const store = new MemoryStore();
   const app = await createApp({
     store,
     env: { NODE_ENV: "test", LOG_LEVEL: "info" },
+    limits,
     logger: {
       write: (line: string) => {
         logs.push(line);

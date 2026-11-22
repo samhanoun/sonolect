@@ -133,9 +133,16 @@ pub(crate) fn http_client(timeout: Duration) -> reqwest::Result<reqwest::blockin
         .redirect(reqwest::redirect::Policy::none())
         .build()
 }
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
 fn client() -> Result<reqwest::blocking::Client, String> {
-    http_client(Duration::from_secs(90))
-        .map_err(|_| "Could not initialize the provider connection.".into())
+    http_client(REQUEST_TIMEOUT).map_err(|_| "Could not initialize the provider connection.".into())
+}
+/// The deadline of a provider request whose body has `bytes` bytes. It
+/// covers sending the body too, so it grows with it as a sync upload's does:
+/// three minutes of recording still reach the provider over a slow link.
+fn request_timeout(bytes: usize) -> Duration {
+    REQUEST_TIMEOUT
+        + Duration::from_secs((bytes as u64).div_ceil(super::sync::UPLOAD_BYTES_PER_SECOND))
 }
 fn response_bytes(response: reqwest::blocking::Response) -> Result<Vec<u8>, String> {
     let code = response.status().as_u16();
@@ -279,19 +286,35 @@ fn post_json(
 ) -> Result<reqwest::blocking::Response, String> {
     guard_cloud(CLOUD_ENABLED.load(Ordering::SeqCst))?;
     let key = read_key(provider)?;
-    let mut request = client()?.post(endpoint).bearer_auth(&key).json(body);
-    if provider == "opencode" && endpoint.ends_with("/messages") {
-        request = request
-            .header("x-api-key", &key)
-            .header("anthropic-version", "2023-06-01");
-    }
-    if provider == "opencode" && endpoint.contains(":generateContent") {
-        request = request.header("x-goog-api-key", &key);
-    }
+    let request = provider_request(&client()?, provider, endpoint, &key, body)?;
     guard_cloud(CLOUD_ENABLED.load(Ordering::SeqCst))?;
     request
         .send()
         .map_err(|_| "The provider connection failed or timed out.".into())
+}
+fn provider_request(
+    client: &reqwest::blocking::Client,
+    provider: &str,
+    endpoint: &str,
+    key: &str,
+    body: &Value,
+) -> Result<reqwest::blocking::RequestBuilder, String> {
+    let body = serde_json::to_vec(body).map_err(|_| "Invalid provider request.")?;
+    let mut request = client
+        .post(endpoint)
+        .bearer_auth(key)
+        .timeout(request_timeout(body.len()))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body);
+    if provider == "opencode" && endpoint.ends_with("/messages") {
+        request = request
+            .header("x-api-key", key)
+            .header("anthropic-version", "2023-06-01");
+    }
+    if provider == "opencode" && endpoint.contains(":generateContent") {
+        request = request.header("x-goog-api-key", key);
+    }
+    Ok(request)
 }
 /// The recording is the raw IPC body; provider, model and settings are headers.
 #[tauri::command]
@@ -565,6 +588,47 @@ mod tests {
             assert!(validate_key(key).is_err());
         }
         assert_eq!(validate_key(" valid-test-key ").unwrap(), "valid-test-key");
+    }
+
+    #[test]
+    fn a_long_recording_has_time_to_upload_over_a_slow_link() {
+        let client = reqwest::blocking::Client::new();
+        let endpoint = speech_endpoint("openrouter", "stt").unwrap();
+        let build = |body: &Value| {
+            provider_request(&client, "openrouter", endpoint, "test-key", body)
+                .unwrap()
+                .build()
+                .unwrap()
+        };
+        // Three minutes of recording, as JSON with the audio in base64.
+        let body = transcription_body(
+            "vendor/stt",
+            &vec![0; crate::ipc_audio::MAX_AUDIO_BYTES],
+            None,
+        );
+        let sent = serde_json::to_vec(&body).unwrap().len();
+        assert!(sent > 7_700_000);
+        let upload = build(&body);
+        // The usual 90 s for the answer, plus the body at 256 kbit/s.
+        let deadline = upload.timeout().copied().unwrap();
+        assert_eq!(deadline, request_timeout(sent));
+        assert!(deadline >= Duration::from_secs(90 + 235), "{deadline:?}");
+        assert_eq!(
+            upload.headers()[reqwest::header::CONTENT_TYPE],
+            "application/json"
+        );
+        assert_eq!(
+            upload.headers()[reqwest::header::AUTHORIZATION],
+            "Bearer test-key"
+        );
+        let sent_body = upload.body().and_then(|body| body.as_bytes()).unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(sent_body).unwrap(), body);
+        // A short request keeps about the usual deadline.
+        let short = build(&json!({"model": "vendor/chat", "input": "hi"}));
+        assert_eq!(
+            short.timeout().copied(),
+            Some(REQUEST_TIMEOUT + Duration::from_secs(1))
+        );
     }
 
     #[test]

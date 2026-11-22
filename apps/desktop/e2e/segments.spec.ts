@@ -239,6 +239,64 @@ test.describe("segment editor", () => {
     expect(errors).toEqual([]);
   });
 
+  test("undo back past opening the phone's version saves against the first one", async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    const opened = { t: Date.UTC(2026, 10, 19, 9, 31), c: 0, d: "desk" };
+    const old: MockCapture = {
+      ...meeting,
+      id: "1700000000000-7",
+      createdAtMs: Date.UTC(2026, 10, 1),
+      transcript: "An old note.",
+      segments: [],
+    };
+    await installMockTauri(page, [{ ...meeting, hlc: opened }, old]);
+    await page.goto("/");
+    await nav(page, "Library").click();
+    const note = page.locator("article", { hasText: "Good morning" });
+    await note.getByRole("button", { name: /^Open editor/ }).click();
+    const editor = page.getByLabel("Transcript editor");
+    await editor.fill("Edited in the studio.");
+
+    // The phone's version arrives. The list shows it once it reloads, as
+    // it does after a delete.
+    const phone = { t: Date.UTC(2026, 10, 19, 10, 0), c: 0, d: "phone1" };
+    await writeFromSync(page, meeting.id, "Edited on the phone.", phone);
+    await nav(page, "Library").click();
+    page.once("dialog", (dialog) => void dialog.accept());
+    await page
+      .locator("article", { hasText: "An old note." })
+      .getByRole("button", { name: "Delete", exact: true })
+      .click();
+    const phoneNote = page.locator("article", {
+      hasText: "Edited on the phone.",
+    });
+    await phoneNote.getByRole("button", { name: /^Open editor/ }).click();
+    await expect(editor).toHaveValue("Edited on the phone.");
+
+    // Undo brings back the edit, made from the first version: its save
+    // keeps the phone's as a conflict copy.
+    await editor.press("ControlOrMeta+z");
+    await expect(editor).toHaveValue("Edited in the studio.");
+    await page.getByRole("button", { name: "Save to library" }).click();
+    await expect(
+      page.getByText(
+        "Saved. This recording had changed on another device meanwhile: that version is kept as a conflict copy in your library.",
+      ),
+    ).toBeVisible();
+    const [save] = await nativeCalls(page, "update_local_capture");
+    expect(save?.args).toMatchObject({
+      id: meeting.id,
+      transcript: "Edited in the studio.",
+      base: { hlc: opened },
+    });
+    await nav(page, "Library").click();
+    await expect(page.getByText("Edited on the phone.")).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
   test("a compressed recording plays from the segment that is clicked", async ({
     page,
   }) => {

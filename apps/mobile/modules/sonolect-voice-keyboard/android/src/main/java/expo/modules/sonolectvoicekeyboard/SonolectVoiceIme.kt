@@ -29,6 +29,8 @@ import androidx.core.content.ContextCompat
  * you say into whatever text field has focus, in any app. Speech recognition
  * runs on the device when Android has an on-device recognizer; the system
  * speech service is only used when the app's privacy setting allows it.
+ * Its text is in res/values (English) and res/values-fr, and follows the
+ * phone's language.
  */
 class SonolectVoiceIme : InputMethodService(), RecognitionListener {
   private var recognizer: SpeechRecognizer? = null
@@ -69,7 +71,7 @@ class SonolectVoiceIme : InputMethodService(), RecognitionListener {
     }
     statusView = status
     header.addView(status, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-    header.addView(pill("ABC", "Switch keyboard") { switchKeyboard() })
+    header.addView(pill("ABC", getString(R.string.sonolect_voice_switch_keyboard)) { switchKeyboard() })
     root.addView(header)
 
     val wave = VoiceWaveView(this)
@@ -80,7 +82,7 @@ class SonolectVoiceIme : InputMethodService(), RecognitionListener {
 
     val orbFrame = FrameLayout(this)
     val orb = VoiceOrbView(this).apply {
-      contentDescription = "Dictate"
+      contentDescription = getString(R.string.sonolect_voice_dictate)
       isClickable = true
       setOnClickListener {
         it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -95,9 +97,14 @@ class SonolectVoiceIme : InputMethodService(), RecognitionListener {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER
     }
-    keys.addView(pill("⌫", "Delete") { deleteBackward() }, keyParams())
-    keys.addView(pill("space", "Space") { currentInputConnection?.commitText(" ", 1) }, keyParams(2.4f))
-    keys.addView(pill("⏎", "Enter") { pressEnter() }, keyParams())
+    keys.addView(pill("⌫", getString(R.string.sonolect_voice_delete)) { deleteBackward() }, keyParams())
+    keys.addView(
+      pill(getString(R.string.sonolect_voice_space_key), getString(R.string.sonolect_voice_space)) {
+        currentInputConnection?.commitText(" ", 1)
+      },
+      keyParams(2.4f),
+    )
+    keys.addView(pill("⏎", getString(R.string.sonolect_voice_enter)) { pressEnter() }, keyParams())
     root.addView(keys, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)).apply {
       topMargin = dp(8)
     })
@@ -154,15 +161,12 @@ class SonolectVoiceIme : InputMethodService(), RecognitionListener {
 
   private fun startListening(preferOnDevice: Boolean = true) {
     if (!hasMicPermission()) {
-      showMessage("Open Sonolect once and allow the microphone.", offerOpen = true)
+      showMessage(getString(R.string.sonolect_voice_allow_mic), offerOpen = true)
       return
     }
     val rec = createRecognizer(preferOnDevice)
     if (rec == null) {
-      showMessage(
-        "No on-device speech recognizer. To use the system speech service here, allow it in Sonolect's privacy settings.",
-        offerOpen = true,
-      )
+      showMessage(getString(R.string.sonolect_voice_no_recognizer), offerOpen = true)
       return
     }
     val before = currentInputConnection?.getTextBeforeCursor(1, 0)
@@ -180,32 +184,32 @@ class SonolectVoiceIme : InputMethodService(), RecognitionListener {
       }
     }
     listening = true
-    orbView?.setActive(true)
-    statusView?.text = "Listening…"
+    setOrbActive(true)
+    statusView?.text = getString(R.string.sonolect_voice_listening)
     try {
       rec.startListening(intent)
     } catch (error: RuntimeException) {
       listening = false
-      orbView?.setActive(false)
-      showMessage("Couldn't start listening.")
+      setOrbActive(false)
+      showMessage(getString(R.string.sonolect_voice_start_failed))
     }
   }
 
   private fun stopListening() {
     recognizer?.stopListening()
-    statusView?.text = "Finishing…"
+    statusView?.text = getString(R.string.sonolect_voice_finishing)
   }
 
   private fun cancelListening() {
     if (listening) recognizer?.cancel()
     listening = false
     currentInputConnection?.finishComposingText()
-    orbView?.setActive(false)
+    setOrbActive(false)
     waveView?.reset()
   }
 
   override fun onReadyForSpeech(params: Bundle?) {
-    statusView?.text = "Listening…"
+    statusView?.text = getString(R.string.sonolect_voice_listening)
   }
 
   override fun onBeginningOfSpeech() = Unit
@@ -220,7 +224,7 @@ class SonolectVoiceIme : InputMethodService(), RecognitionListener {
   override fun onBufferReceived(buffer: ByteArray?) = Unit
 
   override fun onEndOfSpeech() {
-    statusView?.text = "Finishing…"
+    statusView?.text = getString(R.string.sonolect_voice_finishing)
   }
 
   override fun onPartialResults(partialResults: Bundle?) {
@@ -230,24 +234,24 @@ class SonolectVoiceIme : InputMethodService(), RecognitionListener {
 
   override fun onResults(results: Bundle?) {
     listening = false
-    orbView?.setActive(false)
+    setOrbActive(false)
     waveView?.reset()
     val text = firstResult(results)?.trim().orEmpty()
     val ic = currentInputConnection
     if (text.isEmpty()) {
       ic?.setComposingText("", 1)
       ic?.finishComposingText()
-      showMessage("Didn't catch that. Tap to try again.")
+      showMessage(getString(R.string.sonolect_voice_no_match))
       return
     }
     ic?.commitText(prefix + text, 1)
-    statusView?.text = "Tap to keep talking"
+    statusView?.text = getString(R.string.sonolect_voice_keep_talking)
   }
 
   override fun onError(error: Int) {
     val wasOnDevice = usingOnDevice
     listening = false
-    orbView?.setActive(false)
+    setOrbActive(false)
     waveView?.reset()
     currentInputConnection?.finishComposingText()
     val languageMissing = error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
@@ -259,15 +263,15 @@ class SonolectVoiceIme : InputMethodService(), RecognitionListener {
     showMessage(
       when (error) {
         SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
-          "Didn't catch that. Tap to try again."
+          getString(R.string.sonolect_voice_no_match)
         SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
-          "Open Sonolect once and allow the microphone."
+          getString(R.string.sonolect_voice_allow_mic)
         SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
-          "The speech service is offline. Try again."
-        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "The recognizer is busy. Try again."
+          getString(R.string.sonolect_voice_offline)
+        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> getString(R.string.sonolect_voice_busy)
         SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED, SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ->
-          "Download this language for offline speech in Android settings."
-        else -> "Couldn't dictate (error $error). Tap to try again."
+          getString(R.string.sonolect_voice_language_missing)
+        else -> getString(R.string.sonolect_voice_error, error)
       },
       offerOpen = error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS,
     )
@@ -311,15 +315,22 @@ class SonolectVoiceIme : InputMethodService(), RecognitionListener {
 
   private fun showIdle() {
     statusView?.text = when {
-      !hasMicPermission() -> "Open Sonolect once and allow the microphone."
-      else -> "Tap the mic and speak"
+      !hasMicPermission() -> getString(R.string.sonolect_voice_allow_mic)
+      else -> getString(R.string.sonolect_voice_idle)
     }
     statusView?.setOnClickListener(if (!hasMicPermission()) View.OnClickListener { openApp() } else null)
   }
 
   private fun showMessage(message: String, offerOpen: Boolean = false) {
-    statusView?.text = if (offerOpen) "$message  Open ›" else message
+    statusView?.text = if (offerOpen) "$message  ${getString(R.string.sonolect_voice_open)}" else message
     statusView?.setOnClickListener(if (offerOpen) View.OnClickListener { openApp() } else null)
+  }
+
+  /** The orb's look, and what TalkBack reads for it: a tap stops while listening. */
+  private fun setOrbActive(active: Boolean) {
+    orbView?.setActive(active)
+    orbView?.contentDescription =
+      getString(if (active) R.string.sonolect_voice_stop else R.string.sonolect_voice_dictate)
   }
 
   private fun openApp() {

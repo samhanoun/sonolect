@@ -39,6 +39,13 @@ export function isTauriRuntime(
   return Boolean(win?.__TAURI_INTERNALS__);
 }
 
+/** Whether this runs on macOS, where CommandOrControl is the Cmd key. */
+export function isMacPlatform(
+  nav: Pick<Navigator, "platform"> | undefined = globalThis.navigator,
+): boolean {
+  return /Mac/i.test(nav?.platform ?? "");
+}
+
 export function normalizeShortcutAccelerator(shortcut: string): string {
   return shortcut
     .split("+")

@@ -59,6 +59,8 @@ const mockTranscriptText = (job: AudioUploadJob): string => {
   return `Mock transcript for ${label} (${seconds} seconds).`;
 };
 
+const DEFAULT_STT_TIMEOUT_MS = 120_000;
+
 const isEnabled = (value: string | undefined): boolean =>
   value === "1" || value?.toLowerCase() === "true";
 
@@ -146,11 +148,20 @@ const runLocalSttCommandArgs = async (
     }
 
     let settled = false;
+    // A daemon passes the same signal to every job, so the listener is
+    // removed when the command ends instead of piling up on the signal.
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGTERM");
+      reject(new LocalSttCommandAbortedError());
+    };
     const child = execFile(
       file,
       args,
       { timeout: timeoutMs, maxBuffer: 1024 * 1024 },
       (error, stdout, stderr) => {
+        signal?.removeEventListener("abort", onAbort);
         if (settled) return;
         settled = true;
         if (error) {
@@ -166,16 +177,7 @@ const runLocalSttCommandArgs = async (
       },
     );
 
-    signal?.addEventListener(
-      "abort",
-      () => {
-        if (settled) return;
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new LocalSttCommandAbortedError());
-      },
-      { once: true },
-    );
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 
 const parseLocalSttCommandArgs = (
@@ -206,7 +208,7 @@ const transcribeLocalAudio = async (
     return {
       text: await runLocalSttCommandArgs(
         resolveLocalSttCommandArgs(commandArgsTemplate, job, transcript),
-        options.sttTimeoutMs ?? 120_000,
+        options.sttTimeoutMs ?? DEFAULT_STT_TIMEOUT_MS,
         options.signal,
       ),
       tags: ["audio", "local-stt", "offline-transcribed"],
@@ -246,26 +248,32 @@ const replaceById = <T extends { id: string }>(items: T[], item: T): T[] => {
   return next;
 };
 
-const mergeAudioJob = (
-  latest: LocalAudioStorePayload,
-  original: AudioUploadJob,
-  update: AudioUploadJob,
-): AudioUploadJob[] => {
-  const audioJobs = [...(latest.audioJobs ?? [])];
-  const current = audioJobs.find((job) => job.id === original.id) ?? original;
-  return replaceById(audioJobs, { ...current, ...update });
+/**
+ * Applies `update` to the latest stored copy of a record, not to the copy
+ * read when the job was claimed. The engine can run for minutes, and the user
+ * can rename or tag the transcript meanwhile: `update` sets only the fields
+ * the worker owns, so those edits survive.
+ */
+const mergeLatest = <T extends { id: string }>(
+  latest: T[] | undefined,
+  original: T,
+  update: (current: T) => T,
+): { items: T[]; item: T } => {
+  const items = [...(latest ?? [])];
+  const item = update(
+    items.find((each) => each.id === original.id) ?? original,
+  );
+  return { items: replaceById(items, item), item };
 };
 
-const mergeTranscript = (
-  latest: LocalAudioStorePayload,
-  original: Transcript,
-  update: Transcript,
-): Transcript[] => {
-  const transcripts = [...(latest.transcripts ?? [])];
-  const current =
-    transcripts.find((item) => item.id === original.id) ?? original;
-  return replaceById(transcripts, { ...current, ...update });
-};
+const uniqueTags = (tags: string[]): string[] => Array.from(new Set(tags));
+
+/**
+ * How long past the engine timeout a "processing" claim may stand. A job
+ * still "processing" after that was claimed by a worker that stopped before
+ * it finished (killed, or the machine slept), so it is taken again.
+ */
+const STALE_CLAIM_MARGIN_MS = 60_000;
 
 export async function processNextQueuedAudioJob(
   options: LocalAudioWorkerOptions,
@@ -273,8 +281,15 @@ export async function processNextQueuedAudioJob(
   const payload = await readStore(options.storePath);
   const audioJobs = [...(payload.audioJobs ?? [])];
   const transcripts = [...(payload.transcripts ?? [])];
+  const staleBefore =
+    Date.parse(createNow(options)) -
+    (options.sttTimeoutMs ?? DEFAULT_STT_TIMEOUT_MS) -
+    STALE_CLAIM_MARGIN_MS;
+  const isClaimable = (job: AudioUploadJob): boolean =>
+    job.status === "queued" ||
+    (job.status === "processing" && Date.parse(job.updatedAt) < staleBefore);
   const queuedJob = audioJobs
-    .filter((job) => job.status === "queued" && hasUploadedLocalAudio(job))
+    .filter((job) => isClaimable(job) && hasUploadedLocalAudio(job))
     .sort(byCreatedAtThenId)[0];
 
   if (!queuedJob) {
@@ -311,115 +326,101 @@ export async function processNextQueuedAudioJob(
       originalTranscript,
       options,
     );
-    const transcript: Transcript = {
-      ...originalTranscript,
-      status: "completed",
-      rawText: text,
-      finalText: text,
-      tags: Array.from(
-        new Set([
-          ...originalTranscript.tags.filter(
+    const latestPayload = await readStore(options.storePath);
+    const jobs = mergeLatest(
+      latestPayload.audioJobs,
+      processingJob,
+      (current): AudioUploadJob => {
+        const { error: _error, ...currentJob } = current;
+        return {
+          ...currentJob,
+          status: "completed",
+          updatedAt: completedAt,
+          completedAt,
+        };
+      },
+    );
+    const merged = mergeLatest(
+      latestPayload.transcripts,
+      originalTranscript,
+      (current): Transcript => ({
+        ...current,
+        status: "completed",
+        rawText: text,
+        finalText: text,
+        tags: uniqueTags([
+          ...current.tags.filter(
             (tag) => tag !== "queued" && tag !== "mock-transcribed",
           ),
           ...tags,
         ]),
-      ),
-      updatedAt: completedAt,
-    };
-    const { error: _processingError, ...processingJobInput } = processingJob;
-    const job: AudioUploadJob = {
-      ...processingJobInput,
-      status: "completed",
-      updatedAt: completedAt,
-      completedAt,
-    };
-
-    const latestPayload = await readStore(options.storePath);
+        updatedAt: completedAt,
+      }),
+    );
     await writeStore(options.storePath, {
       ...latestPayload,
-      audioJobs: mergeAudioJob(latestPayload, processingJob, job),
-      transcripts: mergeTranscript(
-        latestPayload,
-        originalTranscript,
-        transcript,
-      ),
+      audioJobs: jobs.items,
+      transcripts: merged.items,
     });
-    return { job, transcript };
+    return { job: jobs.item, transcript: merged.item };
   } catch (error) {
     const failedAt = createNow(options);
-    const transcriptIndex = transcripts.findIndex(
+    const originalTranscript = transcripts.find(
       (transcript) => transcript.id === processingJob.transcriptId,
     );
-    const originalTranscript = transcripts[transcriptIndex];
-
-    if (isAbortError(error)) {
-      const restoredJob: AudioUploadJob = {
-        ...processingJob,
-        status: "queued",
-        updatedAt: failedAt,
-      };
-      const restoredTranscript: Transcript | undefined = originalTranscript
-        ? {
-            ...originalTranscript,
-            status: "processing",
-            tags: Array.from(new Set([...originalTranscript.tags, "queued"])),
-            updatedAt: failedAt,
-          }
-        : undefined;
-      const latestPayload = await readStore(options.storePath);
-      await writeStore(options.storePath, {
-        ...latestPayload,
-        audioJobs: mergeAudioJob(latestPayload, processingJob, restoredJob),
-        transcripts: restoredTranscript
-          ? mergeTranscript(
-              latestPayload,
-              originalTranscript!,
-              restoredTranscript,
-            )
-          : [...(latestPayload.transcripts ?? [])],
-      });
-      return {
-        job: restoredJob,
-        ...(restoredTranscript ? { transcript: restoredTranscript } : {}),
-      };
-    }
-
+    const aborted = isAbortError(error);
     const errorMessage =
       error instanceof Error
         ? error.message
         : "Unknown local audio worker error";
-    const job: AudioUploadJob = {
-      ...processingJob,
-      status: "failed",
-      updatedAt: failedAt,
-      error: errorMessage,
-    };
-    const failedTranscript: Transcript | undefined = originalTranscript
-      ? {
-          ...originalTranscript,
-          status: "failed",
-          tags: Array.from(
-            new Set([
-              ...originalTranscript.tags.filter((tag) => tag !== "queued"),
-              "local-stt",
-              "transcription-failed",
-            ]),
-          ),
-          updatedAt: failedAt,
-        }
-      : undefined;
 
     const latestPayload = await readStore(options.storePath);
+    // An aborted job goes back to the queue. Any other error fails it.
+    const jobs = mergeLatest(
+      latestPayload.audioJobs,
+      processingJob,
+      (current): AudioUploadJob =>
+        aborted
+          ? { ...current, status: "queued", updatedAt: failedAt }
+          : {
+              ...current,
+              status: "failed",
+              updatedAt: failedAt,
+              error: errorMessage,
+            },
+    );
+    const merged = originalTranscript
+      ? mergeLatest(
+          latestPayload.transcripts,
+          originalTranscript,
+          (current): Transcript =>
+            aborted
+              ? {
+                  ...current,
+                  status: "processing",
+                  tags: uniqueTags([...current.tags, "queued"]),
+                  updatedAt: failedAt,
+                }
+              : {
+                  ...current,
+                  status: "failed",
+                  tags: uniqueTags([
+                    ...current.tags.filter((tag) => tag !== "queued"),
+                    "local-stt",
+                    "transcription-failed",
+                  ]),
+                  updatedAt: failedAt,
+                },
+        )
+      : undefined;
     await writeStore(options.storePath, {
       ...latestPayload,
-      audioJobs: mergeAudioJob(latestPayload, processingJob, job),
-      transcripts: failedTranscript
-        ? mergeTranscript(latestPayload, originalTranscript!, failedTranscript)
-        : [...(latestPayload.transcripts ?? [])],
+      audioJobs: jobs.items,
+      transcripts: merged?.items ?? [...(latestPayload.transcripts ?? [])],
     });
     return {
-      job,
-      ...(failedTranscript ? { transcript: failedTranscript } : {}),
+      job: jobs.item,
+      ...(merged ? { transcript: merged.item } : {}),
     };
   }
 }

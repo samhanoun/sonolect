@@ -129,6 +129,45 @@ try {
   assert.equal(listBody.items.length, 1);
   assert.equal(listBody.items[0]?.id, createdJob.transcriptId);
   assert.equal(listBody.items[0]?.status, "completed");
+
+  // What the desktop sends from Chromium: an Opus type with its codecs
+  // parameter, and the user's language. The engine gets both.
+  const frenchCreated = await app.inject({
+    method: "POST",
+    url: "/audio/jobs",
+    headers: { authorization: `Bearer ${userId}` },
+    payload: {
+      fileName: "sonolect-capture.webm",
+      mimeType: "audio/webm;codecs=opus",
+      sizeBytes: audioPayload.length,
+      durationMs: 2_000,
+      transcriptTitle: "Desktop voice capture",
+      source: "desktop",
+      language: "fr",
+    },
+  });
+  assert.equal(frenchCreated.statusCode, 201, frenchCreated.body);
+  const frenchJob = frenchCreated.json<AudioUploadJob>();
+  const frenchUploaded = await app.inject({
+    method: "POST",
+    url: `/audio/jobs/${frenchJob.id}/audio`,
+    headers: {
+      authorization: `Bearer ${userId}`,
+      "content-type": "audio/webm;codecs=opus",
+    },
+    payload: audioPayload,
+  });
+  assert.equal(frenchUploaded.statusCode, 200, frenchUploaded.body);
+  const frenchProcessed = await processNextQueuedAudioJob({
+    storePath,
+    localSttCommandArgs,
+  });
+  assert.equal(frenchProcessed?.job.id, frenchJob.id);
+  assert.equal(frenchProcessed?.job.status, "completed");
+  assert.match(
+    frenchProcessed?.transcript?.finalText ?? "",
+    / in fr from audio\/webm\.$/,
+  );
 } finally {
   await app.close();
   await rm(tempDir, { recursive: true, force: true });

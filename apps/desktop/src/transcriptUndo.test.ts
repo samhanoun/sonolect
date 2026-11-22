@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
-import { createTranscriptUndoStack } from "./transcriptUndo";
+import {
+  TRANSCRIPT_EDITOR_ATTRIBUTE,
+  createTranscriptUndoStack,
+  transcriptUndoAction,
+} from "./transcriptUndo";
 import { textToSegments } from "./segmentEditor";
 
 describe("desktop transcript undo stack", () => {
@@ -69,5 +73,119 @@ describe("desktop transcript undo stack", () => {
     const stack = createTranscriptUndoStack(snapshot);
     stack.push(snapshot);
     assert.equal(stack.canUndo(), false);
+  });
+
+  it("keeps the version a step was opened at, which makes no step itself", () => {
+    const at = (t: number) => ({ id: "1-1", hlc: { t, c: 0, d: "desk" } });
+    const text = (transcript: string, version: ReturnType<typeof at>) => ({
+      transcript,
+      transcriptSegments: textToSegments(transcript),
+      selectedSegmentIds: [],
+      openedVersion: version,
+    });
+    const stack = createTranscriptUndoStack(text("One", at(1)));
+    // The same text at a newer version: no step, but the newer version.
+    stack.push(text("One", at(2)));
+    assert.equal(stack.canUndo(), false);
+    assert.deepEqual(stack.current().openedVersion, at(2));
+
+    stack.push(text("Two", at(3)));
+    assert.deepEqual(stack.undo()?.openedVersion, at(2));
+    assert.deepEqual(stack.redo()?.openedVersion, at(3));
+
+    stack.undo();
+    stack.rewrite((snapshot) => ({ ...snapshot, openedVersion: at(4) }));
+    assert.deepEqual(stack.current().openedVersion, at(4));
+    assert.deepEqual(stack.redo()?.openedVersion, at(4));
+    assert.equal(stack.current().transcript, "Two");
+    assert.deepEqual(stack.undo()?.openedVersion, at(4));
+  });
+});
+
+describe("undo and redo shortcuts", () => {
+  /** A focused element, inside one of the transcript's editors or not. */
+  const focused = (
+    tagName: string,
+    more: { type?: string; isContentEditable?: boolean } = {},
+    inEditor = false,
+  ) => ({
+    tagName: tagName.toUpperCase(),
+    ...more,
+    closest: (selector: string) =>
+      inEditor && selector === `[${TRANSCRIPT_EDITOR_ATTRIBUTE}]` ? {} : null,
+  });
+  const press = (
+    key: string,
+    target: unknown,
+    keys: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean } = {
+      ctrlKey: true,
+    },
+  ) => ({
+    key,
+    target,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    ...keys,
+  });
+  const editor = focused("textarea", {}, true);
+
+  it("undo and redo the transcript in its own editors", () => {
+    assert.equal(transcriptUndoAction(press("z", editor), true), "undo");
+    assert.equal(
+      transcriptUndoAction(
+        press("Z", editor, { ctrlKey: true, shiftKey: true }),
+        true,
+      ),
+      "redo",
+    );
+    assert.equal(transcriptUndoAction(press("y", editor), true), "redo");
+    assert.equal(
+      transcriptUndoAction(press("z", editor, { metaKey: true }), true),
+      "undo",
+    );
+  });
+
+  it("leave any other field that takes typing its own undo", () => {
+    const fields = {
+      input: focused("input"),
+      search: focused("input", { type: "search" }),
+      number: focused("input", { type: "number" }),
+      textarea: focused("textarea"),
+      contenteditable: focused("div", { isContentEditable: true }),
+    };
+    for (const [name, field] of Object.entries(fields))
+      for (const shown of [true, false])
+        assert.equal(
+          transcriptUndoAction(press("z", field), shown),
+          undefined,
+          `${name}, transcript ${shown ? "shown" : "hidden"}`,
+        );
+  });
+
+  it("undo the transcript from what takes no typing only while it is on screen", () => {
+    const untyped = {
+      nothing: null,
+      button: focused("button"),
+      checkbox: focused("input", { type: "checkbox" }),
+      radio: focused("input", { type: "radio" }),
+      range: focused("input", { type: "range" }),
+      "input button": focused("input", { type: "button" }),
+      select: focused("select"),
+      "segment checkbox": focused("input", { type: "checkbox" }, true),
+    };
+    for (const [name, field] of Object.entries(untyped)) {
+      assert.equal(transcriptUndoAction(press("z", field), true), "undo", name);
+      assert.equal(
+        transcriptUndoAction(press("y", field), false),
+        undefined,
+        name,
+      );
+    }
+  });
+
+  it("ignore other keys and plain letters", () => {
+    assert.equal(transcriptUndoAction(press("k", null), true), undefined);
+    assert.equal(transcriptUndoAction(press("z", null, {}), true), undefined);
   });
 });

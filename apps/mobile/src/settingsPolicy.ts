@@ -44,6 +44,20 @@ export function historyOffConfirmation(
     : { kind, count: noteCount };
 }
 
+/**
+ * How store.ts writes a change to the history. "all": every note shown is
+ * stored. "existing": no new note is stored, but the notes already stored
+ * keep their edits, refines, pins and deletes (NoteStore.saveExisting).
+ * That is so while history is off, and while the settings could not be
+ * read: the session then runs with history off, the stored choice unknown.
+ */
+export function historyWrites(
+  settings: HistorySettings,
+  settingsUnread: boolean,
+): "all" | "existing" {
+  return !settingsUnread && keepsHistory(settings) ? "all" : "existing";
+}
+
 /** A deletion confirmation: a short question, then what it deletes. */
 export interface ConfirmPrompt {
   /**

@@ -150,6 +150,77 @@ try {
   assert.equal(cancelled.statusCode, 202, cancelled.body);
   assert.equal(await planOf("user-42"), "free");
 
+  // Stripe does not deliver events in order. An event older than the last
+  // plan change applied for the user arrives late and changes nothing.
+  const subscriptionEvent = (
+    id: string,
+    type: string,
+    created: number,
+    status: string,
+    lookupKey = "sonolect_pro_monthly",
+  ) =>
+    JSON.stringify({
+      id,
+      type,
+      created,
+      data: {
+        object: {
+          customer: "cus_77",
+          status,
+          items: { data: [{ price: { lookup_key: lookupKey } }] },
+        },
+      },
+    });
+  const linked = await deliver(
+    JSON.stringify({
+      id: "evt_checkout_77",
+      type: "checkout.session.completed",
+      created: 1_800_000_100,
+      data: {
+        object: {
+          customer: "cus_77",
+          client_reference_id: "user-77",
+          payment_status: "paid",
+          metadata: { plan: "pro" },
+        },
+      },
+    }),
+  );
+  assert.equal(linked.statusCode, 202, linked.body);
+  assert.equal(await planOf("user-77"), "pro");
+  const deletedFirst = await deliver(
+    subscriptionEvent(
+      "evt_sub_deleted_77",
+      "customer.subscription.deleted",
+      1_800_000_300,
+      "canceled",
+    ),
+  );
+  assert.equal(deletedFirst.json<{ planApplied: boolean }>().planApplied, true);
+  assert.equal(await planOf("user-77"), "free");
+  const lateUpdate = await deliver(
+    subscriptionEvent(
+      "evt_sub_updated_77_old",
+      "customer.subscription.updated",
+      1_800_000_200,
+      "active",
+    ),
+  );
+  assert.equal(lateUpdate.statusCode, 202, lateUpdate.body);
+  assert.equal(lateUpdate.json<{ planApplied: boolean }>().planApplied, false);
+  assert.equal(await planOf("user-77"), "free");
+  const resubscribed = await deliver(
+    subscriptionEvent(
+      "evt_sub_created_77",
+      "customer.subscription.created",
+      1_800_000_400,
+      "active",
+      "sonolect_team_monthly",
+    ),
+  );
+  assert.equal(resubscribed.json<{ planApplied: boolean }>().planApplied, true);
+  assert.equal(await planOf("user-77"), "team");
+
   const forged = await deliver(checkout, sign(checkout, "whsec_attacker"));
   assert.equal(forged.statusCode, 400, forged.body);
 

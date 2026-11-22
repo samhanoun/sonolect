@@ -11,7 +11,11 @@ import {
 import { SyncClosedError, SyncError } from "./errors";
 import { deriveVaultKeys, generateRootKey, recordId } from "./keys";
 import { conflictCopyId, isPastRetention, type SyncNote } from "./payload";
-import { createMemoryStateStore, type SyncStateStore } from "./state";
+import {
+  createKeyValueStateStore,
+  createMemoryStateStore,
+  type SyncStateStore,
+} from "./state";
 import type { SyncTransport } from "./transport";
 import {
   type MemoryNoteStore,
@@ -22,9 +26,13 @@ import {
 import { SYNC_ERROR_CODES, SYNC_LIMITS } from "./wire";
 import { DAY, manualClock, note, randomBytes } from "./test-helpers";
 
-function setup(serverOptions: MemoryVaultServerOptions["limits"] = {}) {
+function setup(
+  serverOptions: MemoryVaultServerOptions["limits"] = {},
+  rate: Pick<MemoryVaultServerOptions, "vaultRequestsPerMinute"> = {},
+) {
   const clock = manualClock();
   const server = createMemoryVaultServer({
+    ...rate,
     now: clock.now,
     limits: serverOptions,
   });
@@ -823,6 +831,329 @@ describe("sync engine", () => {
     assert.equal(report.full, "requested");
     assert.equal(a.engine.status().fullResyncPending, null);
     assert.ok(a.engine.status().lastFullSyncAt !== undefined);
+  });
+
+  it("finishes a full pass the rate limit cuts short, resuming each run, then uploads", async () => {
+    // Two records a page and two requests a minute: the pass of five pages
+    // never fits one window. An app syncs again after Retry-After, and may
+    // restart in between.
+    const { device, server, clock, keys } = setup(
+      { maxPageRecords: 2 },
+      { vaultRequestsPerMinute: 2 },
+    );
+    const a = await device();
+    for (let i = 0; i < 12; i += 1) a.edit(`n${i}`, `note ${i}`);
+    await a.engine.sync();
+    clock.advance(60_000);
+    const kv = new Map<string, string>();
+    const state = createKeyValueStateStore({
+      getItem: async (key) => kv.get(key) ?? null,
+      setItem: async (key, value) => {
+        kv.set(key, value);
+      },
+      removeItem: async (key) => {
+        kv.delete(key);
+      },
+    });
+    let b = await device({ state });
+    /** Syncs as an app does: again after each 429, once Retry-After passed. */
+    const syncThrough = async (
+      side: () => SyncEngine,
+      restart = async () => {},
+    ) => {
+      const runs: string[] = [];
+      while (runs.length < 10) {
+        try {
+          const report = await side().sync();
+          runs.push("done");
+          return { report, runs };
+        } catch (error) {
+          assert.ok(error instanceof SyncError, String(error));
+          assert.equal(error.kind, "rateLimited");
+          runs.push("429");
+          clock.advance(error.retryAfterMs!);
+          await restart();
+        }
+      }
+      return { report: undefined, runs };
+    };
+    // Its first pull (no full pass) saves its cursor after each page.
+    assert.ok((await syncThrough(() => b.engine)).report);
+    assert.equal(b.ids().length, 12);
+    // A deletes two notes while B is away; their tombstones are purged.
+    clock.advance(DAY);
+    await a.remove("n3");
+    await a.remove("n9");
+    assert.ok((await syncThrough(() => a.engine)).report);
+    b.edit("mine", "written on B while away");
+    clock.advance(100 * DAY);
+    server.purgeTombstones();
+
+    const { report, runs } = await syncThrough(
+      () => b.engine,
+      async () => {
+        assert.equal(b.engine.status().fullResyncPending, "stale");
+        // The app quits and starts again: the pass resumes from its state.
+        await b.engine.close();
+        b = await device({ state, notes: b.notes });
+      },
+    );
+    assert.deepEqual(runs, ["429", "429", "done"]);
+    assert.equal(report?.full, "stale");
+    // Only the notes deleted elsewhere are gone: none that an earlier run
+    // of the pass listed.
+    assert.deepEqual(
+      b.ids(),
+      sorted(["mine", ...[0, 1, 2, 4, 5, 6, 7, 8, 10, 11].map((i) => `n${i}`)]),
+    );
+    assert.equal(report?.pushed, 1);
+    assert.ok(
+      server
+        .records(keys.vaultId)
+        .some((record) => record.rid === recordId(keys, "mine")),
+    );
+    const status = b.engine.status();
+    assert.equal(status.fullResyncPending, null);
+    assert.ok(status.lastFullSyncAt !== undefined);
+    // The marks the pass left on its records are gone with it.
+    assert.ok(![...kv.values()].some((value) => value.includes(",1]")));
+  });
+
+  it("keeps a full pass's progress when a note changes while it runs", async () => {
+    const { device, server, clock } = setup({ maxPageRecords: 2 });
+    const a = await device();
+    for (let i = 0; i < 6; i += 1) a.edit(`n${i}`, `note ${i}`);
+    await a.engine.sync();
+    const b = await device();
+    await b.engine.sync();
+    clock.advance(1000);
+    for (let i = 0; i < 6; i += 1) a.edit(`n${i}`, `edited ${i}`);
+    await a.engine.sync();
+    // The user edits n4 just as the pass writes A's version of it.
+    b.notes.beforeApply = (change) => {
+      if (change.id !== "n4") return;
+      b.notes.beforeApply = undefined;
+      b.edit("n4", "edited on B meanwhile");
+    };
+    const first = await b.engine.sync({ full: true });
+    assert.equal(first.deferred, true);
+    assert.equal(b.engine.status().fullResyncPending, "requested");
+    const before = server.log.length;
+    const second = await b.engine.sync();
+    assert.equal(second.full, "requested");
+    assert.equal(b.engine.status().fullResyncPending, null);
+    // It went on from n4's page, not from seq 0.
+    const pulls = server.log
+      .slice(before)
+      .filter((entry) => entry.path.endsWith("/changes"));
+    assert.equal(pulls.length, 1);
+    assert.equal(b.text("n4"), "edited on B meanwhile");
+    assert.equal(b.text("n5"), "edited 5");
+  });
+
+  it("starts a resumed full pass over when tombstones were purged since it began", async () => {
+    const { device, server, clock, keys } = setup({ maxPageRecords: 2 });
+    const a = await device();
+    for (let i = 0; i < 6; i += 1) a.edit(`n${i}`, `note ${i}`);
+    await a.engine.sync();
+    const b = await device();
+    await b.engine.sync();
+    // The pass stops after its first page.
+    let calls = 0;
+    const honest = server.transport(keys);
+    const flaky: SyncTransport = {
+      ...honest,
+      async changes(since, limit) {
+        calls += 1;
+        if (calls === 2) throw new SyncError("network", "offline");
+        if (calls === 3) {
+          assert.ok(since > 0);
+          throw new SyncError("gone", "cursor expired", {
+            status: 410,
+            code: SYNC_ERROR_CODES.cursorExpired,
+          });
+        }
+        return honest.changes(since, limit);
+      },
+    };
+    await b.engine.close();
+    const c = await device({
+      notes: b.notes,
+      state: b.state,
+      transport: flaky,
+    });
+    await assert.rejects(c.engine.sync({ full: true }), SyncError);
+    clock.advance(1000);
+    const report = await c.engine.sync();
+    // Started over from seq 0, for the same reason: nothing was uploaded
+    // again as if the server had lost it.
+    assert.equal(report.full, "requested");
+    assert.equal(report.pushed, 0);
+    assert.equal(c.engine.status().fullResyncPending, null);
+    assert.deepEqual(c.ids(), a.ids());
+  });
+
+  it("starts a full pass over that stopped more than 90 days ago, and drops what was deleted meanwhile", async () => {
+    const { device, server, clock, keys } = setup({ maxPageRecords: 2 });
+    const a = await device();
+    for (let i = 0; i < 6; i += 1) a.edit(`n${i}`, `note ${i}`);
+    await a.engine.sync();
+    const b = await device();
+    await b.engine.sync();
+    const honest = server.transport(keys);
+    const asked: number[] = [];
+    let calls = 0;
+    const watched: SyncTransport = {
+      ...honest,
+      async changes(since, limit) {
+        asked.push(since);
+        calls += 1;
+        if (calls === 3) throw new SyncError("network", "offline");
+        return honest.changes(since, limit);
+      },
+    };
+    await b.engine.close();
+    const c = await device({
+      notes: b.notes,
+      state: b.state,
+      transport: watched,
+    });
+    // The pass lists n0 to n3, then the device goes offline for months.
+    await assert.rejects(c.engine.sync({ full: true }), SyncError);
+    clock.advance(DAY);
+    await a.remove("n1");
+    await a.engine.sync();
+    clock.advance(95 * DAY);
+    server.purgeTombstones();
+    asked.length = 0;
+    const report = await c.engine.sync();
+    assert.equal(asked[0], 0, "started over from seq 0");
+    assert.equal(report.full, "requested");
+    // n1 was listed before it was deleted: it goes, and is not uploaded again.
+    assert.deepEqual(c.ids(), ["n0", "n2", "n3", "n4", "n5"]);
+    assert.equal(report.pushed, 0);
+    assert.ok(
+      !server.records(keys.vaultId).some((r) => r.rid === recordId(keys, "n1")),
+    );
+  });
+
+  it("reads every record again, not from where a stopped pass got, after an upgrade or a damaged state", async () => {
+    for (const change of ["upgrade", "damaged"] as const) {
+      const { device, server, keys } = setup({ maxPageRecords: 2 });
+      const a = await device();
+      for (let i = 0; i < 6; i += 1) a.edit(`n${i}`, `note ${i}`);
+      await a.engine.sync();
+      const b = await device();
+      await b.engine.sync();
+      const honest = server.transport(keys);
+      const asked: number[] = [];
+      let calls = 0;
+      const watched: SyncTransport = {
+        ...honest,
+        async changes(since, limit) {
+          asked.push(since);
+          calls += 1;
+          // The pass stops after its first page.
+          if (calls === 2) throw new SyncError("network", "offline");
+          return honest.changes(since, limit);
+        },
+      };
+      await b.engine.close();
+      const c = await device({
+        notes: b.notes,
+        state: b.state,
+        transport: watched,
+      });
+      await assert.rejects(c.engine.sync({ full: true }), SyncError);
+      assert.ok(asked[1]! > 0);
+      await c.engine.close();
+      // Opened again by a newer app that reads records the one that ran
+      // the pass could not, or with part of the saved state lost.
+      const state: SyncStateStore = {
+        ...c.state,
+        async load() {
+          const saved = await c.state.load();
+          if (!saved) return saved;
+          if (change === "damaged") return { ...saved, damaged: true };
+          return {
+            ...saved,
+            meta: { ...saved.meta, reader: 0, unreadable: 2 },
+          };
+        },
+      };
+      const d = await device({ notes: c.notes, state, transport: watched });
+      asked.length = 0;
+      const report = await d.engine.sync();
+      assert.equal(asked[0], 0, `${change}: started over from seq 0`);
+      assert.equal(report.full, "requested");
+      assert.equal(report.pushed, 0);
+      assert.equal(d.engine.status().fullResyncPending, null);
+      assert.deepEqual(d.ids(), a.ids());
+    }
+  });
+
+  it("joins and resyncs a vault of many pages after deletes were purged", async () => {
+    const { device, server, clock } = setup({ maxPageRecords: 2 });
+    const a = await device();
+    for (let i = 0; i < 8; i += 1) a.edit(`n${i}`, `note ${i}`);
+    await a.engine.sync();
+    await a.remove("n7");
+    await a.engine.sync();
+    clock.advance(91 * DAY);
+    server.purgeTombstones();
+    // The purged tombstone has the highest seq: every page boundary is below it.
+    const b = await device();
+    const joined = await b.engine.sync();
+    assert.equal(joined.full, null);
+    assert.equal(b.ids().length, 7);
+    const again = await b.engine.sync({ full: true });
+    assert.equal(again.full, "requested");
+    assert.equal(again.pushed, 0);
+    assert.equal(b.engine.status().fullResyncPending, null);
+    // The cursor ends past the purged tombstone, so later syncs stay plain
+    // pulls of one page instead of a full pass each time.
+    for (let run = 0; run < 2; run += 1) {
+      const before = server.log.length;
+      const plain = await b.engine.sync();
+      assert.equal(plain.full, null);
+      const pulls = server.log
+        .slice(before)
+        .filter((entry) => entry.path.endsWith("/changes"));
+      assert.equal(pulls.length, 1);
+    }
+  });
+
+  it("pulls once, not a full pass each time, when the newest seqs are purged deletes", async () => {
+    const { device, server, clock } = setup();
+    const a = await device();
+    const b = await device();
+    a.edit("keep", "keep me");
+    a.edit("gone", "delete me");
+    await a.engine.sync();
+    await b.engine.sync();
+    await a.remove("gone");
+    await a.engine.sync();
+    await b.engine.sync();
+    clock.advance(91 * DAY);
+    server.purgeTombstones();
+    // A pass that ends below the purged tombstone: a device joining, and one
+    // that asks for a full pass.
+    const c = await device();
+    assert.equal((await c.engine.sync()).full, null);
+    assert.equal((await b.engine.sync({ full: true })).full, "requested");
+    for (const engine of [b.engine, c.engine]) {
+      for (let run = 0; run < 2; run += 1) {
+        const before = server.log.length;
+        const plain = await engine.sync();
+        assert.equal(plain.full, null);
+        const pulls = server.log
+          .slice(before)
+          .filter((entry) => entry.path.endsWith("/changes"));
+        assert.equal(pulls.length, 1);
+      }
+    }
+    assert.deepEqual(b.ids(), ["keep"]);
+    assert.deepEqual(c.ids(), ["keep"]);
   });
 
   it("closes cleanly while a sync runs", async () => {

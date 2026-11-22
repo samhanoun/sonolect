@@ -328,6 +328,8 @@ export const en = {
   "studio.transcribe.subtitle":
     "Record your voice, import audio, or work on your next draft.",
   "studio.transcribe.import": "Import audio",
+  "studio.transcribe.importRunning":
+    "An audio file is being transcribed. Its transcript opens here when it is done.",
   "studio.transcribe.yourTranscript": "Your transcript",
   "studio.transcribe.editorLabel": "Transcript editor",
   "studio.transcribe.placeholder":
@@ -426,6 +428,8 @@ export const en = {
   "studio.library.retried": "Recording transcribed locally.",
   "studio.library.confirmDelete":
     "Delete this recording and its transcript from this device?",
+  "studio.library.confirmDeleteEverywhere":
+    "Delete this note from all your synced devices? Its recording is deleted from this device.",
 
   // Studio dictionary and snippets
   "studio.vocab.eyebrow": "Sounds like you",
@@ -511,6 +515,12 @@ export const en = {
     "Saved. Deleted {count} recordings older than {period}.",
   "studio.privacy.savedAuto":
     "Saved. Recordings older than {period} are deleted automatically.",
+  "studio.privacy.confirmRetention.one":
+    "Keep recordings for {period}? This deletes {count} recording older than that from this device now. This cannot be undone.",
+  "studio.privacy.confirmRetention.other":
+    "Keep recordings for {period}? This deletes {count} recordings older than that from this device now. This cannot be undone.",
+  "studio.privacy.confirmRetentionUnknown":
+    "Keep recordings for {period}? Recordings older than that are deleted from this device now. This cannot be undone.",
   "studio.retention.forever": "Until I delete them",
   "studio.retention.days.one": "{count} day",
   "studio.retention.days.other": "{count} days",
@@ -527,7 +537,7 @@ export const en = {
   "studio.sync.turnOn": "Turn on sync",
   "studio.sync.turningOn": "Turning on…",
   "studio.sync.join": "Join with a code",
-  "studio.sync.joinLabel": "Sync code or link from your other device",
+  "studio.sync.joinLabel": "Sync code from your other device",
   "studio.sync.joinSubmit": "Join",
   "studio.sync.joining": "Joining…",
   "studio.sync.cancel": "Cancel",
@@ -540,7 +550,7 @@ export const en = {
   "studio.sync.showCode": "Show code",
   "studio.sync.hideCode": "Hide code",
   "studio.sync.codeHint":
-    "On your other device, choose to join sync, then scan this QR code or type the code.",
+    "On your phone, scan this QR code with Sonolect (Settings, Sync, Scan code), not with the camera app. On another computer, choose Join with a code and type the code.",
   "studio.sync.codeLabel": "Sync code",
   "studio.sync.qrLabel": "QR code to join this sync",
   "studio.sync.turnOff": "Turn off sync",
@@ -688,7 +698,7 @@ export const en = {
   "bubble.phase.inserted": "Inserted",
   "bubble.phase.copied": "Copied",
   "bubble.phase.error": "Couldn't dictate",
-  "bubble.copiedDetail": "Copied. Press Ctrl+V to paste.",
+  "bubble.copiedDetail": "Copied. Press {key} to paste.",
   "bubble.pasteFailed": "Couldn't paste. Your words are saved in Sonolect.",
   "bubble.error.generic": "Something went wrong.",
   "bubble.error.micUnavailable": "No microphone found.",

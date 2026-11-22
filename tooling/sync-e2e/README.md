@@ -31,6 +31,8 @@ The tests prove that:
 - a conflict leaves a copy on the side that loses;
 - fields that one app does not know survive the other app;
 - a device that joins with notes merges them;
+- a phone back after two months finishes its full pass when the per-vault
+  rate limit stops it part way, and then uploads;
 - retention stays local;
 - deleting the server copy turns the other device off, and its notes stay;
 - the server never sees a note's text or a key.

@@ -17,7 +17,7 @@ import {
   isSyncError,
   openSyncEngine,
   pairingCodeGroups,
-  pairingLink,
+  pairingPayload,
   pendingDeletesOf,
   withSyncedVersions,
 } from "@sonolect/sync-core";
@@ -37,7 +37,8 @@ import type { Timers } from "./timers";
  *   silently. Offline is shown in plain words, never as an alert.
  * - A refused key stops syncing until the next launch. A deleted vault
  *   turns sync off, keeping the notes.
- * - Nothing syncs while history is off or some notes could not be read.
+ * - Nothing syncs while history is off or some notes could not be read,
+ *   nor while the settings could not be read, until settings are saved.
  * - A delete made here reaches the other devices even when the vault is
  *   not open (yet), sync is turned off with the server copy kept, or the
  *   notes are cleared on this phone only: what no engine holds is kept
@@ -66,8 +67,27 @@ export type SyncProblem =
   | "quotaExceeded"
   | "newerSchema";
 
-/** Why nothing syncs for now. */
-export type SyncPause = "historyOff" | "storage";
+/**
+ * Why nothing syncs for now: the settings could not be read at launch,
+ * history is off, or some notes are not read (yet).
+ */
+export type SyncPause = "settings" | "historyOff" | "storage";
+
+/**
+ * The phone's pause (store.ts). Settings that could not be read keep sync
+ * paused, even with history turned on meanwhile, until settings are saved
+ * (a read error blocks that for the session): the stored choice may be
+ * Ephemeral or Save history off.
+ */
+export function syncPauseFor(state: {
+  settingsUnread: boolean;
+  keepsHistory: boolean;
+  notesReady: boolean;
+}): SyncPause | null {
+  if (state.settingsUnread) return "settings";
+  if (!state.keepsHistory) return "historyOff";
+  return state.notesReady ? null : "storage";
+}
 
 export interface SyncView {
   /** loading: the key is being read (or could not be read yet). */
@@ -104,8 +124,11 @@ export interface SyncControllerOptions {
 export type JoinResult = "joined" | "alreadyJoined" | "otherVaultOn";
 
 export interface Pairing {
-  /** sonolect://sync/join?v=1&k=… for the QR code. */
-  link: string;
+  /**
+   * The QR code's text (sync-core pairingPayload): plain text that
+   * Sonolect's scanner reads, never a link another app could open.
+   */
+  payload: string;
   /** The typed code: 14 groups of 4 characters. */
   groups: string[];
 }
@@ -287,22 +310,13 @@ export class SyncController {
     });
   }
 
-  /** What joining with this key would answer now: null when it would join. */
-  joinOutcome(root: Uint8Array): Exclude<JoinResult, "joined"> | null {
-    const engine = this.engine;
-    if (!engine) return null;
-    return engine.vaultId === deriveVaultKeys(root).vaultId
-      ? "alreadyJoined"
-      : "otherVaultOn";
-  }
-
-  /** The pairing link and code of this phone's vault, read from the key store. */
+  /** The QR text and code of this phone's vault, read from the key store. */
   async pairing(): Promise<Pairing | null> {
     const engine = this.engine;
     if (!engine) return null;
     const root = await this.options.keyStore.load();
     if (!root || deriveVaultKeys(root).vaultId !== engine.vaultId) return null;
-    return { link: pairingLink(root), groups: pairingCodeGroups(root) };
+    return { payload: pairingPayload(root), groups: pairingCodeGroups(root) };
   }
 
   /**

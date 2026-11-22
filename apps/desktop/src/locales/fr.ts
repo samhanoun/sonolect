@@ -334,6 +334,8 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.transcribe.subtitle":
     "Enregistrez votre voix, importez un fichier audio ou travaillez votre prochain brouillon.",
   "studio.transcribe.import": "Importer un audio",
+  "studio.transcribe.importRunning":
+    "Un fichier audio est en cours de transcription. Sa transcription s'ouvrira ici une fois terminée.",
   "studio.transcribe.yourTranscript": "Votre transcription",
   "studio.transcribe.editorLabel": "Éditeur de transcription",
   "studio.transcribe.placeholder":
@@ -432,6 +434,8 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.library.retried": "Enregistrement transcrit en local.",
   "studio.library.confirmDelete":
     "Supprimer cet enregistrement et sa transcription de cet appareil\u202f?",
+  "studio.library.confirmDeleteEverywhere":
+    "Supprimer cette note de tous vos appareils synchronisés\u202f? Son enregistrement est supprimé de cet appareil.",
 
   // Studio dictionary and snippets
   "studio.vocab.eyebrow": "À votre image",
@@ -521,6 +525,12 @@ export const fr: Record<LocaleKeys, string> = {
     "Enregistré. {count} enregistrements de plus de {period} ont été supprimés.",
   "studio.privacy.savedAuto":
     "Enregistré. Les enregistrements de plus de {period} sont supprimés automatiquement.",
+  "studio.privacy.confirmRetention.one":
+    "Conserver les enregistrements pendant {period}\u202f? {count} enregistrement plus ancien sera supprimé de cet appareil dès maintenant. Cette action est irréversible.",
+  "studio.privacy.confirmRetention.other":
+    "Conserver les enregistrements pendant {period}\u202f? {count} enregistrements plus anciens seront supprimés de cet appareil dès maintenant. Cette action est irréversible.",
+  "studio.privacy.confirmRetentionUnknown":
+    "Conserver les enregistrements pendant {period}\u202f? Les enregistrements plus anciens seront supprimés de cet appareil dès maintenant. Cette action est irréversible.",
   "studio.retention.forever": "Jusqu'à ce que je les supprime",
   "studio.retention.days.one": "{count} jour",
   "studio.retention.days.other": "{count} jours",
@@ -537,8 +547,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.sync.turnOn": "Activer la synchronisation",
   "studio.sync.turningOn": "Activation…",
   "studio.sync.join": "Rejoindre avec un code",
-  "studio.sync.joinLabel":
-    "Code ou lien de synchronisation de votre autre appareil",
+  "studio.sync.joinLabel": "Code de synchronisation de votre autre appareil",
   "studio.sync.joinSubmit": "Rejoindre",
   "studio.sync.joining": "Connexion…",
   "studio.sync.cancel": "Annuler",
@@ -551,7 +560,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.sync.showCode": "Afficher le code",
   "studio.sync.hideCode": "Masquer le code",
   "studio.sync.codeHint":
-    "Sur votre autre appareil, choisissez de rejoindre la synchronisation, puis scannez ce code QR ou saisissez le code.",
+    "Sur votre téléphone, scannez ce code QR avec Sonolect (Réglages, Synchronisation, Scanner un code), pas avec l'app Appareil photo. Sur un autre ordinateur, choisissez Rejoindre avec un code et saisissez le code.",
   "studio.sync.codeLabel": "Code de synchronisation",
   "studio.sync.qrLabel": "Code QR pour rejoindre cette synchronisation",
   "studio.sync.turnOff": "Désactiver la synchronisation",
@@ -713,7 +722,7 @@ export const fr: Record<LocaleKeys, string> = {
   "bubble.phase.inserted": "Inséré",
   "bubble.phase.copied": "Copié",
   "bubble.phase.error": "Dictée impossible",
-  "bubble.copiedDetail": "Copié. Appuyez sur Ctrl+V pour coller.",
+  "bubble.copiedDetail": "Copié. Appuyez sur {key} pour coller.",
   "bubble.pasteFailed":
     "Collage impossible. Vos mots sont enregistrés dans Sonolect.",
   "bubble.error.generic": "Une erreur s'est produite.",

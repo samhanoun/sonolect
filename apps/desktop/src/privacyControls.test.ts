@@ -3,6 +3,7 @@ import { strict as assert } from "node:assert";
 import {
   CAPTURE_RETENTION_KEY,
   applyCaptureRetention,
+  countExpiredCaptures,
   deleteAllLocalData,
   loadCaptureRetentionDays,
   retentionLabel,
@@ -63,6 +64,23 @@ describe("capture retention", () => {
     assert.deepEqual(week.calls, [
       { command: "purge_local_captures", args: { olderThanDays: 7 } },
     ]);
+  });
+
+  it("counts what a shorter period deletes now, as the native purge does", () => {
+    const now = Date.UTC(2026, 10, 22, 12);
+    const day = 86_400_000;
+    const captures = [
+      { createdAtMs: now - 10 * day },
+      { createdAtMs: now - 2 * day },
+      { createdAtMs: now - 3 * day, pinned: true },
+      { createdAtMs: now - day + 1 },
+      { createdAtMs: now - 60_000 },
+    ];
+    assert.equal(countExpiredCaptures(captures, 0, now), 0);
+    assert.equal(countExpiredCaptures(captures, 1, now), 2);
+    assert.equal(countExpiredCaptures(captures, 7, now), 1);
+    assert.equal(countExpiredCaptures(captures, 30, now), 0);
+    assert.equal(countExpiredCaptures([], 1, now), 0);
   });
 });
 

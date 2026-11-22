@@ -122,7 +122,10 @@ export class SqliteStore implements VaultStore {
     try {
       db.exec("PRAGMA busy_timeout = 5000");
       if (path !== ":memory:") db.exec("PRAGMA journal_mode = WAL");
-      db.exec("PRAGMA synchronous = NORMAL");
+      // Every commit reaches the disk before the service answers: devices
+      // forget a delete, and trust a revision, once the server said ok, so
+      // a write that a power cut rolls back would never be sent again.
+      db.exec("PRAGMA synchronous = FULL");
       const version = Number(
         (db.prepare("PRAGMA user_version").get() as Row).user_version,
       );

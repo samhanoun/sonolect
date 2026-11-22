@@ -17,8 +17,7 @@ import {
   formatTimestamp,
   mergeableRun,
   segmentAtTime,
-  speakerColorIndex,
-  speakerNames,
+  speakerColors,
   type TranscriptSegment,
 } from "../segmentEditor";
 import { SpeakerTools, useSpeakerStatus } from "./StudioSpeakers";
@@ -160,7 +159,8 @@ function SpeakerLegend({
 }) {
   const t = useT();
   const rename = useDesktopStore((state) => state.renameSpeakerEverywhere);
-  const names = speakerNames(segments);
+  const colors = speakerColors(segments);
+  const names = [...colors.keys()];
   if (!names.length) return null;
   return (
     <ul
@@ -168,10 +168,7 @@ function SpeakerLegend({
       aria-label={t("studio.speakers.legend")}
     >
       {names.map((name) => (
-        <li
-          key={name}
-          className={`studio-speaker speaker-${speakerColorIndex(segments, name)}`}
-        >
+        <li key={name} className={`studio-speaker speaker-${colors.get(name)}`}>
           <span className="studio-speaker-swatch" aria-hidden="true" />
           <SpeakerField
             value={name}
@@ -196,7 +193,8 @@ function SpeakerLegend({
 export function SegmentEditor({ player }: { player: CapturePlayer }) {
   const segments = useDesktopStore((state) => state.transcriptSegments);
   const selected = useDesktopStore((state) => state.selectedSegmentIds);
-  const actions = useDesktopStore();
+  // Only the actions, which never change: no render for unrelated state.
+  const actions = useDesktopStore.getState();
   const t = useT();
   const speakerListId = useId();
   // Where the cursor last was, so Split can cut there.
@@ -208,7 +206,10 @@ export function SegmentEditor({ player }: { player: CapturePlayer }) {
   const playable =
     canPlay &&
     segments.some((segment) => hasPlayableAudio(segment.captureId, audioless));
-  const names = speakerNames(segments);
+  // Worked out once per render, not once per row.
+  const colors = speakerColors(segments);
+  const names = [...colors.keys()];
+  const chosen = new Set(selected);
   const activeId = segmentAtTime(segments, player.captureId, player.positionMs);
   const selectedSegment =
     selected.length === 1
@@ -310,7 +311,9 @@ export function SegmentEditor({ player }: { player: CapturePlayer }) {
       >
         {segments.map((segment, index) => {
           const number = index + 1;
-          const color = speakerColorIndex(segments, segment.speaker);
+          const speaker = segment.speaker?.trim();
+          const color = speaker ? colors.get(speaker) : undefined;
+          const isSelected = chosen.has(segment.id);
           const time = `${segment.approx ? "~" : ""}${formatTimestamp(segment.startMs)}`;
           const isActive = segment.id === activeId;
           const isPlaying = isActive && player.playing;
@@ -320,7 +323,7 @@ export function SegmentEditor({ player }: { player: CapturePlayer }) {
               key={segment.id}
               className={[
                 "studio-segment",
-                selected.includes(segment.id) ? "selected" : "",
+                isSelected ? "selected" : "",
                 isActive ? "active" : "",
                 color === undefined ? "" : `speaker-${color}`,
               ]
@@ -330,7 +333,7 @@ export function SegmentEditor({ player }: { player: CapturePlayer }) {
               <input
                 type="checkbox"
                 aria-label={t("studio.segments.select", { number })}
-                checked={selected.includes(segment.id)}
+                checked={isSelected}
                 onChange={() => actions.toggleSegmentSelection(segment.id)}
               />
               <div className="studio-segment-meta">
@@ -377,6 +380,7 @@ export function SegmentEditor({ player }: { player: CapturePlayer }) {
                 />
               </div>
               <textarea
+                data-transcript-editor
                 className="studio-segment-text"
                 aria-label={t("studio.segments.textOf", { number })}
                 rows={Math.max(1, Math.ceil(segment.text.length / 70))}

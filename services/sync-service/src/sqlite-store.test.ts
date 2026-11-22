@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { after, describe, it } from "node:test";
 
 import { SqliteStore } from "./sqlite-store.js";
@@ -106,6 +107,23 @@ describe("sqlite store file", () => {
       assert.equal(version.user_version, 2);
     } finally {
       reopened.close();
+    }
+  });
+
+  it("syncs each commit to disk before it answers", async () => {
+    const store = await SqliteStore.open(join(directory, "durable.db"));
+    try {
+      // The store's own connection: synchronous is set per connection.
+      const { db } = store as unknown as { db: DatabaseSync };
+      const pragma = (name: string) =>
+        Object.values(
+          db.prepare(`PRAGMA ${name}`).get() as Record<string, unknown>,
+        )[0];
+      assert.equal(pragma("journal_mode"), "wal");
+      // 2 is FULL: NORMAL (1) in WAL mode loses the last commits on a power cut.
+      assert.equal(pragma("synchronous"), 2);
+    } finally {
+      await store.close();
     }
   });
 

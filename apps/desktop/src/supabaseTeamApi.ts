@@ -1,8 +1,8 @@
-import { supabase } from "./supabaseClient";
+import { getSupabase } from "./supabaseClient";
 import type { TeamRole } from "./teamApi";
 
 export async function fetchTeamsFromSupabase() {
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("teams")
     .select(
       "*, team_members(user_id, role, joined_at, profiles(display_name, email))",
@@ -31,17 +31,17 @@ export async function fetchTeamsFromSupabase() {
 export async function createTeamInSupabase(name: string) {
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await getSupabase().auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
-  const { data: team, error } = await supabase
+  const { data: team, error } = await getSupabase()
     .from("teams")
     .insert({ name, owner_id: user.id })
     .select()
     .single();
   if (error) throw new Error(error.message);
 
-  await supabase.from("team_members").insert({
+  await getSupabase().from("team_members").insert({
     team_id: team.id,
     user_id: user.id,
     role: "owner",
@@ -57,10 +57,10 @@ export async function inviteMemberInSupabase(
 ) {
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await getSupabase().auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("team_invites")
     .insert({ team_id: teamId, email, role, invited_by: user.id })
     .select()
@@ -70,7 +70,7 @@ export async function inviteMemberInSupabase(
 }
 
 export async function removeMemberFromSupabase(teamId: string, userId: string) {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from("team_members")
     .delete()
     .eq("team_id", teamId)
@@ -83,7 +83,7 @@ export async function updateMemberRoleInSupabase(
   userId: string,
   role: TeamRole,
 ) {
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from("team_members")
     .update({ role })
     .eq("team_id", teamId)
@@ -92,7 +92,7 @@ export async function updateMemberRoleInSupabase(
 }
 
 export async function deleteTeamFromSupabase(teamId: string) {
-  const { error } = await supabase.from("teams").delete().eq("id", teamId);
+  const { error } = await getSupabase().from("teams").delete().eq("id", teamId);
   if (error) throw new Error(error.message);
 }
 
@@ -103,8 +103,8 @@ export async function addSharedDictionaryEntry(
 ) {
   const {
     data: { user },
-  } = await supabase.auth.getUser();
-  const { error } = await supabase
+  } = await getSupabase().auth.getUser();
+  const { error } = await getSupabase()
     .from("shared_dictionaries")
     .insert({ team_id: teamId, spoken, replacement, created_by: user?.id });
   if (error) throw new Error(error.message);
@@ -117,8 +117,8 @@ export async function addSharedSnippet(
 ) {
   const {
     data: { user },
-  } = await supabase.auth.getUser();
-  const { error } = await supabase.from("shared_snippets").insert({
+  } = await getSupabase().auth.getUser();
+  const { error } = await getSupabase().from("shared_snippets").insert({
     team_id: teamId,
     trigger_text: trigger,
     body,

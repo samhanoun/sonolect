@@ -35,7 +35,7 @@ import {
   openSyncEngine,
   pairingCode,
   pairingCodeGroups,
-  pairingLink,
+  pairingPayload,
   parsePairing,
   pendingDeletesOf,
   qrMatrix,
@@ -110,8 +110,11 @@ export interface SyncPairing {
   /** The typed code, in groups of 4 joined by dashes. */
   code: string;
   groups: string[];
-  /** The link in the QR code. */
-  link: string;
+  /**
+   * The QR code's text (sync-core pairingPayload): plain text for
+   * Sonolect's scanner on the phone, never a link another app could open.
+   */
+  payload: string;
   qr: QrMatrix;
 }
 
@@ -234,9 +237,10 @@ export class SyncController {
   }
 
   /**
-   * Joins the vault of a pairing link or typed code. Throws PairingError for
-   * text that is not a valid code, or the native message on failure. The
-   * notes on this device join the vault too.
+   * Joins the vault of a typed or pasted code (or the QR code's text).
+   * Throws PairingError for text that is not a valid code, a link included,
+   * or the native message on failure. The notes on this device join the
+   * vault too.
    */
   join(text: string): Promise<void> {
     return this.exclusive(async () => {
@@ -273,12 +277,12 @@ export class SyncController {
     const key = await this.call<string | null>("sync_key_load");
     if (!key) return null;
     const root = base64urlDecode(key);
-    const link = pairingLink(root);
+    const payload = pairingPayload(root);
     return {
       code: pairingCode(root),
       groups: pairingCodeGroups(root),
-      link,
-      qr: qrMatrix(link),
+      payload,
+      qr: qrMatrix(payload),
     };
   }
 

@@ -14,13 +14,16 @@ service firebase.storage {
         && firestore.exists(/databases/(default)/documents/tenants/$(tenantId)/members/$(request.auth.uid));
     }
 
+    // request.resource exists only on an upload, so the size check sits on
+    // create and update alone: on a read or a delete it would deny.
     match /users/{userId}/{allPaths=**} {
-      allow read, write: if isOwner(userId) && request.resource.size < 50 * 1024 * 1024;
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && request.resource.size < 50 * 1024 * 1024;
     }
 
     match /tenants/{tenantId}/{allPaths=**} {
-      allow read: if isTenantMember(tenantId);
-      allow write: if isTenantMember(tenantId) && request.resource.size < 500 * 1024 * 1024;
+      allow read, delete: if isTenantMember(tenantId);
+      allow create, update: if isTenantMember(tenantId) && request.resource.size < 500 * 1024 * 1024;
     }
 
     match /public/{allPaths=**} {

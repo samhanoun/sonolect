@@ -229,7 +229,7 @@ export const ar: Partial<Record<LocaleKeys, string>> = {
   "studio.sync.turnOn": "تفعيل المزامنة",
   "studio.sync.turningOn": "جارٍ التفعيل…",
   "studio.sync.join": "الانضمام برمز",
-  "studio.sync.joinLabel": "رمز المزامنة أو رابطها من جهازك الآخر",
+  "studio.sync.joinLabel": "رمز المزامنة من جهازك الآخر",
   "studio.sync.joinSubmit": "انضمام",
   "studio.sync.joining": "جارٍ الانضمام…",
   "studio.sync.cancel": "إلغاء",
@@ -241,7 +241,7 @@ export const ar: Partial<Record<LocaleKeys, string>> = {
   "studio.sync.showCode": "إظهار الرمز",
   "studio.sync.hideCode": "إخفاء الرمز",
   "studio.sync.codeHint":
-    "على جهازك الآخر، اختر الانضمام إلى المزامنة، ثم امسح رمز QR هذا أو اكتب الرمز.",
+    "على هاتفك، امسح رمز QR هذا باستخدام Sonolect (Settings، Sync، Scan code)، وليس بتطبيق الكاميرا. على حاسوب آخر، اختر «الانضمام برمز» واكتب الرمز.",
   "studio.sync.codeLabel": "رمز المزامنة",
   "studio.sync.qrLabel": "رمز QR للانضمام إلى هذه المزامنة",
   "studio.sync.turnOff": "إيقاف المزامنة",

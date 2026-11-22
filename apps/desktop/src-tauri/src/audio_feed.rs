@@ -43,6 +43,12 @@ pub fn gap(elapsed: Duration, rate: u32, delivered: u64, incoming: usize) -> usi
     }
 }
 
+/// The longest silence filled in at once, in seconds. A source is asked
+/// again within moments, so a longer gap means the computer slept or the
+/// feed stalled: a pause this long marks it, and the time beyond it is left
+/// out, so a recording never fills up with hours of silence.
+pub const LONGEST_FILL_SECONDS: u32 = 10;
+
 /// The loudest sample of a block, 0.0 to 1.0.
 pub fn peak(samples: &[i16]) -> f32 {
     let loudest = samples
@@ -54,8 +60,9 @@ pub fn peak(samples: &[i16]) -> f32 {
 }
 
 /// Feeds `sink` from `source` until the source ends or the sink refuses.
-/// The sink gets interleaved frames in the source's format. Returns what
-/// went wrong, if anything did.
+/// The sink gets interleaved frames in the source's format, and silence in
+/// pieces of a second at most, so the recording's limit stops it in time.
+/// Returns what went wrong, if anything did.
 pub fn pump(
     source: &mut dyn Source,
     elapsed: impl Fn() -> Duration,
@@ -63,7 +70,11 @@ pub fn pump(
 ) -> Option<String> {
     let format = source.format();
     let channels = usize::from(format.channels);
+    let second = format.rate as usize;
+    let longest = LONGEST_FILL_SECONDS as usize * second;
     let mut delivered: u64 = 0;
+    // Frames of time left out of the recording (see LONGEST_FILL_SECONDS).
+    let mut skipped: u64 = 0;
     loop {
         let (audio, ended) = match source.next() {
             Feed::Audio(audio) => (audio, None),
@@ -71,12 +82,21 @@ pub fn pump(
             Feed::Ended(reason) => (Vec::new(), Some(reason)),
         };
         let frames = audio.len() / channels;
-        let silence = gap(elapsed(), format.rate, delivered, frames);
+        let mut silence = gap(elapsed(), format.rate, delivered + skipped, frames);
+        if silence > longest {
+            skipped += (silence - longest) as u64;
+            silence = longest;
+        }
         if silence > 0 {
-            if let Err(message) = sink(&vec![0; silence * channels]) {
-                return Some(message);
+            let quiet = vec![0; silence.min(second) * channels];
+            while silence > 0 {
+                let piece = silence.min(second);
+                if let Err(message) = sink(&quiet[..piece * channels]) {
+                    return Some(message);
+                }
+                delivered += piece as u64;
+                silence -= piece;
             }
-            delivered += silence as u64;
         }
         if !audio.is_empty() {
             if let Err(message) = sink(&audio) {
@@ -244,6 +264,90 @@ mod tests {
         assert_eq!(recorded.len(), 3 * second + second / 2);
         assert!(recorded[second..3 * second].iter().all(|s| *s == 0));
         assert!(recorded[3 * second..].iter().all(|s| *s == 9));
+    }
+
+    #[test]
+    fn silence_goes_in_pieces_of_a_second_so_the_limit_stops_it() {
+        let second = 16_000;
+        let script = || {
+            Script(
+                VecDeque::from([Feed::Audio(vec![7; second]), Feed::Quiet, Feed::Ended(None)]),
+                PcmFormat::SPEECH,
+            )
+        };
+        // Eight seconds of nothing at once.
+        let clock = [1, 9, 9];
+        let call = Cell::new(0);
+        let elapsed = || {
+            let now = Duration::from_secs(clock[call.get() % clock.len()]);
+            call.set(call.get() + 1);
+            now
+        };
+        let mut pieces = Vec::new();
+        let ended = pump(&mut script(), elapsed, |audio| {
+            pieces.push(audio.len());
+            Ok(())
+        });
+        assert_eq!(ended, None);
+        assert_eq!(pieces, [vec![second], vec![second; 8]].concat());
+        // A recording that is full after three seconds takes no more than
+        // that of the silence.
+        call.set(0);
+        let mut recorded = 0;
+        let ended = pump(&mut script(), elapsed, |audio| {
+            if recorded >= 3 * second {
+                return Err("The recording reached the four-hour limit.".into());
+            }
+            recorded += audio.len();
+            Ok(())
+        });
+        assert_eq!(
+            ended.as_deref(),
+            Some("The recording reached the four-hour limit.")
+        );
+        assert_eq!(recorded, 3 * second);
+    }
+
+    #[test]
+    fn a_computer_that_slept_for_hours_leaves_a_short_pause() {
+        // 48 kHz stereo, as Windows records what plays.
+        let format = PcmFormat::new(48_000, 2).unwrap();
+        let second = 2 * 48_000;
+        let mut source = Script(
+            VecDeque::from([
+                Feed::Audio(vec![7; second]),
+                // The clock went on for three hours while nothing ran.
+                Feed::Quiet,
+                Feed::Audio(vec![9; second]),
+                Feed::Ended(None),
+            ]),
+            format,
+        );
+        let woke = 3 * 3600 + 1;
+        let call = Cell::new(0);
+        let mut pieces: Vec<usize> = Vec::new();
+        let mut recorded: Vec<i16> = Vec::new();
+        let ended = pump(
+            &mut source,
+            || {
+                let now = Duration::from_secs([1, woke, woke + 1, woke + 1][call.get()]);
+                call.set(call.get() + 1);
+                now
+            },
+            |audio| {
+                pieces.push(audio.len());
+                recorded.extend_from_slice(audio);
+                Ok(())
+            },
+        );
+        assert_eq!(ended, None);
+        let pause = LONGEST_FILL_SECONDS as usize * second;
+        assert_eq!(recorded.len(), second + pause + second);
+        assert!(pieces.iter().all(|piece| *piece <= second), "{pieces:?}");
+        assert!(recorded[second..second + pause].iter().all(|s| *s == 0));
+        // What comes after the sleep is recorded as it comes, with no more
+        // silence before it.
+        assert!(recorded[second + pause..].iter().all(|s| *s == 9));
     }
 
     #[test]

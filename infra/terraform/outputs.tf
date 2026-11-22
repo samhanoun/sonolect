@@ -13,9 +13,9 @@ output "cloud_run_urls" {
   value       = { for name, service in google_cloud_run_v2_service.services : name => service.uri }
 }
 
-output "cloud_run_runtime_service_account" {
-  description = "Runtime service account email used by Cloud Run services."
-  value       = google_service_account.cloud_run.email
+output "cloud_run_runtime_service_accounts" {
+  description = "Runtime service account email of each Cloud Run service."
+  value       = { for name, account in google_service_account.runtime : name => account.email }
 }
 
 output "ci_deploy_service_account" {
@@ -29,8 +29,8 @@ output "firestore_database" {
 }
 
 output "cloud_sql_connection_name" {
-  description = "Cloud SQL PostgreSQL connection name."
-  value       = google_sql_database_instance.postgres.connection_name
+  description = "Cloud SQL PostgreSQL connection name. Null unless enable_cloud_sql is true."
+  value       = one(google_sql_database_instance.postgres[*].connection_name)
 }
 
 output "storage_bucket_name" {
@@ -41,6 +41,11 @@ output "storage_bucket_name" {
 output "pubsub_topics" {
   description = "Pub/Sub topic names."
   value       = { for name, topic in google_pubsub_topic.topics : name => topic.name }
+}
+
+output "pubsub_dead_letter_subscription" {
+  description = "Pull subscription that keeps dead letters for inspection and replay."
+  value       = google_pubsub_subscription.dead_letter.name
 }
 
 output "secret_ids" {

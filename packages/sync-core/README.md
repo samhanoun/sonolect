@@ -178,6 +178,12 @@ const report = await engine.sync();
   in 64 buckets plus a meta key. `kv` is AsyncStorage or any store with
   `getItem`, `setItem`, `removeItem` and an optional `multiGet`.
 - A damaged bucket triggers a full resync ("repair") instead of an error.
+- `load()` returns null when the meta is missing or damaged. The first save
+  after that removes the buckets left from the old state, so they never load
+  as records of the new one.
+- A record that a full pass listed before it stopped carries a tenth
+  element. Versions before it read such a record as damaged, and run a
+  repair pass.
 
 ### `SyncTransport`
 
@@ -195,13 +201,35 @@ const report = await engine.sync();
   | Trigger                                                            | Missing remote records                                                              |
   | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
   | No sync for more than 60 days (`stale`)                            | Treated as deleted only after more than 90 days                                     |
-  | 410 `cursor_expired` (`expired`)                                   | Deleted locally (their tombstones were purged), unless edited here since; see below |
+  | 410 `cursor_expired`, or `purgedSeq` above the cursor (`expired`)  | Deleted locally (their tombstones were purged), unless edited here since; see below |
   | 410 `cursor_reset`, a head below our seq, or a new epoch (`reset`) | Uploaded again                                                                      |
   | 401 (`reset`)                                                      | The engine recreates the vault, then uploads again; the vault id comes from the key |
   | `sync({full: true})` (`requested`)                                 | Uploaded again                                                                      |
 
+- **A full pass in parts.** A large vault takes more pages than the
+  service's per-vault rate limit allows in a minute. A pass that stops (a
+  429, the network, a deferred note) saves the seq it got to and marks the
+  records it listed. The next run goes on from there, and compares the
+  records with the local notes only once it reaches the head.
+  - A pass that began more than 89 days ago starts from seq 0 again: a note
+    it listed may since have been deleted, and that tombstone purged.
+  - A device more than 90 days away whose pass is still not done treats
+    missing records as deleted, as for `stale` (but not for `reset`).
+
 - **Tombstones** live 90 days on the server. After that the service purges
-  them, and any cursor older than the purge gets 410 `cursor_expired`.
+  them, and every page says how far it purged (`purgedSeq`).
+  - A pull from a saved cursor below `purgedSeq` may have missed deletes: the
+    engine handles that as 410 `cursor_expired`, which older servers send.
+  - A pass from seq 0, and the later pages of a pull, go on past it. A note
+    deleted there was deleted before this device listed it, or the pass
+    compares it at the end.
+  - A pull or pass that reaches the end of the feed moves its cursor up to
+    `purgedSeq` when the newest seqs are purged tombstones, so the next pull
+    does not take them for missed deletes and start a full pass again.
+  - A pending pass that stopped part way starts from seq 0 again when the
+    saved state was damaged ("repair"), or when an app update can read
+    records the old version could not ("upgrade"), so it reads those
+    records too.
   - An honest server can send `cursor_expired` only to a device that last
     pulled more than 90 days ago. The engine deletes absent notes on it only
     then (with a day of slack for clocks); a device that pulled more
@@ -262,20 +290,20 @@ back unchanged.
 
 ## Errors and what to tell the user
 
-| Error                                                     | Meaning                                                      | UI text and action                                                                                |
-| --------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `SyncError` kind `unauthorized` (401/409)                 | The server does not accept this key                          | "This sync key is not accepted by the server." Offer to turn sync off.                            |
-| `SyncError` kind `gone`, code `vault_deleted`             | Another device deleted the server copy                       | "This sync was deleted." Call `engine.forget()` and turn sync off. The notes stay on this device. |
-| `SyncError` kind `rateLimited`                            | Too many requests                                            | No message. Retry after `error.retryAfterMs`.                                                     |
-| `SyncError` kind `tooLarge`                               | The server refused the request size                          | "A note is too large to sync." Notes too large to seal are listed in `report.tooLarge`.           |
-| `SyncError` kind `server`                                 | 5xx, or an answer this version does not understand           | "Sync is unavailable right now." Retry later with backoff.                                        |
-| `SyncError` kind `network`                                | No answer: offline, DNS, TLS or timeout                      | "Offline. Notes will sync when you're back online." Retry later.                                  |
-| `SyncClosedError`                                         | The engine was closed, forgotten or deleted                  | Ignore it.                                                                                        |
-| `report.quotaExceeded`                                    | The vault is full (20,000 notes or 200 MiB)                  | "Sync storage is full. Delete notes to sync new ones."                                            |
-| `report.newerSchema` > 0                                  | A newer app wrote notes this version cannot read             | "Update Sonolect to sync every note."                                                             |
-| `PairingError` code `invalid`                             | Neither a link nor a code                                    | "This is not a Sonolect sync code."                                                               |
-| `PairingError` code `version`                             | A link from a newer app                                      | "Update Sonolect to use this code."                                                               |
-| `PairingError` codes `key`, `length`, `character`, `typo` | Malformed, the wrong length, an invalid character, or a typo | "Check the code: it has 56 characters." For `typo`: "A character is wrong."                       |
+| Error                                              | Meaning                                            | UI text and action                                                                                |
+| -------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `SyncError` kind `unauthorized` (401/409)          | The server does not accept this key                | "This sync key is not accepted by the server." Offer to turn sync off.                            |
+| `SyncError` kind `gone`, code `vault_deleted`      | Another device deleted the server copy             | "This sync was deleted." Call `engine.forget()` and turn sync off. The notes stay on this device. |
+| `SyncError` kind `rateLimited`                     | Too many requests                                  | No message. Retry after `error.retryAfterMs`.                                                     |
+| `SyncError` kind `tooLarge`                        | The server refused the request size                | "A note is too large to sync." Notes too large to seal are listed in `report.tooLarge`.           |
+| `SyncError` kind `server`                          | 5xx, or an answer this version does not understand | "Sync is unavailable right now." Retry later with backoff.                                        |
+| `SyncError` kind `network`                         | No answer: offline, DNS, TLS or timeout            | "Offline. Notes will sync when you're back online." Retry later.                                  |
+| `SyncClosedError`                                  | The engine was closed, forgotten or deleted        | Ignore it.                                                                                        |
+| `report.quotaExceeded`                             | The vault is full (20,000 notes or 200 MiB)        | "Sync storage is full. Delete notes to sync new ones."                                            |
+| `report.newerSchema` > 0                           | A newer app wrote notes this version cannot read   | "Update Sonolect to sync every note."                                                             |
+| `PairingError` code `invalid`                      | Not a sync code: a link, or other text             | "This is not a Sonolect sync code."                                                               |
+| `PairingError` code `version`                      | A QR code from a newer app                         | "Update Sonolect to use this code."                                                               |
+| `PairingError` codes `length`, `character`, `typo` | The wrong length, an invalid character, or a typo  | "Check the code: it has 56 characters." For `typo`: "A character is wrong."                       |
 
 `error.retryable` is true for `network`, `server` and `rateLimited`.
 `error.vaultGone` is true for `unauthorized` and `gone`.
@@ -285,22 +313,25 @@ back unchanged.
 Pairing gives another device only the root key. The server URL comes from the
 build.
 
-- **Link (QR code)**: `sonolect://sync/join?v=1&k=<base64url root>`.
-  - The key is in the query string: Expo Router (SDK 58) passes a native
-    deep link's query parameters to the screen and drops its fragment.
-  - The parsers also accept the fragment form `#v=1&k=…`.
-  - They also accept `sonolect:///sync/join`, any letter case, and unknown
-    parameters, which they ignore.
-  - `parsePairingParams(useLocalSearchParams())` reads a deep-link screen's
-    parameters.
-  - `qrMatrix(pairingLink(root))` returns a 37×37 matrix (version 5, ECC M,
-    no border). Draw it with a quiet zone of 4 modules.
 - **Code**: `pairingCode(root)` is 56 characters of Crockford base32 (the
   root key plus a 3-byte SHA-256 checksum), shown as 14 groups of 4.
   - `parsePairingCode` ignores spaces, dashes, `_` and `.`, and accepts
     lower case.
   - It reads I and L as 1, and O as 0.
-- **`parsePairing(text)`** accepts either form.
+- **QR code**: `pairingPayload(root)` is plain text, `SONOLECT SYNC 1 `
+  and the code, such as `SONOLECT SYNC 1 000G-40R4-…-63ED`.
+  - It is not a link, so the phone has nothing to open and no app can
+    claim it. The phone reads it with Sonolect's own scanner (Settings ›
+    Sync › Scan code).
+  - `1` is the format version. A newer version is refused with `version`.
+  - Its characters fit the QR alphanumeric mode:
+    `qrMatrix(pairingPayload(root))` returns a 33×33 matrix (version 4,
+    ECC M, no border). Draw it with a quiet zone of 4 modules.
+- **`parsePairing(text)`** is the one parser the apps use, for a scanned
+  QR code and for a typed or pasted code. It reads the QR text in any
+  letter case and spacing, and the code with `parsePairingCode`'s
+  tolerance. It refuses anything else with `invalid`, links included
+  (`sonolect://…`, `https://…`): no build reads a key from a link.
 
 Every screen that shows or accepts a code says, in one short line, that
 joining shares every note with whoever holds the code.
@@ -326,13 +357,22 @@ joining shares every note with whoever holds the code.
   - learn the number and approximate sizes of notes, and when devices sync.
 - **A malicious server cannot:** read, forge or move a record between notes
   or vaults.
-- **Whoever holds the root key** (link, code or QR) has full read and write
-  access to the vault.
+- **Whoever holds the root key** (the code or the QR code) has full read
+  and write access to the vault.
   - There is no revocation in v1. "Turn off sync and delete the server copy"
     deletes the vault; the remaining devices see "this sync was deleted",
     turn sync off and keep their notes.
   - Erase-all also forgets the key and the sync state, and first offers to
     delete the server copy.
+- **The key never goes through a link.** A custom URL scheme such as
+  `sonolect://` belongs to no one app: any app on the phone can claim it,
+  and the phone then picks which app opens the link, so a link with the key
+  could reach another app. The QR code holds plain text instead, read by
+  Sonolect's own scanner, and no build reads a key from a link.
+  - A camera app that reads the QR code shows its text, and may offer a web
+    search with it, which would send the key to a search engine. The
+    screens that show the QR code therefore say to scan it with Sonolect on
+    the phone, not with the camera app.
 - **Not covered:** a compromised device, and traffic analysis beyond sizes
   and timing.
 
@@ -349,10 +389,10 @@ describes the routes. Every byte string is unpadded base64url.
 - known-answer vectors for the keys, the record ids and the envelope;
 - the pairing formats and the QR matrix;
 - the HLC, the state store and the transport error mapping;
-- 33 engine scenarios against the in-memory server: two devices, conflicts,
+- 38 engine scenarios against the in-memory server: two devices, conflicts,
   deletes beating and losing to edits, deletes dated when they were made,
   retention, paging, batching, rollback refusal, a server restored from a
   backup, a wiped server, purged tombstones, a server that answers
   `cursor_expired` and leaves records out, vault deletion, lost answers,
-  restarts, interrupted runs, and deletes handed to a fresh state, from the
-  saved state or kept by the app.
+  restarts, interrupted runs, full passes the rate limit cuts short, and
+  deletes handed to a fresh state, from the saved state or kept by the app.

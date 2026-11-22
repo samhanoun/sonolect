@@ -473,12 +473,12 @@ export function mergeSegmentRun(
 
 /** The speaker names in use, in order of first appearance. */
 export function speakerNames(segments: TranscriptSegment[]): string[] {
-  const names: string[] = [];
+  const names = new Set<string>();
   for (const segment of segments) {
     const name = segment.speaker?.trim();
-    if (name && !names.includes(name)) names.push(name);
+    if (name) names.add(name);
   }
-  return names;
+  return [...names];
 }
 
 /** Gives every segment of speaker `from` the name `to`; an empty name clears it. */
@@ -645,6 +645,21 @@ export function speakerColorIndex(
   if (!name) return undefined;
   const index = speakerNames(segments).indexOf(name);
   return index === -1 ? undefined : index % SPEAKER_COLOR_COUNT;
+}
+
+/**
+ * The colour slot of every speaker, as speakerColorIndex gives it, worked
+ * out once so that a long list does not scan all its segments per row.
+ */
+export function speakerColors(
+  segments: TranscriptSegment[],
+): ReadonlyMap<string, number> {
+  return new Map(
+    speakerNames(segments).map((name, index) => [
+      name,
+      index % SPEAKER_COLOR_COUNT,
+    ]),
+  );
 }
 
 /** 83 000 ms as "1:23", and with hours once a recording needs them. */

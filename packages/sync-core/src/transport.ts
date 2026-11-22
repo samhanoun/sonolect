@@ -106,12 +106,13 @@ const isEpoch = (value: unknown): value is string =>
 
 function asChanges(value: unknown): ChangesResponse {
   if (!isRecord(value) || !Array.isArray(value.records)) badAnswer("changes");
-  const { next, hasMore, head, epoch } = value;
+  const { next, hasMore, head, epoch, purgedSeq } = value;
   if (
     !isCount(next) ||
     typeof hasMore !== "boolean" ||
     !isCount(head) ||
-    !isEpoch(epoch)
+    !isEpoch(epoch) ||
+    (purgedSeq !== undefined && !isCount(purgedSeq))
   )
     badAnswer("changes");
   return {
@@ -120,6 +121,7 @@ function asChanges(value: unknown): ChangesResponse {
     hasMore,
     head,
     epoch,
+    ...(purgedSeq !== undefined ? { purgedSeq } : {}),
   };
 }
 

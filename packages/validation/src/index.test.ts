@@ -51,6 +51,69 @@ describe("other schemas", () => {
     assert.equal(parsed.includeDeleted, true);
   });
 
+  it("reads includeDeleted=false and 0 as false, and refuses other words", () => {
+    for (const value of ["false", "0", "FALSE"])
+      assert.equal(
+        listTranscriptsQuerySchema.parse({ includeDeleted: value })
+          .includeDeleted,
+        false,
+        value,
+      );
+    for (const value of ["true", "1"])
+      assert.equal(
+        listTranscriptsQuerySchema.parse({ includeDeleted: value })
+          .includeDeleted,
+        true,
+        value,
+      );
+    assert.equal(listTranscriptsQuerySchema.parse({}).includeDeleted, false);
+    for (const value of ["maybe", "yes", "no", "on", "off", "y", "enabled"])
+      assert.equal(
+        listTranscriptsQuerySchema.safeParse({ includeDeleted: value }).success,
+        false,
+        value,
+      );
+  });
+
+  it("accepts audio types with parameters and keeps only the media type", async () => {
+    const { audioMimeTypeSchema, createAudioUploadJobSchema } =
+      await import("./index.js");
+    for (const [value, expected] of [
+      ["audio/webm", "audio/webm"],
+      ["audio/webm;codecs=opus", "audio/webm"],
+      ['audio/ogg; codecs="opus"', "audio/ogg"],
+      ["Audio/MP4; codecs=mp4a.40.2", "audio/mp4"],
+    ])
+      assert.equal(audioMimeTypeSchema.parse(value), expected, value);
+    for (const value of [
+      "text/plain",
+      "audio/",
+      "audio/webm;",
+      "audio/webm; codecs",
+      "audio/webm\ncodecs=opus",
+      `audio/webm;codecs=${"a".repeat(100)}`,
+    ])
+      assert.equal(audioMimeTypeSchema.safeParse(value).success, false, value);
+
+    const job = createAudioUploadJobSchema.parse({
+      mimeType: "audio/webm;codecs=opus",
+      sizeBytes: 3,
+      durationMs: 1,
+      language: "fr-CA",
+    });
+    assert.equal(job.mimeType, "audio/webm");
+    assert.equal(job.language, "fr-CA");
+    assert.equal(
+      createAudioUploadJobSchema.safeParse({
+        mimeType: "audio/webm",
+        sizeBytes: 3,
+        durationMs: 1,
+        language: "--threads",
+      }).success,
+      false,
+    );
+  });
+
   it("requires uri or base64 for audio", () => {
     assert.equal(audioSourceSchema.safeParse({}).success, false);
     assert.equal(

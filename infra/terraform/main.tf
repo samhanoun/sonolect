@@ -26,21 +26,26 @@ locals {
     "managed-by" = "terraform"
   })
 
-  service_apis = toset([
-    "artifactregistry.googleapis.com",
-    "cloudbuild.googleapis.com",
-    "run.googleapis.com",
-    "firestore.googleapis.com",
-    "sqladmin.googleapis.com",
-    "storage.googleapis.com",
-    "pubsub.googleapis.com",
-    "secretmanager.googleapis.com",
-    "iam.googleapis.com",
-    "logging.googleapis.com",
-    "monitoring.googleapis.com",
-    "aiplatform.googleapis.com",
-    "speech.googleapis.com"
-  ])
+  # Cloud Resource Manager serves the project IAM bindings below. Cloud SQL
+  # Admin is needed only with Cloud SQL.
+  service_apis = setunion(
+    [
+      "artifactregistry.googleapis.com",
+      "cloudbuild.googleapis.com",
+      "cloudresourcemanager.googleapis.com",
+      "run.googleapis.com",
+      "firestore.googleapis.com",
+      "storage.googleapis.com",
+      "pubsub.googleapis.com",
+      "secretmanager.googleapis.com",
+      "iam.googleapis.com",
+      "logging.googleapis.com",
+      "monitoring.googleapis.com",
+      "aiplatform.googleapis.com",
+      "speech.googleapis.com"
+    ],
+    var.enable_cloud_sql ? ["sqladmin.googleapis.com"] : []
+  )
 
   cloud_run_services = {
     api = {
@@ -49,6 +54,7 @@ locals {
       memory         = var.api_memory
       container_port = 8080
       max_instances  = var.api_max_instances
+      concurrency    = var.api_concurrency
     }
     worker = {
       image          = var.worker_image
@@ -56,6 +62,7 @@ locals {
       memory         = var.worker_memory
       container_port = 8080
       max_instances  = var.worker_max_instances
+      concurrency    = 80
     }
   }
 
@@ -78,6 +85,44 @@ locals {
   # Firebase ID tokens are issued for the Firebase project, which is the GCP
   # project unless a separate one is configured.
   firebase_project_id = coalesce(var.firebase_project_id, var.project_id)
+
+  # Polish requests go to Vertex AI in the platform's own region unless
+  # another one is set, so transcripts stay where the rest of the data is.
+  vertex_location = coalesce(var.vertex_location, var.region)
+
+  # Project roles of each service's runtime account. Only the API calls
+  # Speech-to-Text (v2 checks speech.recognizers.recognize, which
+  # roles/speech.client grants) and Vertex AI. Firestore and Pub/Sub follow
+  # the data flow in docs/architecture.md: the API publishes jobs, the worker
+  # consumes them and emits follow-up events.
+  cloud_sql_client_roles = var.enable_cloud_sql ? ["roles/cloudsql.client"] : []
+  runtime_project_roles = {
+    api = concat([
+      "roles/aiplatform.user",
+      "roles/datastore.user",
+      "roles/pubsub.publisher",
+      "roles/serviceusage.serviceUsageConsumer",
+      "roles/speech.client"
+    ], local.cloud_sql_client_roles)
+    worker = concat([
+      "roles/datastore.user",
+      "roles/pubsub.publisher",
+      "roles/pubsub.subscriber"
+    ], local.cloud_sql_client_roles)
+  }
+  runtime_project_bindings = merge([
+    for service, roles in local.runtime_project_roles : {
+      for role in roles : "${service}/${role}" => { service = service, role = role }
+    }
+  ]...)
+
+  # Pub/Sub forwards undeliverable messages to the dead-letter topic with its
+  # own service agent.
+  pubsub_service_agent = "serviceAccount:service-${data.google_project.this.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+}
+
+data "google_project" "this" {
+  project_id = var.project_id
 }
 
 resource "google_project_service" "services" {
@@ -88,10 +133,14 @@ resource "google_project_service" "services" {
   disable_on_destroy = false
 }
 
-resource "google_service_account" "cloud_run" {
-  account_id   = "${local.name_prefix}-run"
-  display_name = "Sonolect ${var.environment} Cloud Run runtime"
-  description  = "Runtime identity for Sonolect API and worker Cloud Run services."
+# One runtime identity per Cloud Run service, so the public API cannot read
+# the worker's service token or use the worker's grants.
+resource "google_service_account" "runtime" {
+  for_each = local.cloud_run_services
+
+  account_id   = "${local.name_prefix}-${each.key}"
+  display_name = "Sonolect ${var.environment} ${each.key} runtime"
+  description  = "Runtime identity of the Sonolect ${each.key} Cloud Run service."
 
   depends_on = [google_project_service.services]
 }
@@ -116,7 +165,12 @@ resource "google_firestore_database" "default" {
   depends_on = [google_project_service.services]
 }
 
+# Off unless enable_cloud_sql is true: no service reads or writes relational
+# state yet. docs/infrastructure.md lists what a service needs before it can
+# use the instance.
 resource "google_sql_database_instance" "postgres" {
+  count = var.enable_cloud_sql ? 1 : 0
+
   name             = "${local.name_prefix}-postgres"
   region           = var.region
   database_version = var.postgres_version
@@ -152,12 +206,23 @@ resource "google_sql_database_instance" "postgres" {
 
   deletion_protection = var.deletion_protection
 
+  lifecycle {
+    # The instance has a private IP only. Without a network Google refuses
+    # to create it.
+    precondition {
+      condition     = var.private_network_self_link != null && var.private_network_self_link != ""
+      error_message = "enable_cloud_sql needs private_network_self_link: the Cloud SQL instance has a private IP only."
+    }
+  }
+
   depends_on = [google_project_service.services]
 }
 
 resource "google_sql_database" "app" {
+  count = var.enable_cloud_sql ? 1 : 0
+
   name     = "sonolect"
-  instance = google_sql_database_instance.postgres.name
+  instance = google_sql_database_instance.postgres[0].name
 }
 
 resource "google_storage_bucket" "app" {
@@ -225,6 +290,40 @@ resource "google_pubsub_topic" "dead_letter" {
   depends_on = [google_project_service.services]
 }
 
+# Keeps dead letters for inspection and manual replay: a topic without a
+# subscription keeps nothing. Nothing pulls from it in normal operation, so
+# it must never expire.
+resource "google_pubsub_subscription" "dead_letter" {
+  name  = "${google_pubsub_topic.dead_letter.name}-inspect"
+  topic = google_pubsub_topic.dead_letter.name
+
+  ack_deadline_seconds       = 60
+  message_retention_duration = var.pubsub_message_retention
+  retain_acked_messages      = false
+
+  expiration_policy {
+    ttl = ""
+  }
+}
+
+# Pub/Sub forwards a message to the dead-letter topic only when its service
+# agent may publish there and acknowledge on the source subscription.
+resource "google_pubsub_topic_iam_member" "dead_letter_publisher" {
+  project = var.project_id
+  topic   = google_pubsub_topic.dead_letter.name
+  role    = "roles/pubsub.publisher"
+  member  = local.pubsub_service_agent
+}
+
+resource "google_pubsub_subscription_iam_member" "dead_letter_subscriber" {
+  for_each = google_pubsub_subscription.worker_subscriptions
+
+  project      = var.project_id
+  subscription = each.value.name
+  role         = "roles/pubsub.subscriber"
+  member       = local.pubsub_service_agent
+}
+
 resource "google_secret_manager_secret" "placeholders" {
   for_each = local.secret_names
 
@@ -262,10 +361,12 @@ resource "google_secret_manager_secret_version" "service_tokens" {
   secret_data = random_password.service_token.result
 }
 
+# Only the worker mounts a secret. Each account gets access to the secrets
+# its service mounts and to no other secret in the project.
 resource "google_secret_manager_secret_iam_member" "service_tokens_accessor" {
   secret_id = google_secret_manager_secret.service_tokens.id
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.cloud_run.email}"
+  member    = "serviceAccount:${google_service_account.runtime["worker"].email}"
 }
 
 resource "google_cloud_run_v2_service" "services" {
@@ -278,8 +379,9 @@ resource "google_cloud_run_v2_service" "services" {
   labels              = local.labels
 
   template {
-    service_account = google_service_account.cloud_run.email
-    timeout         = "300s"
+    service_account                  = google_service_account.runtime[each.key].email
+    timeout                          = "300s"
+    max_instance_request_concurrency = each.value.concurrency
 
     scaling {
       min_instance_count = var.cloud_run_min_instances
@@ -346,12 +448,12 @@ resource "google_cloud_run_v2_service" "services" {
 
       env {
         name  = "SONOLECT_VERTEX_LOCATION"
-        value = "us-central1"
+        value = local.vertex_location
       }
 
       env {
         name  = "SONOLECT_GEMINI_MODEL"
-        value = "gemini-2.0-flash"
+        value = var.gemini_model
       }
     }
   }
@@ -376,53 +478,22 @@ resource "google_cloud_run_v2_service_iam_member" "api_invoker" {
   member   = "allUsers"
 }
 
-resource "google_project_iam_member" "cloud_run_firestore_user" {
+# The roles in local.runtime_project_roles. No account gets Secret Manager
+# access on the whole project: see service_tokens_accessor.
+resource "google_project_iam_member" "runtime" {
+  for_each = local.runtime_project_bindings
+
   project = var.project_id
-  role    = "roles/datastore.user"
-  member  = "serviceAccount:${google_service_account.cloud_run.email}"
+  role    = each.value.role
+  member  = "serviceAccount:${google_service_account.runtime[each.value.service].email}"
+
+  depends_on = [google_project_service.services]
 }
 
-resource "google_project_iam_member" "cloud_run_cloudsql_client" {
-  project = var.project_id
-  role    = "roles/cloudsql.client"
-  member  = "serviceAccount:${google_service_account.cloud_run.email}"
-}
+resource "google_storage_bucket_iam_member" "runtime_storage_object_user" {
+  for_each = google_service_account.runtime
 
-resource "google_project_iam_member" "cloud_run_secret_accessor" {
-  project = var.project_id
-  role    = "roles/secretmanager.secretAccessor"
-  member  = "serviceAccount:${google_service_account.cloud_run.email}"
-}
-
-resource "google_storage_bucket_iam_member" "cloud_run_storage_object_user" {
   bucket = google_storage_bucket.app.name
   role   = "roles/storage.objectUser"
-  member = "serviceAccount:${google_service_account.cloud_run.email}"
-}
-
-resource "google_project_iam_member" "cloud_run_vertex_user" {
-  project = var.project_id
-  role    = "roles/aiplatform.user"
-  member  = "serviceAccount:${google_service_account.cloud_run.email}"
-}
-
-# Speech-to-Text v2 is callable once the API is enabled and the service account
-# can consume project services. If org policy requires a granular Speech role,
-# add roles/speech.client here as well.
-resource "google_project_iam_member" "cloud_run_service_usage" {
-  project = var.project_id
-  role    = "roles/serviceusage.serviceUsageConsumer"
-  member  = "serviceAccount:${google_service_account.cloud_run.email}"
-}
-
-resource "google_project_iam_member" "cloud_run_pubsub_publisher" {
-  project = var.project_id
-  role    = "roles/pubsub.publisher"
-  member  = "serviceAccount:${google_service_account.cloud_run.email}"
-}
-
-resource "google_project_iam_member" "cloud_run_pubsub_subscriber" {
-  project = var.project_id
-  role    = "roles/pubsub.subscriber"
-  member  = "serviceAccount:${google_service_account.cloud_run.email}"
+  member = "serviceAccount:${each.value.email}"
 }

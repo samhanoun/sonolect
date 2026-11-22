@@ -4,6 +4,7 @@ const { describe, it } = require("node:test");
 const {
   MAX_BUILD_NUMBER,
   MESSAGES,
+  isDevelopmentBundle,
   isEasBuilder,
   isReleaseBuild,
   resolveReleaseConfig,
@@ -289,6 +290,27 @@ describe("isReleaseBuild", () => {
   });
 });
 
+describe("isDevelopmentBundle", () => {
+  it("is false for a release build and for a bundle made for production", () => {
+    assert.equal(isDevelopmentBundle({}), true);
+    assert.equal(isDevelopmentBundle({ NODE_ENV: "development" }), true);
+    assert.equal(isDevelopmentBundle({ NODE_ENV: "production" }), false);
+    assert.equal(
+      isDevelopmentBundle({ EAS_BUILD_PROFILE: "production" }),
+      false,
+    );
+    assert.equal(isDevelopmentBundle({ SONOLECT_RELEASE: "1" }), false);
+    // EAS bundles a preview build for production (__DEV__ false).
+    assert.equal(
+      isDevelopmentBundle({
+        EAS_BUILD_PROFILE: "preview",
+        NODE_ENV: "production",
+      }),
+      false,
+    );
+  });
+});
+
 describe("EXPO_PUBLIC_SONOLECT_SYNC_URL", () => {
   const SYNC = "https://sync.example.org";
 
@@ -355,9 +377,20 @@ describe("EXPO_PUBLIC_SONOLECT_SYNC_URL", () => {
         syncServerUrlFrom({ EXPO_PUBLIC_SONOLECT_SYNC_URL: url }),
         url,
       );
+      assert.equal(
+        syncServerUrlFrom({
+          NODE_ENV: "development",
+          EXPO_PUBLIC_SONOLECT_SYNC_URL: url,
+        }),
+        url,
+      );
       for (const release of [
         { EAS_BUILD_PROFILE: "production" },
         { SONOLECT_RELEASE: "1" },
+        // The app would drop plain http there (__DEV__ false) and have no
+        // sync: an EAS preview build, or a release variant built locally.
+        { EAS_BUILD_PROFILE: "preview", NODE_ENV: "production" },
+        { NODE_ENV: "production" },
       ]) {
         assert.throws(
           () =>

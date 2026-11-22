@@ -1,3 +1,4 @@
+import { getEventListeners } from "node:events";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -407,5 +408,146 @@ assert.equal(optionRefused?.job.id, "job-option-injection");
 assert.equal(optionRefused?.job.status, "failed");
 assert.match(optionRefused?.job.error ?? "", /Local STT command refused/);
 assert.notEqual(optionRefused?.transcript?.status, "completed");
+
+type Store = { audioJobs: AudioUploadJob[]; transcripts: Transcript[] };
+const readTestStore = async () =>
+  JSON.parse(await readFile(storePath, "utf8")) as Store;
+const addJob = async (job: AudioUploadJob, transcript: Transcript) => {
+  const store = await readTestStore();
+  store.audioJobs.push(job);
+  store.transcripts.push(transcript);
+  await writeFile(storePath, JSON.stringify(store, null, 2), "utf8");
+};
+
+// The user renames and tags the transcript while the engine runs. The worker
+// writes only its own fields, so those edits survive.
+await addJob(
+  {
+    ...queuedJob,
+    id: "job-edited-while-running",
+    transcriptId: "transcript-edited-while-running",
+    status: "queued",
+    updatedAt: now,
+  },
+  {
+    ...queuedTranscriptInput,
+    id: "transcript-edited-while-running",
+    title: "Desktop voice capture",
+    status: "processing",
+    tags: ["audio", "queued"],
+    updatedAt: now,
+  },
+);
+const editWhileRunning =
+  "const fs = require('node:fs'); const storePath = process.argv[1]; " +
+  "const store = JSON.parse(fs.readFileSync(storePath, 'utf8')); " +
+  "const transcript = store.transcripts.find((item) => item.id === 'transcript-edited-while-running'); " +
+  "transcript.title = 'Standup notes'; transcript.tags.push('work'); " +
+  "fs.writeFileSync(storePath, JSON.stringify(store, null, 2)); " +
+  "console.log('Edited while running.');";
+const edited = await processNextQueuedAudioJob({
+  storePath,
+  localSttCommandArgs: [process.execPath, "-e", editWhileRunning, storePath],
+});
+assert.equal(edited?.job.id, "job-edited-while-running");
+assert.equal(edited?.job.status, "completed");
+assert.equal(edited?.transcript?.title, "Standup notes");
+assert.equal(edited?.transcript?.finalText, "Edited while running.");
+assert.deepEqual(edited?.transcript?.tags, [
+  "audio",
+  "work",
+  "local-stt",
+  "offline-transcribed",
+]);
+const storedEdited = (await readTestStore()).transcripts.find(
+  (item) => item.id === "transcript-edited-while-running",
+);
+assert.equal(storedEdited?.title, "Standup notes");
+assert.equal(storedEdited?.status, "completed");
+assert.ok(storedEdited?.tags.includes("work"));
+
+// A job left in "processing" by a worker that died is taken again once its
+// claim is older than the engine timeout. A recent claim is left alone.
+const freshClaim = new Date().toISOString();
+await addJob(
+  {
+    ...queuedJob,
+    id: "job-claim-recent",
+    transcriptId: "transcript-claim-recent",
+    status: "processing",
+    updatedAt: freshClaim,
+  },
+  {
+    ...queuedTranscriptInput,
+    id: "transcript-claim-recent",
+    status: "processing",
+    tags: ["audio", "queued"],
+    updatedAt: freshClaim,
+  },
+);
+await addJob(
+  {
+    ...queuedJob,
+    id: "job-claim-stale",
+    transcriptId: "transcript-claim-stale",
+    status: "processing",
+    updatedAt: now,
+  },
+  {
+    ...queuedTranscriptInput,
+    id: "transcript-claim-stale",
+    status: "processing",
+    tags: ["audio", "queued"],
+    updatedAt: now,
+  },
+);
+const reclaimed = await processNextQueuedAudioJob({
+  storePath,
+  localSttCommandArgs: successCommandArgs,
+});
+assert.equal(reclaimed?.job.id, "job-claim-stale");
+assert.equal(reclaimed?.job.status, "completed");
+assert.equal(reclaimed?.transcript?.status, "completed");
+assert.equal(
+  await processNextQueuedAudioJob({
+    storePath,
+    localSttCommandArgs: successCommandArgs,
+  }),
+  undefined,
+);
+assert.equal(
+  (await readTestStore()).audioJobs.find((job) => job.id === "job-claim-recent")
+    ?.status,
+  "processing",
+);
+
+// A worker that runs for a long time with one signal must not leave an abort
+// listener behind for every command it ran.
+const longLivedSignal = new AbortController().signal;
+for (let index = 0; index < 3; index += 1) {
+  await addJob(
+    {
+      ...queuedJob,
+      id: `job-listener-${index}`,
+      transcriptId: `transcript-listener-${index}`,
+      status: "queued",
+      updatedAt: now,
+    },
+    {
+      ...queuedTranscriptInput,
+      id: `transcript-listener-${index}`,
+      status: "processing",
+      tags: ["audio", "queued"],
+      updatedAt: now,
+    },
+  );
+  const result = await processNextQueuedAudioJob({
+    storePath,
+    localSttCommandArgs: successCommandArgs,
+    signal: longLivedSignal,
+  });
+  assert.equal(result?.job.status, "completed");
+}
+assert.equal(getEventListeners(longLivedSignal, "abort").length, 0);
 
 console.log("Local audio worker smoke test passed");

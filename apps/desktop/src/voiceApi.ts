@@ -56,6 +56,8 @@ type AudioJobResponse = {
 
 export type TranscriptJobResult = {
   jobId?: string;
+  /** The API's id for the transcript a job will write; never text to show. */
+  transcriptId?: string;
   transcript?: string;
   segments?: TranscriptSegment[];
   /** The saved recording behind this transcript, for playback in the editor. */
@@ -95,16 +97,61 @@ function cloudAllowed(options: SubmitCapturedAudioOptions): boolean {
   );
 }
 
+/** The parts of `AbortSignal` that older WebKit may lack. */
+export type SignalStatics = {
+  timeout?: (ms: number) => AbortSignal;
+  any?: (signals: AbortSignal[]) => AbortSignal;
+};
+
+/**
+ * The signal one request is sent with: it aborts after `ms`, or as soon as
+ * `signal` does. The WebKit of older macOS versions lacks `AbortSignal.any`,
+ * and on macOS 10.15 `AbortSignal.timeout` too, so the same is built there
+ * with a controller, a timer and a listener on `signal`. Both go once the
+ * time is up or `signal` aborts, or sooner with `settle`.
+ */
+export function requestSignal(
+  signal: AbortSignal | undefined,
+  ms: number,
+  statics: SignalStatics = AbortSignal as SignalStatics,
+): { signal: AbortSignal; settle: () => void } {
+  if (statics.timeout && (!signal || statics.any)) {
+    const timeout = statics.timeout(ms);
+    return {
+      signal: signal && statics.any ? statics.any([signal, timeout]) : timeout,
+      settle: () => undefined,
+    };
+  }
+  const controller = new AbortController();
+  const settle = () => {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+  };
+  const onAbort = () => {
+    settle();
+    controller.abort(signal?.reason);
+  };
+  const timer = setTimeout(() => {
+    settle();
+    controller.abort(
+      new DOMException("The request timed out.", "TimeoutError"),
+    );
+  }, ms);
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener("abort", onAbort);
+  return { signal: controller.signal, settle };
+}
+
 function guardedFetch(options: SubmitCapturedAudioOptions): typeof fetch {
   const request = options.fetchImpl ?? fetch;
   return (input, init) => {
     if (!cloudAllowed(options)) throw new Error(getT()("voice.localOnly"));
-    const timeout = AbortSignal.timeout(60_000);
-    return request(input, {
-      ...init,
-      signal: options.signal
-        ? AbortSignal.any([options.signal, timeout])
-        : timeout,
+    const { signal, settle } = requestSignal(options.signal, 60_000);
+    // An answer still has its body to read, which the time limit covers
+    // too, as AbortSignal.timeout's does: only a failed request settles.
+    return request(input, { ...init, signal }).catch((error: unknown) => {
+      settle();
+      throw error;
     });
   };
 }
@@ -204,9 +251,8 @@ export async function submitCapturedAudio(
         : (payload.message ?? getT()("voice.sentForTranscription")),
     };
 
-    const transcript = payload.transcriptId;
     if (jobId) result.jobId = jobId;
-    if (transcript) result.transcript = transcript;
+    if (payload.transcriptId) result.transcriptId = payload.transcriptId;
 
     return result;
   } catch (error) {

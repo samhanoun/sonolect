@@ -57,6 +57,15 @@
         }
       ],
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Sonolect uses the camera only to scan the sync code shown on your other device.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
+      ],
+      "./plugins/withOptionalCamera",
+      [
         "expo-splash-screen",
         {
           "image": "./assets/splash-icon.png",

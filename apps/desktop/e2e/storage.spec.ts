@@ -5,6 +5,7 @@ import {
   microphoneRequests,
   nativeCalls,
   releaseHeldReads,
+  releaseNative,
   watchMicrophoneRequests,
   type MockCapture,
 } from "./support/mockTauri";
@@ -452,5 +453,179 @@ test.describe("compressed recordings in French", () => {
     await expect(card.getByRole("status")).toHaveText(
       /^1 enregistrement compressé, 17,4\sMo libérés\.$/,
     );
+  });
+});
+
+test.describe("deleting recordings", () => {
+  const DAY = 86_400_000;
+  const saved = (id: string, ageDays: number, transcript: string) => ({
+    ...capture(id, 3_000),
+    createdAtMs: Date.now() - ageDays * DAY,
+    transcript,
+  });
+
+  test("a shorter retention asks first, and keeps the old choice if declined", async ({
+    page,
+  }) => {
+    await installMockTauri(page, [
+      saved("1700000000000-1", 0.01, "Made today."),
+      saved("1700000000000-2", 20, "Made three weeks ago."),
+      saved("1700000000000-3", 40, "Made last month."),
+      { ...saved("1700000000000-4", 60, "Pinned long ago."), pinned: true },
+    ]);
+    await page.goto("/");
+    await nav(page, "Settings").click();
+    const card = privacyCard(page);
+    const keep = card.getByLabel("Keep recordings");
+    await expect(keep).toHaveValue("0");
+
+    const asked: string[] = [];
+    page.once("dialog", (dialog) => {
+      asked.push(dialog.message());
+      void dialog.dismiss();
+    });
+    await keep.selectOption("7");
+    await expect.poll(() => asked.length).toBe(1);
+    expect(asked[0]).toBe(
+      "Keep recordings for 7 days? This deletes 2 recordings older than that from this device now. This cannot be undone.",
+    );
+    await expect(keep).toHaveValue("0");
+    expect(await nativeCalls(page, "purge_local_captures")).toEqual([]);
+
+    page.once("dialog", (dialog) => {
+      asked.push(dialog.message());
+      void dialog.accept();
+    });
+    await keep.selectOption("7");
+    await expect(card.getByRole("status")).toHaveText(
+      "Saved. Deleted 2 recordings older than 7 days.",
+    );
+    await expect(keep).toHaveValue("7");
+    expect(
+      (await nativeCalls(page, "purge_local_captures")).map(
+        (call) => call.args,
+      ),
+    ).toEqual([{ olderThanDays: 7 }]);
+
+    // Nothing left that a day would delete, apart from the pinned one: no
+    // question then.
+    page.once("dialog", () => asked.push("unexpected"));
+    await keep.selectOption("1");
+    await expect(card.getByRole("status")).toHaveText(
+      "Saved. Recordings older than 1 day are deleted automatically.",
+    );
+    expect(asked).toHaveLength(2);
+    await nav(page, "Library").click();
+    await expect(page.getByText("Made today.")).toBeVisible();
+    await expect(page.getByText("Pinned long ago.")).toBeVisible();
+    await expect(page.getByText("Made last month.")).toHaveCount(0);
+  });
+
+  test("a shorter retention still asks when the library cannot be read", async ({
+    page,
+  }) => {
+    await installMockTauri(page, [
+      saved("1700000000000-1", 40, "Made last month."),
+    ]);
+    await page.goto("/");
+    await nav(page, "Settings").click();
+    const card = privacyCard(page);
+    const keep = card.getByLabel("Keep recordings");
+    await expect(keep).toHaveValue("0");
+    // From now on the library cannot be listed.
+    await page.evaluate(() => {
+      const internals = (
+        window as typeof window & {
+          __TAURI_INTERNALS__: {
+            invoke: (command: string, ...rest: unknown[]) => Promise<unknown>;
+          };
+        }
+      ).__TAURI_INTERNALS__;
+      const invoke = internals.invoke;
+      internals.invoke = (command, ...rest) =>
+        command === "list_local_captures"
+          ? Promise.reject("The library could not be read.")
+          : invoke(command, ...rest);
+    });
+
+    const asked: string[] = [];
+    page.once("dialog", (dialog) => {
+      asked.push(dialog.message());
+      void dialog.dismiss();
+    });
+    await keep.selectOption("7");
+    await expect.poll(() => asked.length).toBe(1);
+    expect(asked[0]).toBe(
+      "Keep recordings for 7 days? Recordings older than that are deleted from this device now. This cannot be undone.",
+    );
+    await expect(keep).toHaveValue("0");
+    expect(await nativeCalls(page, "purge_local_captures")).toEqual([]);
+  });
+
+  test("deleting a recording from the library asks first", async ({ page }) => {
+    await installMockTauri(page, [saved("1700000000000-1", 1, "Delete me.")]);
+    await page.goto("/");
+    await nav(page, "Library").click();
+    const item = page.locator("article", { hasText: "Delete me." });
+    const asked: string[] = [];
+    page.once("dialog", (dialog) => {
+      asked.push(dialog.message());
+      void dialog.accept();
+    });
+    await item.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(item).toHaveCount(0);
+    expect(asked).toEqual([
+      "Delete this recording and its transcript from this device?",
+    ]);
+    expect(
+      (await nativeCalls(page, "delete_local_capture")).map(
+        (call) => call.args,
+      ),
+    ).toEqual([{ id: "1700000000000-1" }]);
+  });
+
+  test("a second file waits for the first, also after leaving the page", async ({
+    page,
+  }) => {
+    await installMockTauri(page, [], { hold: ["capture_finish"] });
+    await page.goto("/");
+    await nav(page, "Transcribe").click();
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "first.wav",
+      mimeType: "audio/wav",
+      buffer: toneWav(4),
+    });
+    await expect
+      .poll(async () => (await nativeCalls(page, "capture_finish")).length, {
+        timeout: 20_000,
+      })
+      .toBe(1);
+
+    // The page is left and opened again while the first file transcribes.
+    await nav(page, "Overview").click();
+    await nav(page, "Transcribe").click();
+    const running = page.getByText(
+      "An audio file is being transcribed. Its transcript opens here when it is done.",
+    );
+    await expect(running).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Import audio" }),
+    ).toBeDisabled();
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "second.wav",
+      mimeType: "audio/wav",
+      buffer: toneWav(4),
+    });
+    await expect(running).toBeVisible();
+    expect(await nativeCalls(page, "capture_begin")).toHaveLength(1);
+
+    // The first one ends, and its transcript opens on the page shown now.
+    await releaseNative(page, "capture_finish");
+    await expect(running).toHaveCount(0);
+    await expect(page.getByLabel("Transcript editor")).not.toHaveValue("");
+    await expect(
+      page.getByRole("button", { name: "Import audio" }),
+    ).toBeEnabled();
+    expect(await nativeCalls(page, "capture_begin")).toHaveLength(1);
   });
 });

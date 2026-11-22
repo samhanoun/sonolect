@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- What the keyboard says above its mic. -->
+  <string name="sonolect_voice_idle">Touchez le micro et parlez</string>
+  <string name="sonolect_voice_listening">Écoute…</string>
+  <string name="sonolect_voice_finishing">Finalisation…</string>
+  <string name="sonolect_voice_keep_talking">Touchez pour continuer à parler</string>
+  <string name="sonolect_voice_no_match">Aucune parole reconnue. Touchez pour réessayer.</string>
+  <string name="sonolect_voice_allow_mic">Ouvrez Sonolect une fois et autorisez le micro.</string>
+  <string name="sonolect_voice_no_recognizer">Pas de reconnaissance vocale sur l\'appareil. Pour utiliser ici le service vocal du système, autorisez-le dans les réglages de confidentialité de Sonolect.</string>
+  <string name="sonolect_voice_start_failed">Impossible de démarrer l\'écoute.</string>
+  <string name="sonolect_voice_offline">Le service vocal est hors ligne. Réessayez.</string>
+  <string name="sonolect_voice_busy">La reconnaissance vocale est occupée. Réessayez.</string>
+  <string name="sonolect_voice_language_missing">Téléchargez cette langue pour la reconnaissance hors ligne dans les réglages d\'Android.</string>
+  <string name="sonolect_voice_error">Dictée impossible (erreur %1$d). Touchez pour réessayer.</string>
+  <string name="sonolect_voice_open">Ouvrir ›</string>
+
+  <!-- The space key's own label. -->
+  <string name="sonolect_voice_space_key">espace</string>
+
+  <!-- What TalkBack reads for each button. -->
+  <string name="sonolect_voice_dictate">Dicter</string>
+  <string name="sonolect_voice_stop">Arrêter la dictée</string>
+  <string name="sonolect_voice_switch_keyboard">Changer de clavier</string>
+  <string name="sonolect_voice_delete">Effacer</string>
+  <string name="sonolect_voice_space">Espace</string>
+  <string name="sonolect_voice_enter">Entrée</string>
+</resources>

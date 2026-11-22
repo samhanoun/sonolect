@@ -9,12 +9,12 @@ Sonolect is a pnpm monorepo containing desktop/mobile clients, shared packages, 
 - **Worker service**: asynchronous processors for transcription, agent actions, billing events, and retries from Pub/Sub.
 - **Sync service**: end-to-end encrypted note sync. The apps call it directly with a vault key, and it never sees a key or a word of a note (see [security.md](security.md#note-sync)).
 - **Shared packages**: `@sonolect/types`, `@sonolect/validation`, `@sonolect/config`, `@sonolect/sdk`, `@sonolect/sync-core`, `@sonolect/ui`, and prompt assets.
-- **Infrastructure**: GCP Cloud Run, Firestore, Cloud SQL for relational state, Cloud Storage for audio/artifacts, Pub/Sub for queues, and Secret Manager for runtime secrets. The sync service needs only Cloud Run, Firestore and Secret Manager, and has its own Terraform root.
+- **Infrastructure**: GCP Cloud Run, Firestore, Cloud Storage for audio/artifacts, Pub/Sub for queues, and Secret Manager for runtime secrets. Cloud SQL for relational state is off (`enable_cloud_sql = false`) until a service needs it; see [infrastructure.md](infrastructure.md#cloud-sql) for what is still missing to use it. The sync service needs only Cloud Run, Firestore and Secret Manager, and has its own Terraform root.
 
 ## Data flow
 
 1. Client authenticates and requests a session/project operation through the API.
-2. API writes tenant-scoped metadata to Firestore/Cloud SQL and returns upload coordinates where needed.
+2. API writes tenant-scoped metadata to Firestore (or Cloud SQL, once it is turned on) and returns upload coordinates where needed.
 3. Audio/artifacts are stored in private Cloud Storage paths scoped by user or tenant.
 4. API publishes async work to Pub/Sub topics such as `audio-ingest`, `transcription-jobs`, `agent-actions`, or `billing-events`.
 5. Worker consumes subscriptions, calls provider integrations using Secret Manager-backed credentials, writes results, and emits follow-up events.
@@ -42,20 +42,23 @@ The first device creates the vault (`POST /v1/vaults`); others join by QR code o
 
 Terraform environment wrappers exist under `infra/terraform/environments/{dev,staging,prod}` and call the root module with environment-specific sizing and protection defaults. The sync service is deployed separately from `infra/terraform/sync`, one deployment per Google Cloud project.
 
-- **dev**: small Cloud SQL tier, no minimum Cloud Run instances, deletion protection disabled.
+- **dev**: no minimum Cloud Run instances, deletion protection disabled, a small Cloud SQL tier when it is turned on.
 - **staging**: production-like service topology with smaller capacity and deletion protection enabled.
-- **prod**: regional Cloud SQL, minimum API/worker capacity, deletion protection enabled, public API invocation disabled by default for gateway/IAP fronting.
+- **prod**: minimum API/worker capacity, deletion protection enabled, public API invocation disabled by default for gateway/IAP fronting, regional Cloud SQL when it is turned on.
+
+Cloud SQL is off in all three. Vertex AI calls go to the environment's region unless `vertex_location` names another one.
 
 ## Reliability defaults
 
-- Cloud SQL backups and point-in-time recovery are enabled.
-- Pub/Sub subscriptions include retry policy and dead-letter topic placeholders.
+- Cloud SQL, when turned on, has backups and point-in-time recovery enabled.
+- Pub/Sub subscriptions include a retry policy and a dead-letter topic. Its pull subscription keeps dead letters for manual replay.
 - Cloud Storage uses uniform bucket-level access, public access prevention, versioning, and lifecycle retention.
-- Cloud Run services use dedicated runtime service accounts and least-privilege IAM grants for Firestore, Cloud SQL, Storage, Pub/Sub, and Secret Manager.
+- Each Cloud Run service has its own runtime service account with least-privilege IAM grants for Firestore, Storage, Pub/Sub and, when turned on, Cloud SQL. Secret Manager access is granted per secret, only to the service that mounts it (see [infrastructure.md](infrastructure.md#runtime-service-accounts)).
 
 ## Open infrastructure follow-ups
 
 - Add networking module for VPC, private service access, Serverless VPC Access, and egress controls.
+- Before turning Cloud SQL on: VPC egress from Cloud Run, a database user with a Secret Manager password, the `database-url` secret, a Postgres client and migrations.
 - Wire GitHub Actions Workload Identity Federation to the `ci_deploy_service_account` output.
 - Replace placeholder Cloud Run images with Artifact Registry images.
 - Add Cloud Monitoring alert policies and SLO dashboards.

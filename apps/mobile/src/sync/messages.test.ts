@@ -59,12 +59,18 @@ describe("sync messages", () => {
       "This is not a Sonolect sync code.",
     );
     assert.equal(
-      pairingErrorText(en, refusal("sonolect://sync/join?v=2&k=x")),
+      pairingErrorText(en, refusal(`SONOLECT SYNC 2 ${"0".repeat(56)}`)),
       "Update Sonolect to use this code.",
     );
+    // The link earlier builds put in the QR code is not a code.
     assert.equal(
-      pairingErrorText(en, refusal("sonolect://sync/join?v=1&k=abc")),
-      "Check the code: it has 56 characters.",
+      pairingErrorText(
+        en,
+        refusal(
+          "sonolect://sync/join?v=1&k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        ),
+      ),
+      "This is not a Sonolect sync code.",
     );
     assert.equal(
       pairingErrorText(en, refusal("U".repeat(56))),
@@ -115,6 +121,10 @@ describe("sync messages", () => {
       "Paused while Save history is off.",
     );
     assert.equal(
+      at({ paused: "settings" }).problem,
+      "Paused: Sonolect couldn't read its settings. Check them, or restart the app to try again.",
+    );
+    assert.equal(
       at({ paused: "historyOff", problem: "network" }).problem,
       "Offline. Notes will sync when you're back online.",
     );
@@ -156,6 +166,25 @@ describe("sync messages", () => {
       STRINGS.fr.sync.joinNotes(3),
       "Les 3 notes de ce téléphone seront copiées dans cette synchronisation.",
     );
+  });
+
+  it("tells the other phone to scan the QR code in Sonolect, with the app's own labels", () => {
+    for (const ui of ["en", "fr"] as const) {
+      const t = STRINGS[ui];
+      assert.ok(t.sync.codeHelp.includes(`(${t.tabs.settings}, `), ui);
+      assert.ok(t.sync.codeHelp.includes(`, ${t.sync.scanCode})`), ui);
+    }
+    assert.match(STRINGS.en.sync.codeHelp, /not with the camera app/);
+    assert.match(STRINGS.fr.sync.codeHelp, /pas avec l'app Appareil photo/);
+  });
+
+  it("says how to allow the camera: Scan code asks again, or the phone's settings once refused for good", () => {
+    for (const ui of ["en", "fr"] as const) {
+      const t = STRINGS[ui];
+      assert.ok(t.sync.cameraNeeded.includes(t.sync.scanCode), ui);
+      assert.doesNotMatch(t.sync.cameraNeeded, /settings|réglages/i, ui);
+      assert.match(t.sync.cameraDenied, /settings|réglages/i, ui);
+    }
   });
 
   it("says which note a conflict copy comes from, in both languages", () => {

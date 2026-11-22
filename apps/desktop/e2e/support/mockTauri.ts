@@ -20,7 +20,16 @@ export type MockCapture = {
   origin?: string;
   conflictOf?: string;
   hlc?: { t: number; c: number; d: string };
+  /** A pinned recording is never deleted by the retention setting. */
+  pinned?: boolean;
 };
+
+/** Commands the `hold` option can stop halfway. */
+export type HeldCommand =
+  | "download_speaker_model"
+  | "detect_speakers"
+  | "capture_finish"
+  | "transcribe_audio";
 
 /** A request the page sends to the sync server, answered by the test. */
 export type MockSyncRequest = {
@@ -81,6 +90,10 @@ const toneOpus = readFileSync(
  * With `recorderLimitMs`, the recorder is full after that much audio and
  * refuses more, as the real one does after four hours.
  *
+ * `transcribe_audio` (the short path, for a recording the live recorder did
+ * not take) has no speech model either, unless `transcribeAudio` gives the
+ * text it hears: it then saves the recording and answers with its id.
+ *
  * `compress_local_captures` compresses each saved recording once and reports
  * what that freed; `compressed` lists recordings that already are. With
  * `unplayableOpus`, the Ogg Opus audio sent is damaged, so the page cannot
@@ -115,6 +128,8 @@ export async function installMockTauri(
     recorder?: boolean;
     /** The recorder takes this much audio, then refuses more. */
     recorderLimitMs?: number;
+    /** What `transcribe_audio` hears in a recording (see above). */
+    transcribeAudio?: string;
     /** true: this computer's sound can be recorded. */
     systemAudio?: boolean;
     /** true: this build syncs notes (see above). */
@@ -130,7 +145,7 @@ export async function installMockTauri(
     /** Who speaks when in each saved recording, by its id. */
     speakerTurns?: Record<string, MockSpeakerTurn[]>;
     /** These commands stop halfway until `releaseNative` lets them finish. */
-    hold?: ("download_speaker_model" | "detect_speakers")[];
+    hold?: HeldCommand[];
   } = {},
 ) {
   await page.addInitScript(
@@ -140,6 +155,7 @@ export async function installMockTauri(
       toneOpus,
       recorder,
       recorderLimitMs,
+      transcribeAudio,
       systemAudio,
       sync,
       syncHook,
@@ -313,6 +329,34 @@ export async function installMockTauri(
               hear(false);
               return Math.round(live.bytes / 32);
             }
+            if (command === "transcribe_audio") {
+              const audio = args as unknown as Uint8Array;
+              calls.push({ command, args: { bytes: audio.length } });
+              if (transcribeAudio === undefined)
+                throw "Install the local speech model in Settings first.";
+              await halfway(command);
+              // As local_history.rs: the recording is saved, then its text
+              // comes back.
+              const id = `1700000000002-${nextId++}`;
+              const segments = [
+                { startMs: 0, endMs: 1000, text: transcribeAudio },
+              ];
+              library.unshift({
+                id,
+                createdAtMs: Date.now(),
+                durationMs: 1000,
+                transcript: transcribeAudio,
+                error: null,
+                language: "en",
+                segments,
+              });
+              return {
+                text: transcribeAudio,
+                segments,
+                language: "en",
+                captureId: id,
+              };
+            }
             calls.push({ command, args });
             switch (command) {
               case "plugin:event|listen": {
@@ -343,6 +387,8 @@ export async function installMockTauri(
                 const finished = live;
                 live = undefined;
                 if (!finished.bytes) throw "No audio was recorded.";
+                // Transcribing the end of it: the recording is saved after.
+                await halfway(command);
                 // A high-quality recording ends as its 48 kHz Opus file.
                 if (finished.high) compressed.add(finished.id);
                 const text = finished.segments
@@ -432,7 +478,9 @@ export async function installMockTauri(
                   });
                 }
                 capture.transcript = args.transcript as string;
-                capture.segments = args.segments as typeof capture.segments;
+                capture.segments = args.segments as NonNullable<
+                  typeof capture.segments
+                >;
                 if (capture.hlc)
                   capture.hlc = {
                     t: Math.max(Date.now(), capture.hlc.t + 1),
@@ -444,8 +492,26 @@ export async function installMockTauri(
                   ...(conflictCopy ? { conflictCopy } : {}),
                 };
               }
-              case "purge_local_captures":
-                return 0;
+              case "purge_local_captures": {
+                // As local_history.rs: all of them, or those older than the
+                // number of days that are not pinned.
+                const days = args.olderThanDays as number | null;
+                const cutoff = Date.now() - (days ?? 0) * 86_400_000;
+                const gone = library.filter(
+                  (item) =>
+                    days === null ||
+                    (!item.pinned && item.createdAtMs < cutoff),
+                );
+                gone.forEach((item) =>
+                  library.splice(library.indexOf(item), 1),
+                );
+                return gone.length;
+              }
+              case "delete_local_capture": {
+                const index = library.findIndex((item) => item.id === args.id);
+                if (index !== -1) library.splice(index, 1);
+                return null;
+              }
               case "compress_local_captures": {
                 // A WAV is 32 bytes a millisecond; Opus is about a tenth.
                 const fresh = library.filter(
@@ -640,6 +706,7 @@ export async function installMockTauri(
       toneOpus,
       recorder: options.recorder ?? true,
       recorderLimitMs: options.recorderLimitMs,
+      transcribeAudio: options.transcribeAudio,
       systemAudio: options.systemAudio ?? false,
       sync: options.sync ?? false,
       syncHook: SYNC_REQUEST_HOOK,
@@ -779,10 +846,7 @@ export async function emitNativeEvent(
 }
 
 /** Lets a command held with the `hold` option finish, once it is waiting. */
-export async function releaseNative(
-  page: Page,
-  command: "download_speaker_model" | "detect_speakers",
-) {
+export async function releaseNative(page: Page, command: HeldCommand) {
   type Hooks = {
     __sonolectE2eWaiting: (command: string) => boolean;
     __sonolectE2eRelease: (command: string) => void;

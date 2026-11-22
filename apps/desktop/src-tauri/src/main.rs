@@ -1,3 +1,7 @@
+// A release build on Windows is a windowed app: no console window opens
+// beside it, and none can end it when closed. The command-line modes in
+// `main` attach to the console they were started from instead.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -126,12 +130,12 @@ fn check_accessibility() -> PermissionResult {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn check_accessibility_permission() -> PermissionResult {
     check_accessibility()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn open_accessibility_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -148,7 +152,8 @@ fn open_accessibility_settings() -> Result<(), String> {
 
 /// Edge voices are a Microsoft online service, so this honours Local only like
 /// every other online request, and returns the MP3 as a raw binary response.
-#[tauri::command]
+/// It runs off the main thread: the voice service can take seconds.
+#[tauri::command(async)]
 fn edge_tts_synthesize(
     app: tauri::AppHandle,
     text: String,
@@ -196,12 +201,21 @@ fn edge_tts_synthesize(
     };
     // `--option=value` keeps text or rates that start with "-" from being read
     // as extra edge-tts options.
-    let output = Command::new("edge-tts")
+    let mut command = Command::new("edge-tts");
+    command
         .arg(format!("--voice={voice}"))
         .arg(format!("--rate={rate_str}"))
         .arg(format!("--text={trimmed}"))
         .arg("--write-media")
-        .arg(&out_path)
+        .arg(&out_path);
+    // The app has no console on Windows: without this, edge-tts would open
+    // a console window of its own each time.
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+    }
+    let output = command
         .output()
         .map_err(|e| format!("Failed to run edge-tts: {e}. Install with: pip install edge-tts"))?;
     if !output.status.success() {
@@ -214,9 +228,40 @@ fn edge_tts_synthesize(
     Ok(tauri::ipc::Response::new(audio?))
 }
 
+/// The command-line modes: diagnostics that print their answer and exit
+/// instead of opening the app.
+const COMMAND_LINE_MODES: [&str; 3] = [
+    "--list-provider-models",
+    "--transcribe-file",
+    "--detect-speakers",
+];
+
+/// Lets a command-line mode print to the terminal it was started from. A
+/// release build on Windows has no console of its own (see the top of this
+/// file); output sent to a file or a pipe goes there as before.
+#[cfg(target_os = "windows")]
+fn attach_console() {
+    use windows_sys::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+    // This fails when there is no such console, or when this process has
+    // one already (a debug build): the output then goes where it would.
+    // SAFETY: AttachConsole takes a process ID and touches no memory of ours.
+    unsafe {
+        AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn attach_console() {}
+
 fn main() {
     // A local diagnostic path exercises the exact production engine without UI automation.
     let args: Vec<String> = std::env::args().collect();
+    if args
+        .get(1)
+        .is_some_and(|mode| COMMAND_LINE_MODES.contains(&mode.as_str()))
+    {
+        attach_console();
+    }
     if args.get(1).map(String::as_str) == Some("--list-provider-models") {
         match online::discover_models(args.get(2).map(String::as_str).unwrap_or("openrouter")) {
             Ok(models) => println!(

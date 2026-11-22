@@ -1,7 +1,7 @@
 # The end-to-end encrypted note sync service on its own: Firestore, a
 # runtime service account, the service-token secret and a public Cloud Run
 # service. It is a standalone root, apart from ../ (the full platform, which
-# also creates Cloud SQL and needs a private VPC that sync does not use).
+# can also create Cloud SQL, and that needs a private VPC sync does not use).
 # docs/sync-setup.md is the runbook.
 
 terraform {
@@ -71,10 +71,10 @@ resource "google_project_service" "services" {
 }
 
 # The vaults and their sealed records. The service needs no composite index
-# and deliberately no TTL policy: it purges tombstones 90 days after a delete
-# itself, in transactions that also update the vault's record and byte
-# counters and its purge cursor, which a TTL deletion would bypass. See
-# services/sync-service/README.md.
+# (only the exemption below) and deliberately no TTL policy: it purges
+# tombstones 90 days after a delete itself, in transactions that also update
+# the vault's record and byte counters and its purge cursor, which a TTL
+# deletion would bypass. See services/sync-service/README.md.
 resource "google_firestore_database" "sync" {
   project                     = var.project_id
   name                        = var.firestore_database
@@ -91,6 +91,20 @@ resource "google_firestore_database" "sync" {
   deletion_policy = var.deletion_protection ? "PREVENT" : "DELETE"
 
   depends_on = [google_project_service.services]
+}
+
+# Each record's sealed ciphertext (`ct`, up to 768 KiB) is never queried, so
+# it gets no single-field index: Firestore would otherwise index its first
+# 1,500 bytes twice (ascending and descending) on every write. The queries
+# use `seq` and `tombstoneAt`, which keep their automatic indexes.
+resource "google_firestore_field" "record_ciphertext" {
+  project    = var.project_id
+  database   = google_firestore_database.sync.name
+  collection = "records"
+  field      = "ct"
+
+  # An empty block turns off every index on the field.
+  index_config {}
 }
 
 resource "google_service_account" "sync" {
@@ -220,6 +234,15 @@ resource "google_cloud_run_v2_service" "sync" {
       env {
         name  = "SONOLECT_SYNC_FIRESTORE_DATABASE"
         value = google_firestore_database.sync.name
+      }
+
+      # Unset, the service trusts one X-Forwarded-For hop on Cloud Run.
+      dynamic "env" {
+        for_each = var.trust_proxy_hops == null ? [] : [var.trust_proxy_hops]
+        content {
+          name  = "SONOLECT_SYNC_TRUST_PROXY"
+          value = tostring(env.value)
+        }
       }
 
       env {

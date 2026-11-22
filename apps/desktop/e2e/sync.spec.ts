@@ -6,7 +6,8 @@ import {
   generateRootKey,
   openSyncEngine,
   pairingCode,
-  pairingLink,
+  pairingPayload,
+  qrMatrix,
   syncNote,
 } from "@sonolect/sync-core";
 import {
@@ -175,6 +176,24 @@ test.describe("note sync", () => {
     const [key] = await nativeCalls(page, "sync_key_create");
     const root = Buffer.from((key!.args as { key: string }).key, "base64url");
     expect(pairingCode(root)).toBe(code);
+    // The QR code holds the text for Sonolect's scanner, not a link, and
+    // the caption says to scan it in Sonolect.
+    let modules = "";
+    qrMatrix(pairingPayload(root)).modules.forEach((row, y) =>
+      row.forEach((dark, x) => {
+        if (dark) modules += `M${x + 4} ${y + 4}h1v1h-1z`;
+      }),
+    );
+    await expect(
+      card
+        .getByRole("img", { name: "QR code to join this sync" })
+        .locator("path"),
+    ).toHaveAttribute("d", modules);
+    await expect(
+      card.getByText(
+        "On your phone, scan this QR code with Sonolect (Settings, Sync, Scan code), not with the camera app.",
+      ),
+    ).toBeVisible();
     const other = await phone(server, root);
     await other.engine.sync();
     expect(
@@ -188,6 +207,45 @@ test.describe("note sync", () => {
     ).toHaveCount(0);
     await card.getByRole("button", { name: "Show code" }).click();
     await expect(card.locator(".studio-sync-code-text code")).toHaveText(code!);
+  });
+
+  test("deleting a note while sync is on says it goes from every device", async ({
+    page,
+  }) => {
+    await serve(page);
+    await installMockTauri(page, [recording], { sync: true });
+    await page.goto("/");
+    const asked: string[] = [];
+    page.on("dialog", (dialog) => {
+      asked.push(dialog.message());
+      void dialog.dismiss();
+    });
+    const askToDelete = async () => {
+      await nav(page, "Library").click();
+      await page
+        .locator("article", { hasText: "Recorded on this desktop." })
+        .getByRole("button", { name: "Delete", exact: true })
+        .click();
+    };
+
+    // Sync is off: the note goes from this device only.
+    await askToDelete();
+    await expect
+      .poll(() => asked)
+      .toEqual(["Delete this recording and its transcript from this device?"]);
+
+    await nav(page, "Settings").click();
+    await syncCard(page).getByRole("button", { name: "Turn on sync" }).click();
+    await expect(syncCard(page).getByText("Sync is on.")).toBeVisible();
+    await askToDelete();
+    await expect
+      .poll(() => asked.at(-1))
+      .toBe(
+        "Delete this note from all your synced devices? Its recording is deleted from this device.",
+      );
+    // Declined both times: nothing was deleted.
+    expect(await nativeCalls(page, "delete_local_capture")).toEqual([]);
+    await expect(page.getByText("Recorded on this desktop.")).toBeVisible();
   });
 
   test("joining with a code brings the other device's notes, without their audio", async ({
@@ -224,7 +282,7 @@ test.describe("note sync", () => {
     await expect(
       card.getByText("Joining shares every note with whoever holds this code."),
     ).toBeVisible();
-    const field = card.getByLabel("Sync code or link from your other device");
+    const field = card.getByLabel("Sync code from your other device");
 
     // One character wrong.
     const code = pairingCode(other.root);
@@ -244,9 +302,18 @@ test.describe("note sync", () => {
     await expect(card.getByRole("alert")).toHaveText(
       "This is not a Sonolect sync code.",
     );
+    // No build reads a key from a link, the old pairing link included.
+    await field.fill(
+      `sonolect://sync/join?v=1&k=${Buffer.from(other.root).toString("base64url")}`,
+    );
+    await card.getByRole("button", { name: "Join", exact: true }).click();
+    await expect(card.getByRole("alert")).toHaveText(
+      "This is not a Sonolect sync code.",
+    );
+    expect(await nativeCalls(page, "sync_key_import")).toEqual([]);
 
-    // The link from the QR code, as a phone would read it.
-    await field.fill(pairingLink(other.root));
+    // The text of the QR code, pasted.
+    await field.fill(pairingPayload(other.root));
     await card.getByRole("button", { name: "Join", exact: true }).click();
     await expect(card.getByText("Sync is on.")).toBeVisible();
     await expect(card.getByText(/^Last synced: /)).toBeVisible();
@@ -291,7 +358,7 @@ test.describe("note sync", () => {
     const card = syncCard(page);
     await card.getByRole("button", { name: "Join with a code" }).click();
     await card
-      .getByLabel("Sync code or link from your other device")
+      .getByLabel("Sync code from your other device")
       .fill(pairingCode(other.root));
     await card.getByRole("button", { name: "Join", exact: true }).click();
     await expect(card.getByText(/^Last synced: /)).toBeVisible();
@@ -335,7 +402,7 @@ test.describe("note sync", () => {
     const card = syncCard(page);
     await card.getByRole("button", { name: "Join with a code" }).click();
     await card
-      .getByLabel("Sync code or link from your other device")
+      .getByLabel("Sync code from your other device")
       .fill(pairingCode(other.root));
     await card.getByRole("button", { name: "Join", exact: true }).click();
     await expect(card.getByText(/^Last synced: /)).toBeVisible();
@@ -363,7 +430,7 @@ test.describe("note sync", () => {
     const card = syncCard(page);
     await card.getByRole("button", { name: "Join with a code" }).click();
     await card
-      .getByLabel("Sync code or link from your other device")
+      .getByLabel("Sync code from your other device")
       .fill(pairingCode(other.root));
     await card.getByRole("button", { name: "Join", exact: true }).click();
     await expect(card.getByText(/^Last synced: /)).toBeVisible();

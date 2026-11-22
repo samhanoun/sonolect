@@ -22,6 +22,7 @@ jobs:
   quality:
     name: Quality (${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -56,6 +57,7 @@ jobs:
   mobile-bundle:
     name: Mobile web bundle
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -241,6 +243,7 @@ jobs:
     name: Desktop Playwright E2E
     # Playwright 1.59 cannot install browser deps on ubuntu-latest (26.04) yet.
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -335,6 +338,7 @@ jobs:
   config-validation:
     name: Config validation
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -366,6 +370,9 @@ jobs:
       - name: Test the audit gate rules
         run: pnpm test:audit-gate
 
+      - name: Test the design-context script
+        run: pnpm test:design-context
+
       - name: Release readiness dry-run validation
         run: pnpm release:dry-run
 
@@ -375,6 +382,7 @@ jobs:
   release-package-validation:
     name: Release package validation (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -501,6 +509,7 @@ jobs:
   terraform:
     name: Terraform formatting
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: infra/terraform
@@ -529,9 +538,20 @@ jobs:
             echo "::endgroup::"
           done
 
+      # Plan-level tests with mocked providers: no Google account needed.
+      - name: Terraform test
+        run: |
+          set -euo pipefail
+          for root in . sync; do
+            echo "::group::terraform test infra/terraform/${root}"
+            terraform -chdir="${root}" test -no-color
+            echo "::endgroup::"
+          done
+
   service-images:
     name: Service image (${{ matrix.service }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -619,9 +639,20 @@ jobs:
           "pnpm --filter @sonolect/sync-service test:firestore
           && pnpm --filter @sonolect/sync-service smoke"
 
+      # firebase.json points the emulators at infra/firebase, so this checks
+      # the Firestore and Storage rules a `firebase deploy` would publish.
+      - name: Test the Firebase rules on the emulators
+        env:
+          GCLOUD_PROJECT: demo-sonolect
+        run: >-
+          npx --yes firebase-tools@15.37.0 emulators:exec
+          --only firestore,storage --project demo-sonolect
+          "node --test infra/firebase/rules.test.mjs"
+
   security:
     name: Dependency and secret scanning
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

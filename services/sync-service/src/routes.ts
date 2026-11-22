@@ -382,12 +382,10 @@ export async function vaultRoutes(
           SYNC_ERROR_CODES.cursorReset,
           "the cursor is past the vault's head: sync again from 0",
         );
-      if (since > 0 && since < meta.purgedSeq)
-        throw new SyncHttpError(
-          410,
-          SYNC_ERROR_CODES.cursorExpired,
-          "deletes after this cursor were purged: sync again from 0",
-        );
+      // A cursor below purgedSeq is answered too: a device paging from 0
+      // must get past it, and only the device knows whether its cursor is
+      // a page of such a pass or the end of a finished pull (which then
+      // missed deletes). It decides from purgedSeq.
       const page = await store.changes(
         vaultId,
         since,
@@ -402,6 +400,7 @@ export async function vaultRoutes(
         // A write may land between reading the vault and reading the page.
         head: Math.max(meta.head, last?.seq ?? 0),
         epoch: meta.epoch,
+        purgedSeq: meta.purgedSeq,
       };
     },
   );

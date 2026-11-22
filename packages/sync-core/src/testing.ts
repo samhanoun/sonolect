@@ -61,6 +61,12 @@ export interface MemoryVaultServerOptions {
   now?: () => number;
   /** Smaller limits for tests (pages, batches, quotas). */
   limits?: Partial<Limits>;
+  /**
+   * Requests per minute to one vault, counted after authentication in fixed
+   * windows, as the service limits them: more answer 429 with Retry-After.
+   * Unlimited by default.
+   */
+  vaultRequestsPerMinute?: number;
 }
 
 export interface MemoryVaultServerSnapshot {
@@ -125,6 +131,26 @@ export function createMemoryVaultServer(
   let failures: { count: number; status: number | undefined } = {
     count: 0,
     status: undefined,
+  };
+  const windows = new Map<string, { start: number; count: number }>();
+
+  /** A 429 when the vault used up its requests of this minute; counts the request otherwise. */
+  const rateLimit = (vaultId: string): HttpResponse | undefined => {
+    const limit = options.vaultRequestsPerMinute;
+    if (limit === undefined) return undefined;
+    const time = now();
+    let minute = windows.get(vaultId);
+    if (!minute || time - minute.start >= 60_000)
+      windows.set(vaultId, (minute = { start: time, count: 0 }));
+    if (minute.count >= limit)
+      return {
+        ...error(429, SYNC_ERROR_CODES.rateLimited, "too many requests"),
+        retryAfter: String(
+          Math.max(1, Math.ceil((minute.start + 60_000 - time) / 1000)),
+        ),
+      };
+    minute.count += 1;
+    return undefined;
   };
 
   const purge = (vault: StoredVault, force: boolean) => {
@@ -237,8 +263,6 @@ export function createMemoryVaultServer(
         SYNC_ERROR_CODES.cursorReset,
         "cursor is past the head",
       );
-    if (since > 0 && since < vault.purgedSeq)
-      return error(410, SYNC_ERROR_CODES.cursorExpired, "cursor expired");
     const all = [...vault.records]
       .filter(([, record]) => record.seq > since)
       .sort((a, b) => a[1].seq - b[1].seq);
@@ -263,6 +287,7 @@ export function createMemoryVaultServer(
       hasMore: page.length < all.length,
       head: vault.head,
       epoch: vault.epoch,
+      purgedSeq: vault.purgedSeq,
     });
   };
 
@@ -401,6 +426,8 @@ export function createMemoryVaultServer(
     if (!match) return error(404, SYNC_ERROR_CODES.notFound, "no such route");
     const vault = authorize(request, match[1]!);
     if (!("records" in vault)) return vault;
+    const limited = rateLimit(match[1]!);
+    if (limited) return limited;
     if (request.method === "GET" && match[2] === "/changes")
       return changes(vault, query);
     if (request.method === "POST" && match[2] === "/records")

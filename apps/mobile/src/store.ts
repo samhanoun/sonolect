@@ -54,6 +54,7 @@ import {
 } from "./refine";
 import { sweepCacheFiles } from "./recordings";
 import { applyRetention } from "./retention";
+import { historyWrites } from "./settingsPolicy";
 import type { SpeechSession } from "./speech";
 import {
   downloadLanguageModel,
@@ -80,6 +81,7 @@ import {
 import { deviceDefaultSettings, mobileStorage } from "./storage";
 import { isUnreadableValueError } from "./storageCore";
 import type { SyncController, SyncPause } from "./sync/controller";
+import { syncPauseFor } from "./sync/controller";
 import {
   type DeleteScope,
   type Stamp,
@@ -87,6 +89,7 @@ import {
   addNote,
   changeNote,
   deleteNotes,
+  unreadNoteDeletes,
 } from "./sync/edits";
 import { createNotesHost, createSyncNoteStore } from "./sync/noteStore";
 import { createAppSync } from "./sync/runtime";
@@ -272,9 +275,13 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
 
   /**
    * Runs a write to the phone's storage. A failure keeps the change in
-   * memory and shows a notice; it never throws to the screen.
+   * memory and shows a notice; it never throws to the screen. unreadable:
+   * the notice for a value that couldn't be read at launch.
    */
-  const persist = async (write: () => Promise<void>): Promise<boolean> => {
+  const persist = async (
+    write: () => Promise<void>,
+    unreadable: "storageReadError" | "settingsReadError" = "storageReadError",
+  ): Promise<boolean> => {
     try {
       await write();
       return true;
@@ -282,13 +289,31 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       // A value that couldn't be read at launch is never overwritten.
       set({
         notice: noticeFor(
-          isUnreadableValueError(error)
-            ? "storageReadError"
-            : "storageWriteError",
+          isUnreadableValueError(error) ? unreadable : "storageWriteError",
         ),
       });
       return false;
     }
+  };
+
+  /**
+   * Saves the settings; one that couldn't be read at launch stays as it is.
+   * A save over unread settings works only when nothing readable was there
+   * (JSON that did not parse, or a value that is not settings). Then the
+   * session runs on what it saved: new notes are stored again, and sync
+   * runs, when history is on.
+   */
+  const persistSettings = async (settings: CompanionSettings) => {
+    const saved = await persist(
+      () => mobileStorage.saveSettings(settings),
+      "settingsReadError",
+    );
+    if (saved && settingsUnread) {
+      settingsUnread = false;
+      if (get().notice?.kind === "settingsReadError") set({ notice: null });
+      sync?.refresh();
+    }
+    return saved;
   };
 
   /** The state for a notice change (notices.ts); {} when there is none. */
@@ -303,12 +328,21 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
 
   /** Set once hydrate is done with the notes: sync may write them. */
   let syncReady = false;
-  /** Why sync waits: history off, or notes not read (yet). */
+  /**
+   * The stored settings could not be read at launch. The session runs on
+   * settings that keep no history (storageCore.ts settingsFromRead): no new
+   * note is stored and nothing syncs until settings are saved, or a launch
+   * reads them.
+   */
+  let settingsUnread = false;
+  /** Why sync waits: settings unread, history off, or notes not read (yet). */
   const syncPause = (): SyncPause | null => {
     const { settings, storageDegraded } = get();
-    if (!keepsHistory(settings)) return "historyOff";
-    if (!syncReady || storageDegraded) return "storage";
-    return null;
+    return syncPauseFor({
+      settingsUnread,
+      keepsHistory: keepsHistory(settings),
+      notesReady: syncReady && !storageDegraded,
+    });
   };
 
   // Sync reads the notes shown here and writes remote changes through the
@@ -358,12 +392,19 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       ? sync.recordDeletes(tombstones).catch(() => undefined)
       : Promise.resolve();
 
-  /** Every note is kept: there is no local cap (data-2). */
+  /**
+   * Every note is kept: there is no local cap (data-2). While history is
+   * off, or the settings could not be read, no new note is stored, but the
+   * notes already stored keep their edits, refines, pins and deletes.
+   */
   const persistHistory = async (history: TranscriptTurn[]) => {
     const epoch = dataEpoch;
     set({ history });
     const { settings, apiToken } = get();
-    if (!keepsHistory(settings)) return;
+    if (historyWrites(settings, settingsUnread) === "existing") {
+      await persist(() => mobileStorage.saveExistingNotes(history));
+      return;
+    }
     const config = apiConfig(settings, apiToken);
     if (config.apiUrl) {
       const synced = await syncQueuedTranscriptTurns(history, config);
@@ -918,7 +959,10 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
           // Booleans only; no network call (nothing is sent at launch).
           mobileStorage.providerKeyStatus(),
         ]);
+        // Unreadable settings store no new note until settings are saved
+        // (fail closed); the notes already stored still take changes.
         settings = settingsRead.value;
+        settingsUnread = !settingsRead.ok;
         history = notesRead.notes;
         apiToken = token;
         let onlineKeySaved = keyStatus;
@@ -942,7 +986,10 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
           history = migrated.history;
           if (migrated.changed) {
             await Promise.all([
-              mobileStorage.saveSettings(settings).catch(() => undefined),
+              // Settings that couldn't be read are never written here.
+              settingsRead.ok
+                ? mobileStorage.saveSettings(settings).catch(() => undefined)
+                : undefined,
               mobileStorage.saveNotes(history).catch(() => undefined),
             ]);
           }
@@ -966,12 +1013,16 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
             await mobileStorage.saveNotes(history).catch(() => undefined);
           }
         }
-        // Nothing was deleted: the next launch reads again.
-        const readFailed =
-          !settingsRead.ok ||
-          !notesRead.ok ||
-          !dictionaryRead.ok ||
-          !snippetsRead.ok;
+        // Nothing was deleted: the next launch reads again. Unread notes
+        // say so first; then unread settings, which pause history and sync.
+        const readError: "storageReadError" | "settingsReadError" | null =
+          !notesRead.ok
+            ? "storageReadError"
+            : !settingsRead.ok
+              ? "settingsReadError"
+              : !dictionaryRead.ok || !snippetsRead.ok
+                ? "storageReadError"
+                : null;
         set({
           settings,
           history,
@@ -981,14 +1032,17 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
           onlineKeySaved,
           latest: history[0],
           storageDegraded: !notesRead.ok,
-          ...(readFailed ? { notice: noticeFor("storageReadError") } : {}),
+          ...(readError ? { notice: noticeFor(readError) } : {}),
           hydrated: true,
         });
       } catch {
         // The loads report failures instead of throwing; whatever happens,
         // the app leaves the splash screen (_layout.tsx waits for this).
+        // The stored settings are unknown: no new note and no sync.
+        settingsUnread = true;
         set({
           hydrated: true,
+          settings: { ...get().settings, saveHistory: false },
           storageDegraded: true,
           notice: noticeFor("storageReadError"),
         });
@@ -1137,11 +1191,19 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     },
 
     clearHistory: async (scope: DeleteScope) => {
-      const { tombstones } = deleteNotes(get().history, "all", scope);
+      const shown = get().history;
+      const { tombstones } = deleteNotes(shown, "all", scope);
       dataEpoch += 1;
       const recorded = recordDeletes(tombstones);
       set({ history: [], latest: undefined });
-      const cleared = await persist(() => mobileStorage.clearNotes());
+      let removed: readonly string[] = [];
+      const cleared = await persist(async () => {
+        removed = await mobileStorage.clearNotes();
+      });
+      // Notes that could not be read go on the other devices too, recorded
+      // while sync still waits for the notes.
+      if (cleared)
+        await recordDeletes(unreadNoteDeletes(removed, shown, scope));
       if (cleared) set({ storageDegraded: false });
       await recorded;
       // From this phone only (the recovery screen): sync forgets what it
@@ -1174,6 +1236,8 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         set({ capture: idleCapture, level: 0 });
         return "failed";
       }
+      // Nothing is stored any more: the device's first-run settings hold.
+      settingsUnread = false;
       set({
         // Back to a first run, which follows the device language (ux-5).
         settings: deviceDefaultSettings(),
@@ -1197,12 +1261,15 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       // While the API is off, no screen can turn sync on or set an API URL.
       const settings = effectiveSettings({ ...previous, ...patch });
       set({ settings });
-      await persist(() => mobileStorage.saveSettings(settings));
+      await persistSettings(settings);
       if (!keepsHistory(settings) && keepsHistory(previous)) {
         // Turning history off or going ephemeral removes what was stored,
         // and the recordings in the cache (data-15).
         dataEpoch += 1;
-        if (await persist(() => mobileStorage.clearNotes())) {
+        const cleared = await persist(async () => {
+          await mobileStorage.clearNotes();
+        });
+        if (cleared) {
           set({ history: [], storageDegraded: false });
           // From this phone only: they download again once history is back.
           void sync?.notesClearedLocally();
@@ -1240,7 +1307,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       if (!normalizeProviderKey(key)) return "invalid";
       // Saved settings mark this install: a launch that finds none removes
       // any provider key the iOS keychain kept from an earlier install.
-      await persist(() => mobileStorage.saveSettings(get().settings));
+      await persistSettings(get().settings);
       let saved = false;
       const written = await persist(async () => {
         saved = await mobileStorage.saveProviderKey(provider, key);
