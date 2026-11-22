@@ -65,7 +65,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 - **No telemetry by default** — opt-in analytics only
 - Configurable audio retention (auto-delete after N days or manual purge)
 - One-click "Delete all my data" action
-- All processing local unless the user turns on a cloud feature: note sync, which sends only end-to-end encrypted notes, or online editing with their own provider key, which asks before each note is sent
+- All processing local unless the user turns on a cloud feature: note sync, which sends only end-to-end encrypted notes, or online editing with their own provider key, which asks before each note is sent unless the user turns on Send without asking (never in Ephemeral)
 
 ### Sync Between Your Devices
 

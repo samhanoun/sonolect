@@ -199,17 +199,20 @@ involved, and the provider bills the user's own account.
   that names the provider and the model. Only _Send_ sends the note, and
   only to the provider and model the dialog named. The switch _Send without
   asking each time_ skips the dialog, except in _Ephemeral_, which always
-  asks. Picking another provider turns the switch off again.
+  asks. A note made in _Ephemeral_ is still asked for after the user leaves
+  it. Picking another provider turns the switch off again.
 - **What is sent.** The text of that one note, after the phone has applied
   the dictionary and snippets, with a fixed instruction for the mode and
   the dictation language. Never the audio, other notes or the dictionary
-  itself. Notes over 12,000 characters are not sent.
+  itself. Notes over 12,000 characters, or with no text left once cleaned
+  up, are not sent, and the app does not ask for them.
 - **The key** is kept in SecureStore (iOS Keychain or Android Keystore)
   with `WHEN_UNLOCKED_THIS_DEVICE_ONLY`, one item per provider
   (`sonolect.mobile.providerKey.openrouter` and `.opencode`). It stays on
   this phone and is not copied to another phone. On iOS such an item can
   be in a backup of the same phone; Android backups are off
-  (`allowBackup: false`). The key is read only when a note is sent. It is
+  (`allowBackup: false`). The key is read at launch, only to learn whether
+  one is saved (kept as a yes or no), and again when a note is sent. It is
   never kept in app state, AsyncStorage, notices or logs, and Settings only
   shows _Key saved_. _Erase all data_ deletes both keys, and a first launch
   without settings deletes keys an earlier install left in the iOS
