@@ -1,264 +1,183 @@
-import Fastify, {
-  type FastifyInstance,
-  type FastifyReply,
-  type FastifyRequest,
-} from "fastify";
-import helmet from "@fastify/helmet";
-import cors from "@fastify/cors";
+import { randomBytes as nodeRandomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { z } from "zod";
-import type {
-  SyncManifest,
-  SyncManifestItem,
-  SyncPullResponse,
-  SyncPushChange,
-  SyncPushResponse,
-} from "@sonolect/types";
+
+import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
 import {
-  syncPullSchema,
-  syncPushSchema,
-  userIdSchema,
-  type SyncPullInput,
-  type SyncPushInput,
-} from "@sonolect/validation";
-import {
-  BoundedMap,
   registerServiceSecurity,
   resolveListenOptions,
-  resolveRequestUserId,
   type ServiceEnv,
 } from "@sonolect/service-kit";
+import { SYNC_ERROR_CODES } from "@sonolect/sync-core/wire";
+import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 
-const serviceName = "sonolect-sync-service";
-const MAX_RECORDS = 200_000;
-// A client clock this far ahead is treated as "now", so one device with a
-// wrong clock cannot pin a record in the future and block every later edit.
-const MAX_CLIENT_CLOCK_SKEW_MS = 5 * 60_000;
+import {
+  ConfigError,
+  DEFAULT_LIMITS,
+  type ServiceLimits,
+  readConfig,
+} from "./config.js";
+import { openStore } from "./open-store.js";
+import {
+  FixedWindowLimiter,
+  clientKey,
+  retryAfterSeconds,
+} from "./rate-limit.js";
+import { VAULT_ROUTES, vaultRoutes } from "./routes.js";
+import type { VaultStore } from "./store.js";
 
-type StoredSyncRecord = {
-  entity: SyncPushChange["entity"];
-  id: string;
-  userId: string;
-  data: unknown;
-  updatedAt: string;
-  deleted: boolean;
-};
+export const SERVICE_NAME = "sonolect-sync-service";
 
-interface SyncStores {
-  records: Map<string, StoredSyncRecord>;
-}
-
-const createStores = (): SyncStores => ({
-  records: new BoundedMap(MAX_RECORDS),
-});
-
-const parseBody = <T>(
-  schema: { parse: (value: unknown) => T },
-  request: FastifyRequest,
-): T => schema.parse(request.body ?? {});
-
-const sendValidationError = (reply: FastifyReply, error: unknown) => {
-  if (error instanceof z.ZodError) {
-    return reply.status(400).send({
-      error: "validation_error",
-      message: "Request validation failed",
-      issues: error.issues,
-    });
-  }
-  throw error;
-};
-
-const optionalProps = (
-  value: Record<string, unknown>,
-): Record<string, unknown> =>
-  Object.fromEntries(
-    Object.entries(value).filter(([, prop]) => prop !== undefined),
-  );
-
-// IDs may themselves contain ":", so a joined string could make two different
-// users' records share a key. A JSON tuple cannot collide.
-const recordKey = (userId: string, entity: string, id: string) =>
-  JSON.stringify([userId, entity, id]);
-
-const toManifestItems = (
-  records: StoredSyncRecord[],
-  since?: string,
-): SyncManifestItem[] => {
-  const changedAfter = since ? Date.parse(since) : 0;
-  return records
-    .filter((record) => Date.parse(record.updatedAt) > changedAfter)
-    .map((record) => ({
-      id: record.id,
-      entity: record.entity,
-      updatedAt: record.updatedAt,
-      deleted: record.deleted,
-    }))
-    .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
-};
-
-const pullFor = (
-  stores: SyncStores,
-  input: SyncPullInput,
-): SyncPullResponse => {
-  const records = [...stores.records.values()]
-    .filter((record) => record.userId === input.userId)
-    .filter(
-      (record) =>
-        !input.since || Date.parse(record.updatedAt) > Date.parse(input.since),
-    )
-    .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
-  // Pages are cut on `updatedAt` and the next pull asks for anything newer
-  // than the cursor. Records written in the same millisecond therefore have
-  // to travel together, or the ones past the cut would never be pulled.
-  let pageEnd = Math.min(input.limit, records.length);
-  while (
-    pageEnd > 0 &&
-    pageEnd < records.length &&
-    records[pageEnd]?.updatedAt === records[pageEnd - 1]?.updatedAt
-  )
-    pageEnd += 1;
-  const limited = records.slice(0, pageEnd);
-  const last = limited.at(-1);
-  return {
-    cursor: last?.updatedAt ?? new Date().toISOString(),
-    hasMore: records.length > limited.length,
-    manifest: {
-      generatedAt: new Date().toISOString(),
-      ...optionalProps({ since: input.since }),
-      items: toManifestItems(limited, undefined),
-    } as SyncManifest,
-    records: limited.map((record) => ({
-      entity: record.entity,
-      id: record.id,
-      data: record.data,
-      updatedAt: record.updatedAt,
-      deleted: record.deleted,
-    })),
-  };
-};
-
-const pushFor = (
-  stores: SyncStores,
-  input: SyncPushInput,
-): SyncPushResponse => {
-  const accepted: SyncPushResponse["accepted"] = [];
-  const conflicts: SyncPushResponse["conflicts"] = [];
-  for (const change of input.changes) {
-    const key = recordKey(input.userId, change.entity, change.id);
-    const existing = stores.records.get(key);
-    const now = Date.now();
-    const claimedTime = Date.parse(change.updatedAt);
-    const clientTime =
-      claimedTime > now + MAX_CLIENT_CLOCK_SKEW_MS ? now : claimedTime;
-    if (existing && Date.parse(existing.updatedAt) > clientTime) {
-      conflicts.push({
-        clientChangeId: change.clientChangeId,
-        serverVersion: existing,
-        reason: "server_version_is_newer",
-      });
-      continue;
-    }
-    const updatedAt = new Date(Math.max(clientTime, now)).toISOString();
-    // Delete first so a rewritten record becomes the newest entry.
-    stores.records.delete(key);
-    stores.records.set(key, {
-      entity: change.entity,
-      id: change.id,
-      userId: input.userId,
-      data: change.data ?? null,
-      updatedAt,
-      deleted: change.deleted ?? false,
-    });
-    accepted.push({
-      clientChangeId: change.clientChangeId,
-      serverId: change.id,
-      updatedAt,
-    });
-  }
-  return { accepted, conflicts };
-};
+/**
+ * Fastify's trustProxy for a hop count. Fastify ignores a bare number (it
+ * cannot check the peer), so the hops are trusted by position: on Cloud Run
+ * only its front end reaches the container.
+ */
+const trustHops = (hops: false | number) =>
+  hops === false ? false : (_address: string, hop: number) => hop < hops;
 
 export interface CreateAppOptions {
-  stores?: SyncStores;
-  logger?: boolean;
-  env?: ServiceEnv;
+  /** Defaults to process.env. */
+  env?: ServiceEnv | undefined;
+  /** A store to use instead of SONOLECT_SYNC_STORE; the caller closes it. */
+  store?: VaultStore | undefined;
+  /** false: no logs; a stream: JSON lines to it (tests read them). */
+  logger?: boolean | { write(line: string): void } | undefined;
+  /** Server clock (ms); tests move it. */
+  now?: (() => number) | undefined;
+  randomBytes?: ((size: number) => Uint8Array) | undefined;
+  /** Smaller limits for tests. */
+  limits?: Partial<ServiceLimits> | undefined;
 }
 
+/**
+ * The sync service: the vault routes of @sonolect/sync-core/wire, open to
+ * the apps (each vault authenticates its own bearer token), and the admin
+ * routes behind the service token.
+ *
+ * What it sees: vault ids, the SHA-256 of each bearer token, record ids,
+ * revisions, sequence numbers, sizes, timestamps, IP addresses and
+ * ciphertext. It never logs request bodies or tokens.
+ */
 export async function createApp(
   options: CreateAppOptions = {},
 ): Promise<FastifyInstance> {
-  const stores = options.stores ?? createStores();
-  const app = Fastify({ logger: options.logger ?? true });
+  const env = options.env ?? process.env;
+  const config = readConfig(env);
+  if (config.production && options.store?.kind === "memory")
+    throw new ConfigError("the memory store is refused in production");
+  const limits: ServiceLimits = { ...DEFAULT_LIMITS, ...options.limits };
+  const now = options.now ?? (() => Date.now());
+  const randomBytes =
+    options.randomBytes ??
+    ((size: number) => new Uint8Array(nodeRandomBytes(size)));
 
-  await app.register(helmet);
-  await app.register(cors, { origin: false });
-  registerServiceSecurity(app, { serviceName, env: options.env });
-
-  app.get("/health", async () => ({ status: "ok", service: serviceName }));
-
-  app.get(
-    "/sync/manifest",
-    async (request, reply): Promise<SyncManifest | FastifyReply> => {
-      try {
-        const query = z
-          .object({
-            userId: userIdSchema.optional(),
-            since: z.string().datetime().optional(),
+  const app = Fastify({
+    logger:
+      options.logger === false
+        ? false
+        : {
+            level: env.LOG_LEVEL?.trim() || "info",
+            // The default serializers log no headers; this keeps it so.
+            redact: ["req.headers.authorization"],
+            ...(typeof options.logger === "object"
+              ? { stream: options.logger }
+              : {}),
+          },
+    trustProxy: trustHops(config.trustProxy),
+    bodyLimit: limits.maxRequestBytes,
+    // A path Fastify cannot route: an overlong vault id is no vault (404),
+    // a malformed escape is a bad request. Neither echoes the path back.
+    frameworkErrors: (error, _request, genericReply) => {
+      const reply = genericReply as unknown as FastifyReply;
+      void (error.code === "FST_ERR_MAX_PARAM_LENGTH"
+        ? reply.code(404).send({
+            error: SYNC_ERROR_CODES.notFound,
+            message: "no such route",
           })
-          .parse(request.query ?? {});
-        const userId = resolveRequestUserId(request, query.userId);
-        const records = [...stores.records.values()].filter(
-          (record) => record.userId === userId,
-        );
-        return {
-          generatedAt: new Date().toISOString(),
-          ...optionalProps({ since: query.since }),
-          items: toManifestItems(records, query.since),
-        } as SyncManifest;
-      } catch (error) {
-        return sendValidationError(reply, error);
-      }
+        : reply.code(400).send({
+            error: SYNC_ERROR_CODES.badRequest,
+            message: "malformed request",
+          }));
     },
-  );
+  });
 
-  app.post(
-    "/sync/pull",
-    async (request, reply): Promise<SyncPullResponse | FastifyReply> => {
-      try {
-        const input = parseBody<SyncPullInput>(syncPullSchema, request);
-        return pullFor(stores, {
-          ...input,
-          userId: resolveRequestUserId(request, input.userId),
+  const store = options.store ?? (await openStore(config.store));
+  if (!options.store) app.addHook("onClose", async () => store.close());
+
+  await app.register(helmet, {
+    crossOriginResourcePolicy: {
+      policy: config.allowedOrigins ? "cross-origin" : "same-origin",
+    },
+  });
+  if (config.allowedOrigins)
+    await app.register(cors, {
+      origin: config.allowedOrigins,
+      methods: ["GET", "POST", "DELETE"],
+      allowedHeaders: ["authorization", "content-type"],
+      exposedHeaders: ["retry-after"],
+      maxAge: 600,
+    });
+
+  // Every route but the health check counts against the caller's IP.
+  const perIp = new FixedWindowLimiter(limits.ipRequestsPerMinute, 60_000);
+  app.addHook("onRequest", async (request, reply) => {
+    if (request.routeOptions.url === "/health") return;
+    const wait = perIp.hit(clientKey(request.ip), now());
+    if (wait > 0)
+      return reply
+        .status(429)
+        .header("retry-after", String(retryAfterSeconds(wait)))
+        .send({
+          error: SYNC_ERROR_CODES.rateLimited,
+          message: "too many requests",
         });
-      } catch (error) {
-        return sendValidationError(reply, error);
-      }
-    },
+  });
+
+  registerServiceSecurity(app, {
+    serviceName: SERVICE_NAME,
+    env,
+    publicRoutes: [...VAULT_ROUTES, "OPTIONS *"],
+  });
+
+  app.setNotFoundHandler((_request, reply) =>
+    reply
+      .status(404)
+      .send({ error: SYNC_ERROR_CODES.notFound, message: "no such route" }),
   );
 
-  app.post(
-    "/sync/push",
-    async (request, reply): Promise<SyncPushResponse | FastifyReply> => {
-      try {
-        const input = parseBody<SyncPushInput>(syncPushSchema, request);
-        return reply.status(202).send(
-          pushFor(stores, {
-            ...input,
-            userId: resolveRequestUserId(request, input.userId),
-          }),
-        );
-      } catch (error) {
-        return sendValidationError(reply, error);
-      }
-    },
-  );
+  app.get("/health", async () => ({ status: "ok", service: SERVICE_NAME }));
 
+  // Admin: behind the service token (SONOLECT_SERVICE_TOKENS).
+  app.get("/v1/admin/status", async () => ({
+    service: SERVICE_NAME,
+    store: store.kind,
+    limits,
+  }));
+
+  await app.register(vaultRoutes, { store, limits, now, randomBytes });
   return app;
 }
 
 const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isDirectRun) {
-  const app = await createApp();
-  await app.listen(resolveListenOptions());
+  try {
+    const app = await createApp();
+    const close = async (signal: string) => {
+      app.log.info({ signal }, "shutting down");
+      try {
+        await app.close();
+      } finally {
+        process.exit(0);
+      }
+    };
+    process.once("SIGTERM", (signal) => void close(signal));
+    process.once("SIGINT", (signal) => void close(signal));
+    await app.listen(resolveListenOptions());
+  } catch (error) {
+    // Configuration errors are the operator's to fix: print them plainly.
+    console.error(error instanceof ConfigError ? error.message : error);
+    process.exit(1);
+  }
 }

@@ -1,0 +1,6 @@
+# Local settings, the owner's state backend and saved plans. A saved plan
+# holds the generated service token, like the Terraform state (ignored in
+# the repository's .gitignore).
+terraform.tfvars
+backend.tf
+*.tfplan

@@ -14,6 +14,7 @@ import type {
 import { createId, keepsHistory } from "./domain";
 import {
   API_FEATURES_ENABLED,
+  SYNC_URL,
   apiConfig,
   availableRefinementModes,
   effectiveSettings,
@@ -66,6 +67,17 @@ import {
 } from "./speechPolicy";
 import { deviceDefaultSettings, mobileStorage } from "./storage";
 import { isUnreadableValueError } from "./storageCore";
+import type { SyncController, SyncPause } from "./sync/controller";
+import {
+  type DeleteScope,
+  type Stamp,
+  type Tombstone,
+  addNote,
+  changeNote,
+  deleteNotes,
+} from "./sync/edits";
+import { createNotesHost, createSyncNoteStore } from "./sync/noteStore";
+import { createAppSync } from "./sync/runtime";
 import { setTtsPlaybackGuard, ttsController } from "./tts";
 
 interface CompanionState {
@@ -109,8 +121,17 @@ interface CompanionState {
   refine: (turnId: string, mode: RefinementMode) => Promise<void>;
   deleteTurn: (turnId: string) => Promise<void>;
   togglePin: (turnId: string) => Promise<void>;
-  clearHistory: () => Promise<void>;
-  eraseAll: () => Promise<void>;
+  /**
+   * Deletes every note. "everywhere" (Settings): with sync on, the other
+   * devices delete them too. "here": this phone only (the recovery screen).
+   */
+  clearHistory: (scope: DeleteScope) => Promise<void>;
+  /**
+   * Erases all data. With sync on, also forgets the sync key and state,
+   * after deleting the server copy when asked: when that delete fails,
+   * nothing is erased.
+   */
+  eraseAll: (options?: { deleteServerCopy?: boolean }) => Promise<EraseOutcome>;
   updateSettings: (patch: Partial<CompanionSettings>) => Promise<void>;
   setApiToken: (token: string) => Promise<void>;
   addDictionaryEntry: (spoken: string, replacement: string) => Promise<boolean>;
@@ -124,6 +145,21 @@ interface CompanionState {
   /** Shows the notice for a permission answer, such as onboarding's. */
   showPermissionOutcome: (outcome: PermissionOutcome) => void;
   dismissNotice: () => void;
+}
+
+/**
+ * What Erase all did. failed: the phone's storage could not be erased (a
+ * notice says so). serverCopyKept: the server copy could not be deleted,
+ * and nothing was erased.
+ */
+export type EraseOutcome = "erased" | "failed" | "serverCopyKept";
+
+/** This build's sync (features.ts SYNC_URL); null in builds without one. */
+let appSync: SyncController | null = null;
+
+/** The phone's sync, for Settings and the join screen; null in builds without sync. */
+export function syncController(): SyncController | null {
+  return appSync;
 }
 
 const idleCapture: CaptureSession = {
@@ -201,6 +237,63 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       : { notice: change.notice };
   };
 
+  /** Set once hydrate is done with the notes: sync may write them. */
+  let syncReady = false;
+  /** Why sync waits: history off, or notes not read (yet). */
+  const syncPause = (): SyncPause | null => {
+    const { settings, storageDegraded } = get();
+    if (!keepsHistory(settings)) return "historyOff";
+    if (!syncReady || storageDegraded) return "storage";
+    return null;
+  };
+
+  // Sync reads the notes shown here and writes remote changes through the
+  // phone's storage (src/sync/noteStore.ts). None in builds without a sync
+  // server: then nothing below stamps, records or syncs anything.
+  const sync = SYNC_URL
+    ? createAppSync({
+        serverUrl: SYNC_URL,
+        notes: createSyncNoteStore(
+          createNotesHost({
+            read: () => {
+              const { history, latest } = get();
+              return { history, latest, writable: syncPause() === null };
+            },
+            update: (patch) => set(patch),
+            apply: (change) => mobileStorage.applyNotes(change),
+            readCompanion: (id) => mobileStorage.readSyncCompanion(id),
+            generation: () => dataEpoch,
+            now: Date.now,
+            onRemoved: (ids) => {
+              // A note another device deleted takes its Listen button along.
+              const speaking = ttsController.getState().ownerId;
+              if (speaking && ids.includes(speaking)) void ttsController.stop();
+            },
+          }),
+        ),
+        paused: syncPause,
+        retentionDays: () => get().settings.retentionDays,
+      })
+    : null;
+  appSync = sync;
+  /** A new HLC for each note created or changed here (src/sync/edits.ts). */
+  const stamp: Stamp = sync ? (previous) => sync.stamp(previous) : null;
+
+  /** At launch, once the notes are read (and merged with the API's). */
+  const startSync = () => {
+    if (!sync) return;
+    syncReady = true;
+    void sync.start();
+    // Started early by the app coming to the foreground: runs now.
+    sync.refresh();
+  };
+
+  /** Deletes the other devices make too; recorded before the notes go. */
+  const recordDeletes = (tombstones: Tombstone[]): Promise<void> =>
+    sync && tombstones.length > 0
+      ? sync.recordDeletes(tombstones).catch(() => undefined)
+      : Promise.resolve();
+
   /** Every note is kept: there is no local cap (data-2). */
   const persistHistory = async (history: TranscriptTurn[]) => {
     const epoch = dataEpoch;
@@ -274,19 +367,21 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     });
   };
 
-  const addTurn = async (turn: TranscriptTurn) => {
+  const addTurn = async (captured: TranscriptTurn) => {
+    const { history, turn } = addNote(get().history, captured, stamp);
     set({ latest: turn });
     if (keepsHistory(get().settings)) {
-      await persistHistory([turn, ...get().history]);
+      await persistHistory(history);
+      sync?.noteChanged();
     }
   };
 
-  const replaceTurn = async (turn: TranscriptTurn) => {
+  /** An edit, a refine or a pin. */
+  const replaceTurn = async (changed: TranscriptTurn) => {
+    const { history, turn } = changeNote(get().history, changed, stamp);
     if (get().latest?.id === turn.id) set({ latest: turn });
-    const history = get().history.map((item) =>
-      item.id === turn.id ? turn : item,
-    );
     await persistHistory(history);
+    sync?.noteChanged();
   };
 
   /**
@@ -530,10 +625,14 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
             invalidateRecognitionEnvironment();
             // A phone left open for days still honours the limit.
             void enforceRetention();
+            sync?.setForeground(true);
           }
           // Never 'inactive': Control Center, Notification Center, Face ID,
           // system alerts and app-switcher peeks pass through it too.
-          if (state === "background") stopForBackground();
+          if (state === "background") {
+            stopForBackground();
+            sync?.setForeground(false);
+          }
         });
       }
       let settings: CompanionSettings;
@@ -610,6 +709,8 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
           storageDegraded: true,
           notice: noticeFor("storageReadError"),
         });
+        // Paused while the notes can't be read; Settings still shows it.
+        startSync();
         return;
       } finally {
         // No dictation runs yet: delete what earlier launches left in the
@@ -617,20 +718,26 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         sweepCacheFiles();
       }
 
-      const config = apiConfig(settings, apiToken);
-      if (!config.apiUrl || !keepsHistory(settings)) return;
-      const epoch = dataEpoch;
       try {
-        const synced = await syncQueuedTranscriptTurns(history, config);
-        const remote = await fetchLocalTranscriptHistory(config);
-        if (!stillAllowed(epoch)) return;
-        const merged = mergeTranscriptHistory(synced, remote);
-        set({ history: merged, latest: merged[0] });
-        await persist(() => mobileStorage.saveNotes(merged));
-        // The server may have returned notes this phone already let go.
-        await enforceRetention();
-      } catch {
-        // Offline: keep local history as is.
+        const config = apiConfig(settings, apiToken);
+        if (!config.apiUrl || !keepsHistory(settings)) return;
+        const epoch = dataEpoch;
+        try {
+          const synced = await syncQueuedTranscriptTurns(history, config);
+          const remote = await fetchLocalTranscriptHistory(config);
+          if (!stillAllowed(epoch)) return;
+          const merged = mergeTranscriptHistory(synced, remote);
+          set({ history: merged, latest: merged[0] });
+          await persist(() => mobileStorage.saveNotes(merged));
+          // The server may have returned notes this phone already let go.
+          await enforceRetention();
+        } catch {
+          // Offline: keep local history as is.
+        }
+      } finally {
+        // After the API's merge, which would otherwise replace the notes
+        // sync writes meanwhile.
+        startSync();
       }
     },
 
@@ -774,7 +881,15 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         void ttsController.stop();
       }
       if (get().latest?.id === turnId) set({ latest: undefined });
-      await persistHistory(get().history.filter((turn) => turn.id !== turnId));
+      const { history, tombstones } = deleteNotes(
+        get().history,
+        [turnId],
+        "everywhere",
+      );
+      // Before the note goes: a sync that starts now does not upload it.
+      const recorded = recordDeletes(tombstones);
+      await persistHistory(history);
+      await recorded;
     },
 
     togglePin: async (turnId: string) => {
@@ -783,16 +898,31 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       await replaceTurn({ ...turn, pinned: !turn.pinned });
     },
 
-    clearHistory: async () => {
+    clearHistory: async (scope: DeleteScope) => {
+      const { tombstones } = deleteNotes(get().history, "all", scope);
       dataEpoch += 1;
+      const recorded = recordDeletes(tombstones);
       set({ history: [], latest: undefined });
-      if (await persist(() => mobileStorage.clearNotes())) {
-        set({ storageDegraded: false });
-      }
+      const cleared = await persist(() => mobileStorage.clearNotes());
+      if (cleared) set({ storageDegraded: false });
+      await recorded;
+      // From this phone only (the recovery screen): sync forgets what it
+      // knew, so the other devices' notes download again, and the deletes
+      // made here before still reach them.
+      if (cleared && scope === "here") await sync?.notesClearedLocally();
+      sync?.refresh();
       sweepCacheWhenIdle();
     },
 
-    eraseAll: async () => {
+    eraseAll: async (options) => {
+      if (sync) {
+        try {
+          await sync.eraseAll(options?.deleteServerCopy === true);
+        } catch {
+          // The server copy could not be deleted: nothing is erased.
+          return "serverCopyKept";
+        }
+      }
       dataEpoch += 1;
       void ttsController.stop();
       activeSession?.abort();
@@ -804,7 +934,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       if (!erased) {
         // What is left on the phone stays shown; the notice asks to retry.
         set({ capture: idleCapture, level: 0 });
-        return;
+        return "failed";
       }
       set({
         // Back to a first run, which follows the device language (ux-5).
@@ -819,6 +949,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         notice: null,
         storageDegraded: false,
       });
+      return "erased";
     },
 
     updateSettings: async (patch: Partial<CompanionSettings>) => {
@@ -833,9 +964,13 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         dataEpoch += 1;
         if (await persist(() => mobileStorage.clearNotes())) {
           set({ history: [], storageDegraded: false });
+          // From this phone only: they download again once history is back.
+          void sync?.notesClearedLocally();
         }
         sweepCacheWhenIdle();
       }
+      // Sync pauses while history is off, and resumes when it is back.
+      sync?.refresh();
       if (settings.retentionDays !== previous.retentionDays) {
         await enforceRetention();
       }

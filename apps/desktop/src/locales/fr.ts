@@ -520,6 +520,72 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.retention.days.one": "{count} jour",
   "studio.retention.days.other": "{count} jours",
 
+  // Note sync between devices
+  "studio.sync.title": "Synchronisation entre appareils",
+  "studio.sync.subtitle":
+    "Vos notes sur tous vos appareils, chiffrées de bout en bout : le serveur de synchronisation les conserve mais ne peut pas les lire.",
+  "studio.sync.server": "Serveur de synchronisation : {server}",
+  "studio.sync.audioStays":
+    "Les enregistrements restent sur l'appareil qui les a faits. Seules les notes se synchronisent.",
+  "studio.sync.offState": "La synchronisation est désactivée.",
+  "studio.sync.onState": "La synchronisation est activée.",
+  "studio.sync.turnOn": "Activer la synchronisation",
+  "studio.sync.turningOn": "Activation…",
+  "studio.sync.join": "Rejoindre avec un code",
+  "studio.sync.joinLabel":
+    "Code ou lien de synchronisation de votre autre appareil",
+  "studio.sync.joinSubmit": "Rejoindre",
+  "studio.sync.joining": "Connexion…",
+  "studio.sync.cancel": "Annuler",
+  "studio.sync.warning":
+    "Rejoindre partage chaque note avec quiconque détient ce code.",
+  "studio.sync.lastSync": "Dernière synchronisation : {time}.",
+  "studio.sync.neverSynced": "Pas encore synchronisé.",
+  "studio.sync.syncing": "Synchronisation…",
+  "studio.sync.syncNow": "Synchroniser maintenant",
+  "studio.sync.showCode": "Afficher le code",
+  "studio.sync.hideCode": "Masquer le code",
+  "studio.sync.codeHint":
+    "Sur votre autre appareil, choisissez de rejoindre la synchronisation, puis scannez ce code QR ou saisissez le code.",
+  "studio.sync.codeLabel": "Code de synchronisation",
+  "studio.sync.qrLabel": "Code QR pour rejoindre cette synchronisation",
+  "studio.sync.turnOff": "Désactiver la synchronisation",
+  "studio.sync.turnOffQuestion":
+    "Désactiver la synchronisation sur cet appareil ?",
+  "studio.sync.keepServer": "Garder la copie du serveur",
+  "studio.sync.keepServerHint":
+    "Vos autres appareils continuent de se synchroniser. Celui-ci pourra la rejoindre de nouveau avec le code.",
+  "studio.sync.deleteServer": "Supprimer la copie du serveur",
+  "studio.sync.deleteServerHint":
+    "Vos autres appareils voient « Cette synchronisation a été supprimée » et désactivent la synchronisation. Chaque appareil garde ses notes.",
+  "studio.sync.turningOff": "Désactivation…",
+  "studio.sync.notesKept": "Vos notes restent sur cet appareil.",
+  "studio.sync.error.unauthorized":
+    "Le serveur n'accepte pas cette clé de synchronisation.",
+  "studio.sync.error.deleted": "Cette synchronisation a été supprimée.",
+  "studio.sync.error.tooLarge":
+    "Une note est trop volumineuse pour être synchronisée.",
+  "studio.sync.error.server":
+    "La synchronisation est indisponible pour le moment.",
+  "studio.sync.error.offline":
+    "Hors ligne. Les notes se synchroniseront à votre retour en ligne.",
+  "studio.sync.notice.quota":
+    "L'espace de synchronisation est plein. Supprimez des notes pour synchroniser les nouvelles.",
+  "studio.sync.notice.newerSchema":
+    "Mettez Sonolect à jour pour synchroniser toutes les notes.",
+  "studio.sync.pairing.invalid":
+    "Ce n'est pas un code de synchronisation Sonolect.",
+  "studio.sync.pairing.version":
+    "Mettez Sonolect à jour pour utiliser ce code.",
+  "studio.sync.pairing.length": "Vérifiez le code : il compte 56 caractères.",
+  "studio.sync.pairing.typo": "Un caractère est erroné.",
+  "studio.sync.preview":
+    "La synchronisation fonctionne dans l'application installée.",
+  "studio.sync.deleteAllHint":
+    "La synchronisation est aussi désactivée sur cet appareil.",
+  "studio.sync.deleteAllServer":
+    "La synchronisation est activée. Supprimer aussi la copie de vos notes sur le serveur ? OK la supprime : vos autres appareils désactivent la synchronisation et gardent leurs notes. Annuler la conserve pour eux.",
+
   // Studio models and providers
   "studio.task.stt": "Reconnaissance vocale",
   "studio.task.tts": "Synthèse vocale",
@@ -655,6 +721,7 @@ export const fr: Record<LocaleKeys, string> = {
   "bubble.status.copied": "Dictée copiée dans le presse-papiers. {status}",
   "studio.privacy.problemRecordings": "Enregistrements\u00a0: {reason}",
   "studio.privacy.problemSettings": "Réglages\u00a0: {reason}",
+  "studio.privacy.problemSync": "Synchronisation\u00a0: {reason}",
   "native.downloadRunning": "Un téléchargement de modèle est déjà en cours.",
   "native.cannotLoadModel":
     "Impossible de charger le modèle vocal\u00a0: {reason}",
@@ -775,8 +842,15 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.segments.approx": "Horodatage estimé",
   "studio.segments.saveToLibrary": "Enregistrer dans la bibliothèque",
   "studio.segments.saved": "Enregistré dans votre bibliothèque.",
+  "studio.segments.savedWithCopy":
+    "Enregistré. Cet enregistrement avait changé sur un autre appareil entre-temps\u00a0: cette version est conservée comme copie de conflit dans votre bibliothèque.",
   "studio.library.listen": "Écouter",
   "studio.library.pause": "Pause",
+  "studio.library.synced": "Synchronisé",
+  "studio.library.noAudio":
+    "L'enregistrement reste sur l'appareil qui l'a fait.",
+  "studio.library.conflictOf": "Copie de conflit de la note du {date}",
+  "studio.library.conflictCopy": "Copie de conflit",
   "native.audioGone":
     "L'audio de cet enregistrement n'est plus sur cet appareil.",
   "native.recordingGone":
@@ -881,4 +955,19 @@ export const fr: Record<LocaleKeys, string> = {
   "native.systemAudioBusy": "Le son de l'ordinateur n'est pas disponible.",
   "native.ffmpegNeeded":
     "ffmpeg est nécessaire pour enregistrer le son de l'ordinateur.",
+  "native.syncNotAvailable":
+    "La synchronisation n'est pas disponible dans cette version de Sonolect.",
+  "native.syncKeychainLinux":
+    "La synchronisation est indisponible sur ce système : elle garde sa clé dans un trousseau (Secret Service, comme GNOME Keyring ou KWallet), et aucun n'est lancé.",
+  "native.syncKeychainUnavailable":
+    "La synchronisation est indisponible sur ce système : le trousseau n'a pas pu être ouvert.",
+  "native.syncKeychainFailed":
+    "La clé de synchronisation n'a pas pu être lue ou enregistrée dans le trousseau.",
+  "native.syncInvalidKey": "Ce n'est pas une clé de synchronisation valide.",
+  "native.syncKeyExists":
+    "La synchronisation est déjà activée avec une autre clé. Désactivez-la d'abord.",
+  "native.syncStateFailed":
+    "L'état de la synchronisation n'a pas pu être enregistré.",
+  "native.syncInterrupted": "La synchronisation a été interrompue.",
+  "native.syncInvalidNote": "Note synchronisée non valide.",
 };

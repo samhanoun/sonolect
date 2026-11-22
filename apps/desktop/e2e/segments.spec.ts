@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import {
   installMockTauri,
   nativeCalls,
+  writeFromSync,
   type MockCapture,
 } from "./support/mockTauri";
 import { played, watchPlayback } from "./support/playback";
@@ -162,6 +163,8 @@ test.describe("segment editor", () => {
       {
         command: "update_local_capture",
         args: {
+          // The version the editor opened (none: sync is off).
+          base: { hlc: null },
           id: meeting.id,
           transcript:
             "Good morning everyone.\n\nShall we begin?\n\nYes, let us begin.",
@@ -181,6 +184,58 @@ test.describe("segment editor", () => {
 
     await nav(page, "Library").click();
     await expect(page.getByText("Shall we begin?")).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test("a save keeps the version sync wrote while the editor was open", async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    const opened = { t: Date.UTC(2026, 10, 19, 9, 31), c: 0, d: "desk" };
+    await installMockTauri(page, [{ ...meeting, hlc: opened }]);
+    await page.goto("/");
+    await nav(page, "Library").click();
+    await page.getByRole("button", { name: /^Open editor/ }).click();
+    const editor = page.getByLabel("Transcript editor");
+    await expect(editor).toHaveValue(
+      "Good morning everyone.\n\nShall we start?\n\nYes, let us begin.",
+    );
+
+    // The phone edits the note, and sync writes its version here.
+    const phone = { t: Date.UTC(2026, 10, 19, 10, 0), c: 0, d: "phone1" };
+    await writeFromSync(page, meeting.id, "Edited on the phone.", phone);
+    await editor.fill("Edited in the studio.");
+    await page.getByRole("button", { name: "Save to library" }).click();
+    await expect(
+      page.getByText(
+        "Saved. This recording had changed on another device meanwhile: that version is kept as a conflict copy in your library.",
+      ),
+    ).toBeVisible();
+    const [save] = await nativeCalls(page, "update_local_capture");
+    expect(save?.args).toMatchObject({
+      id: meeting.id,
+      transcript: "Edited in the studio.",
+      base: { hlc: opened },
+    });
+
+    // Both versions are in the library: the save as the note, the phone's
+    // edit as a conflict copy of it.
+    await nav(page, "Library").click();
+    await expect(page.getByText("Edited in the studio.")).toBeVisible();
+    await expect(page.getByText("Edited on the phone.")).toBeVisible();
+    await expect(
+      page.getByText("Conflict copy", { exact: true }),
+    ).toBeVisible();
+
+    // A second save starts from the version the first one wrote: no copy.
+    await page
+      .getByRole("button", { name: /^Open editor/ })
+      .first()
+      .click();
+    await editor.fill("Edited in the studio, twice.");
+    await page.getByRole("button", { name: "Save to library" }).click();
+    await expect(page.getByText("Saved to your library.")).toBeVisible();
     expect(errors).toEqual([]);
   });
 

@@ -13,6 +13,7 @@ mod local_engine;
 mod local_history;
 mod online;
 mod streaming;
+mod sync;
 mod system_audio;
 #[cfg(target_os = "windows")]
 mod system_loopback;
@@ -29,7 +30,7 @@ struct WhisperPayload {
     model_path: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WhisperSegment {
     start_ms: u64,
@@ -37,6 +38,10 @@ struct WhisperSegment {
     text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     speaker: Option<String>,
+    /// Fields a synced note's segment carries that this version does not
+    /// know: kept as they are, so no device drops another's data.
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -281,6 +286,22 @@ fn main() {
             local_history::read_local_capture_audio,
             local_history::update_local_capture,
             local_history::compress_local_captures,
+            local_history::list_sync_notes,
+            local_history::read_sync_note,
+            local_history::upsert_synced_capture,
+            local_history::apply_remote_delete,
+            sync::sync_config,
+            sync::sync_key_status,
+            sync::sync_key_create,
+            sync::sync_key_import,
+            sync::sync_key_load,
+            sync::sync_key_forget,
+            sync::sync_state_load,
+            sync::sync_state_save,
+            sync::sync_state_clear,
+            sync::sync_pending_deletes,
+            sync::sync_pending_deletes_done,
+            sync::sync_request,
             streaming::capture_begin,
             streaming::capture_append,
             streaming::capture_finish,

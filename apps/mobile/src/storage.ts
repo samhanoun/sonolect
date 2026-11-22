@@ -10,27 +10,32 @@ import type {
   TranscriptTurn,
 } from "./domain";
 import { DEFAULT_SETTINGS, normalizeSettings } from "./domain";
+import { SYNC_URL } from "./features";
 import { resolveInitialSettings } from "./firstRun";
-import type { NotesLoad } from "./storageCore";
+import type { NoteWrite, NotesLoad } from "./storageCore";
 import {
+  APP_KEY_PREFIX,
   INDEX_KEY,
   LEGACY_V1_KEY,
   LEGACY_V2_KEY,
+  SYNC_COMPANION_PREFIX,
   asRecord,
   createJsonStore,
   createNoteStore,
+  readCompanionValue,
   sanitizeDictionary,
   sanitizeSnippets,
 } from "./storageCore";
+import { SYNC_KEY_ITEM } from "./sync/keyStore";
 
 /**
  * Settings, notes, dictionary and snippets live in the app sandbox via
  * AsyncStorage (SecureStore caps values at ~2 KB). Notes are stored one key
  * per note (storageCore.ts). Nothing is deleted on a read error. The API
- * access token is the only secret and stays in SecureStore (Keychain /
- * Keystore). On web, the token is kept in memory only.
+ * access token and the sync key are the only secrets and stay in
+ * SecureStore (Keychain / Keystore). On web, the token is kept in memory
+ * only, and sync is not offered.
  */
-const KEY_PREFIX = "sonolect.mobile.";
 const KEYS = {
   settings: "sonolect.mobile.settings",
   dictionary: "sonolect.mobile.dictionary",
@@ -41,7 +46,11 @@ const KEYS = {
 const LEGACY_AUTH_KEY = "sonolect.mobile.auth";
 const REMOVE_BATCH = 50;
 
-const notes = createNoteStore(AsyncStorage);
+// Builds with sync keep what other devices store with a note (src/sync).
+const notes = createNoteStore(
+  AsyncStorage,
+  SYNC_URL ? { companionPrefix: SYNC_COMPANION_PREFIX } : {},
+);
 const values = createJsonStore(AsyncStorage);
 const webSecrets = new Map<string, string>();
 
@@ -157,6 +166,22 @@ export const mobileStorage = {
     await notes.save(history);
   },
 
+  /**
+   * Sync's writes: notes with their companion values, and notes another
+   * device deleted. Rejects while some notes could not be read.
+   */
+  async applyNotes(change: {
+    put?: readonly NoteWrite[];
+    remove?: readonly string[];
+  }): Promise<void> {
+    await notes.apply(change);
+  },
+
+  /** What sync keeps of a note beyond the note itself, or null. */
+  async readSyncCompanion(id: string): Promise<string | null> {
+    return readCompanionValue(AsyncStorage, `${SYNC_COMPANION_PREFIX}${id}`);
+  },
+
   async clearNotes(): Promise<void> {
     await notes.clear();
     if (Platform.OS !== "web") {
@@ -218,7 +243,8 @@ export const mobileStorage = {
   /**
    * Removes everything Sonolect stored on this device: every AsyncStorage
    * key under 'sonolect.mobile.' (settings, notes, the index, older history
-   * values and the copies of broken values) and the SecureStore items.
+   * values, the copies of broken values, and sync's state and companion
+   * values) and the SecureStore items, the sync key among them.
    */
   async eraseAll(): Promise<void> {
     // Every step runs even when one fails; the first failure is reported.
@@ -235,7 +261,7 @@ export const mobileStorage = {
     await attempt(() => notes.clear());
     await attempt(async () => {
       const keys = (await AsyncStorage.getAllKeys()).filter((key) =>
-        key.startsWith(KEY_PREFIX),
+        key.startsWith(APP_KEY_PREFIX),
       );
       await removeKeys(keys);
       // Nothing is left to protect: every key may be written again.
@@ -244,8 +270,8 @@ export const mobileStorage = {
     await attempt(() => this.saveApiToken(undefined));
     if (Platform.OS !== "web") {
       await Promise.all(
-        [KEYS.settings, LEGACY_V1_KEY, LEGACY_AUTH_KEY].map((key) =>
-          SecureStore.deleteItemAsync(key).catch(() => undefined),
+        [KEYS.settings, LEGACY_V1_KEY, LEGACY_AUTH_KEY, SYNC_KEY_ITEM].map(
+          (key) => SecureStore.deleteItemAsync(key).catch(() => undefined),
         ),
       );
     }

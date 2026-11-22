@@ -7,6 +7,7 @@ import {
 } from "./desktopNative";
 import DictationBubble from "./components/DictationBubble";
 import { useDictationBubbleBridge } from "./bubbleBridge";
+import { useSyncLifecycle } from "./sync/useSync";
 import "./tailwind.css";
 import StudioShell from "./components/StudioShell";
 import { useDesktopStore } from "./store/appStore";
@@ -19,6 +20,8 @@ function hotkeySource(): "app" | "hotkey" {
 
 function App() {
   useDictationBubbleBridge();
+  // Note sync runs in the main window only, and only in a build that has it.
+  useSyncLifecycle();
   const setCommandOpen = useDesktopStore((state) => state.setCommandOpen);
   const toggleRecording = useDesktopStore((state) => state.toggleRecording);
   const loadTranscriptHistory = useDesktopStore(

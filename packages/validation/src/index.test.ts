@@ -82,7 +82,7 @@ describe("input limits", () => {
   });
 
   it("caps free text and collection sizes", async () => {
-    const { refinementRequestSchema, syncPushSchema, trackUsageSchema } =
+    const { refinementRequestSchema, trackUsageSchema } =
       await import("./index.js");
     assert.equal(
       createTranscriptSchema.safeParse({ rawText: "a".repeat(2_000_001) })
@@ -110,23 +110,16 @@ describe("input limits", () => {
       }).success,
       false,
     );
-    assert.equal(
-      trackUsageSchema.safeParse({
-        userId: "../other-user",
-        metric: "minutes",
-        quantity: 1,
-        source: "audio",
-      }).success,
-      false,
-    );
-    assert.equal(
-      syncPushSchema.safeParse({
-        userId: "user one",
-        deviceId: "desktop",
-        changes: [],
-      }).success,
-      false,
-    );
+    for (const userId of ["../other-user", "user one"])
+      assert.equal(
+        trackUsageSchema.safeParse({
+          userId,
+          metric: "minutes",
+          quantity: 1,
+          source: "audio",
+        }).success,
+        false,
+      );
   });
 
   it("only accepts audio MIME types and https callbacks", async () => {

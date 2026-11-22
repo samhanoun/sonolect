@@ -16,7 +16,11 @@ import {
   Upload,
   WandSparkles,
 } from "lucide-react";
-import { subscribeMicLevel, useDesktopStore } from "../store/appStore";
+import {
+  type CaptureVersion,
+  subscribeMicLevel,
+  useDesktopStore,
+} from "../store/appStore";
 import { isTauriRuntime } from "../desktopNative";
 import {
   nativeProviderCall,
@@ -27,6 +31,7 @@ import {
   transcribeUsingProvider,
 } from "../providerSettings";
 import { MicrophoneSettings } from "./StudioMicrophone";
+import { StudioSync } from "./StudioSync";
 import { StudioModelSelector } from "./StudioModels";
 import { SegmentEditor, useCapturePlayer } from "./StudioSegments";
 import {
@@ -63,6 +68,13 @@ import {
   saveCaptureRetentionDays,
   type RetentionDays,
 } from "../privacyControls";
+import { rememberAudioless } from "../captureAudio";
+import {
+  getSyncController,
+  useSyncView,
+  useSyncedNotes,
+} from "../sync/useSync";
+import { syncActionErrorText } from "../sync/syncMessages";
 import {
   LAUNCH_LOCALES,
   LOCALE_NAMES,
@@ -162,17 +174,68 @@ export type SavedCapture = {
   language: string | null;
   /** Timed segments; recordings saved by older versions have none. */
   segments?: SavedCaptureSegment[];
+  /** False for a note that came through sync: its recording stays on the device that made it. */
+  hasAudio?: boolean;
+  /** Fields a note synced from another device may carry. */
+  title?: string;
+  refinedText?: string;
+  pinned?: boolean;
+  /** The app that made the note ("desktop" or "mobile"); absent: this one. */
+  origin?: string;
+  /** On a conflict copy: the note it was copied from. */
+  conflictOf?: string;
+  updatedAtMs?: number;
+  /** Its version for sync, while sync is on. */
+  hlc?: CaptureVersion;
 };
+/**
+ * A note that came through sync: it has no recording here (recordings do not
+ * sync) and names the app that made it, which recordings made here do not.
+ * A recording made here whose audio is gone is not one.
+ */
+function cameThroughSync(capture: SavedCapture): boolean {
+  return capture.hasAudio === false && capture.origin !== undefined;
+}
+/**
+ * A recording just transcribed into the editor: reads the version it was
+ * saved with, so that a later save keeps a version that sync wrote
+ * meanwhile. Unknown until then (and when it cannot be read): the first
+ * save then overwrites as before.
+ */
+function learnOpenedVersion(id: string) {
+  void nativeProviderCall<{ hlc?: CaptureVersion } | null>("read_sync_note", {
+    id,
+  })
+    .then((note) => {
+      const { openedVersion, transcriptSegments, setOpenedVersion } =
+        useDesktopStore.getState();
+      if (
+        note &&
+        openedVersion === null &&
+        singleCaptureId(transcriptSegments) === id
+      )
+        setOpenedVersion(id, note.hlc ?? null);
+    })
+    .catch(() => undefined);
+}
+/** Lists the library, and remembers which notes have no audio here. */
+async function listSavedCaptures(): Promise<SavedCapture[]> {
+  const captures = await nativeProviderCall<SavedCapture[]>(
+    "list_local_captures",
+  );
+  rememberAudioless(captures);
+  return captures;
+}
 export function useSavedCaptures() {
   const recordingState = useDesktopStore((state) => state.recordingState);
+  // Bumped when sync wrote notes here.
+  const synced = useSyncedNotes((state) => state.version);
   const [captures, setCaptures] = useState<SavedCapture[]>([]);
   const [error, setError] = useState("");
   const refresh = async () => {
     if (!isTauriRuntime()) return;
     try {
-      setCaptures(
-        await nativeProviderCall<SavedCapture[]>("list_local_captures"),
-      );
+      setCaptures(await listSavedCaptures());
       setError("");
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
@@ -189,7 +252,7 @@ export function useSavedCaptures() {
       // Enforce the retention setting whenever the list is refreshed.
       void applyCaptureRetention(nativeProviderCall)
         .catch(() => 0)
-        .then(() => nativeProviderCall<SavedCapture[]>("list_local_captures"))
+        .then(listSavedCaptures)
         .then((result) => {
           if (!cancelled) {
             setCaptures(result);
@@ -204,7 +267,7 @@ export function useSavedCaptures() {
     return () => {
       cancelled = true;
     };
-  }, [recordingState]);
+  }, [recordingState, synced]);
   return { captures, error, refresh };
 }
 export function StudioOverview({ captures }: { captures: SavedCapture[] }) {
@@ -402,6 +465,7 @@ export function StudioTranscribe({
             transcript: long.text,
             segments: long.segments,
           });
+          learnOpenedVersion(long.captureId!);
           setMessage(
             long.text
               ? t("studio.transcribe.saved")
@@ -448,14 +512,15 @@ export function StudioTranscribe({
       );
       if (result.status !== "completed")
         throw new Error(result.message || t("studio.transcribe.notReady"));
-      if (result.captureId)
+      if (result.captureId) {
         state.openCapture({
           id: result.captureId,
           durationMs: (wav.length - 44) / 32,
           transcript: result.transcript || "",
           segments: result.segments ?? [],
         });
-      else state.setTranscript(result.transcript || "");
+        learnOpenedVersion(result.captureId);
+      } else state.setTranscript(result.transcript || "");
       setMessage(
         result.transcript
           ? t("studio.transcribe.saved")
@@ -500,7 +565,17 @@ export function StudioTranscribe({
     if (!libraryCaptureId) return;
     setBusy(true);
     try {
-      await nativeProviderCall("update_local_capture", {
+      // The version the editor opened: if sync changed the recording since,
+      // the save keeps that version as a conflict copy.
+      const opened =
+        state.openedVersion?.id === libraryCaptureId
+          ? state.openedVersion
+          : null;
+      const saved = await nativeProviderCall<{
+        hlc?: CaptureVersion;
+        conflictCopy?: string;
+      } | null>("update_local_capture", {
+        ...(opened ? { base: { hlc: opened.hlc } } : {}),
         id: libraryCaptureId,
         transcript: state.transcript,
         segments: state.transcriptSegments
@@ -512,7 +587,12 @@ export function StudioTranscribe({
             ...(segment.speaker ? { speaker: segment.speaker } : {}),
           })),
       });
-      setMessage(t("studio.segments.saved"));
+      state.setOpenedVersion(libraryCaptureId, saved?.hlc ?? null);
+      setMessage(
+        saved?.conflictCopy
+          ? t("studio.segments.savedWithCopy")
+          : t("studio.segments.saved"),
+      );
       await onSaved();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
@@ -999,10 +1079,18 @@ export function StudioLibrary({
   };
   const needle = query.toLocaleLowerCase(t.locale);
   const visible = captures.filter((item) =>
-    (item.transcript || item.error || "")
+    [item.title, item.transcript || item.error]
+      .filter(Boolean)
+      .join("\n")
       .toLocaleLowerCase(t.locale)
       .includes(needle),
   );
+  const originalDate = (id: string) => {
+    const original = captures.find((capture) => capture.id === id);
+    return original
+      ? new Date(original.createdAtMs).toLocaleString(t.locale)
+      : undefined;
+  };
   return (
     <div className="studio-page">
       <div className="studio-page-heading">
@@ -1063,52 +1151,75 @@ export function StudioLibrary({
                   })}
                 </span>
                 <span
-                  className={`studio-tag ${item.error ? "amber" : "green"}`}
+                  className={`studio-tag ${item.error || item.conflictOf ? "amber" : "green"}`}
                 >
                   {item.error
                     ? t("studio.library.retryNeeded")
-                    : t("studio.library.savedOnDevice")}
+                    : item.conflictOf
+                      ? t("studio.library.conflictCopy")
+                      : cameThroughSync(item)
+                        ? t("studio.library.synced")
+                        : t("studio.library.savedOnDevice")}
                 </span>
               </div>
+              {item.title && (
+                <h3 className="studio-library-title">{item.title}</h3>
+              )}
               <p className="studio-transcript-preview">
                 {item.transcript || t("studio.library.noTranscript")}
               </p>
               {item.error && <p className="studio-muted">{item.error}</p>}
+              {item.conflictOf && originalDate(item.conflictOf) && (
+                <p className="studio-muted">
+                  {t("studio.library.conflictOf", {
+                    date: originalDate(item.conflictOf)!,
+                  })}
+                </p>
+              )}
+              {item.hasAudio === false && (
+                <p className="studio-muted">
+                  {cameThroughSync(item)
+                    ? t("studio.library.noAudio")
+                    : t("native.audioGone")}
+                </p>
+              )}
               <div className="studio-card-actions">
-                <button
-                  className="studio-link"
-                  onClick={() =>
-                    player.captureId === item.id && player.playing
-                      ? player.pause()
-                      : void player.play(
-                          item.id,
-                          // Carry on where this recording was paused.
-                          player.captureId === item.id &&
-                            player.positionMs < item.durationMs - 250
-                            ? player.positionMs
-                            : 0,
-                        )
-                  }
-                >
-                  {player.captureId === item.id && player.playing ? (
-                    <Pause size={14} />
-                  ) : (
-                    <Play size={14} />
-                  )}
-                  {player.captureId === item.id && player.playing
-                    ? t("studio.library.pause")
-                    : t("studio.library.listen")}
-                  {player.captureId === item.id && (
-                    <span className="studio-playhead">
-                      {formatTimestamp(player.positionMs)}
-                    </span>
-                  )}
-                </button>
+                {item.hasAudio !== false && (
+                  <button
+                    className="studio-link"
+                    onClick={() =>
+                      player.captureId === item.id && player.playing
+                        ? player.pause()
+                        : void player.play(
+                            item.id,
+                            // Carry on where this recording was paused.
+                            player.captureId === item.id &&
+                              player.positionMs < item.durationMs - 250
+                              ? player.positionMs
+                              : 0,
+                          )
+                    }
+                  >
+                    {player.captureId === item.id && player.playing ? (
+                      <Pause size={14} />
+                    ) : (
+                      <Play size={14} />
+                    )}
+                    {player.captureId === item.id && player.playing
+                      ? t("studio.library.pause")
+                      : t("studio.library.listen")}
+                    {player.captureId === item.id && (
+                      <span className="studio-playhead">
+                        {formatTimestamp(player.positionMs)}
+                      </span>
+                    )}
+                  </button>
+                )}
                 <button
                   className="studio-link"
                   disabled={!item.transcript}
                   onClick={() => {
-                    state.openCapture(item);
+                    state.openCapture({ ...item, hlc: item.hlc ?? null });
                     state.setActiveView("transcribe");
                   }}
                 >
@@ -1126,16 +1237,18 @@ export function StudioLibrary({
                   <Copy size={14} />
                   {t("studio.common.copy")}
                 </button>
-                <button
-                  className="studio-link"
-                  disabled={!!busy}
-                  onClick={() => void retry(item.id)}
-                >
-                  <RefreshCw size={14} />
-                  {busy === item.id
-                    ? t("studio.library.transcribing")
-                    : t("studio.library.retryLocal")}
-                </button>
+                {item.hasAudio !== false && (
+                  <button
+                    className="studio-link"
+                    disabled={!!busy}
+                    onClick={() => void retry(item.id)}
+                  >
+                    <RefreshCw size={14} />
+                    {busy === item.id
+                      ? t("studio.library.transcribing")
+                      : t("studio.library.retryLocal")}
+                  </button>
+                )}
                 <button
                   className="studio-link muted"
                   disabled={!!busy}
@@ -1358,16 +1471,33 @@ function PrivacyControls() {
           : t("studio.storage.savedWav"),
     );
   };
+  const sync = getSyncController();
+  const syncAvailable = useSyncView().available;
   const deleteEverything = async () => {
     if (!window.confirm(t("studio.privacy.confirmDeleteAll"))) return;
     setBusy(true);
     setMessage("");
     try {
+      // With sync on, the server copy can go first; the other devices then
+      // turn sync off and keep their notes. If that fails, nothing is deleted.
+      if (
+        sync?.getView().phase === "on" &&
+        window.confirm(t("studio.sync.deleteAllServer"))
+      ) {
+        try {
+          await sync.turnOff({ deleteServerCopy: true });
+        } catch (error) {
+          setMessage(syncActionErrorText(error, t));
+          return;
+        }
+      }
       const result = await deleteAllLocalData(
         native
           ? nativeProviderCall
           : async <T,>() =>
               0 as unknown as T /* browser preview: nothing native */,
+        undefined,
+        sync ? { forgetSync: () => sync.forgetLocal() } : {},
       );
       if (result.problems.length) {
         setMessage(
@@ -1446,7 +1576,10 @@ function PrivacyControls() {
           {busy ? t("studio.privacy.deleting") : t("studio.privacy.deleteAll")}
         </button>
       </div>
-      <p className="studio-muted">{t("studio.privacy.deleteAllHint")}</p>
+      <p className="studio-muted">
+        {t("studio.privacy.deleteAllHint")}
+        {syncAvailable ? ` ${t("studio.sync.deleteAllHint")}` : ""}
+      </p>
       {message && (
         <p role="status" className="studio-notice">
           {message}
@@ -1644,6 +1777,7 @@ export function StudioSettings() {
         </label>
       </section>
       <MicrophoneSettings />
+      <StudioSync />
       <PrivacyControls />
       <section className="studio-card">
         <h3>{t("studio.settings.shortcutsTitle")}</h3>

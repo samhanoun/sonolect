@@ -226,4 +226,90 @@ export const es: Partial<Record<LocaleKeys, string>> = {
   "audio.recentCapture": "Captura reciente",
   "audio.playPause": "Reproducir o pausar audio",
   "audio.waveform": "Forma de onda de audio",
+
+  // Note sync between devices
+  "studio.sync.title": "Sincronización entre dispositivos",
+  "studio.sync.subtitle":
+    "Tus notas en todos tus dispositivos, cifradas de extremo a extremo: el servidor de sincronización las guarda, pero no puede leerlas.",
+  "studio.sync.server": "Servidor de sincronización: {server}",
+  "studio.sync.audioStays":
+    "Las grabaciones se quedan en el dispositivo que las hizo. Solo se sincronizan las notas.",
+  "studio.sync.offState": "La sincronización está desactivada.",
+  "studio.sync.onState": "La sincronización está activada.",
+  "studio.sync.turnOn": "Activar la sincronización",
+  "studio.sync.turningOn": "Activando…",
+  "studio.sync.join": "Unirse con un código",
+  "studio.sync.joinLabel":
+    "Código o enlace de sincronización de tu otro dispositivo",
+  "studio.sync.joinSubmit": "Unirse",
+  "studio.sync.joining": "Uniéndose…",
+  "studio.sync.cancel": "Cancelar",
+  "studio.sync.warning":
+    "Unirse comparte cada nota con quien tenga este código.",
+  "studio.sync.lastSync": "Última sincronización: {time}.",
+  "studio.sync.neverSynced": "Aún no se ha sincronizado.",
+  "studio.sync.syncing": "Sincronizando…",
+  "studio.sync.syncNow": "Sincronizar ahora",
+  "studio.sync.showCode": "Mostrar el código",
+  "studio.sync.hideCode": "Ocultar el código",
+  "studio.sync.codeHint":
+    "En tu otro dispositivo, elige unirte a la sincronización y luego escanea este código QR o escribe el código.",
+  "studio.sync.codeLabel": "Código de sincronización",
+  "studio.sync.qrLabel": "Código QR para unirse a esta sincronización",
+  "studio.sync.turnOff": "Desactivar la sincronización",
+  "studio.sync.turnOffQuestion":
+    "¿Desactivar la sincronización en este dispositivo?",
+  "studio.sync.keepServer": "Conservar la copia del servidor",
+  "studio.sync.keepServerHint":
+    "Tus otros dispositivos siguen sincronizándose. Este podrá volver a unirse con el código.",
+  "studio.sync.deleteServer": "Eliminar la copia del servidor",
+  "studio.sync.deleteServerHint":
+    "Tus otros dispositivos verán «Esta sincronización se eliminó» y desactivarán la sincronización. Cada dispositivo conserva sus notas.",
+  "studio.sync.turningOff": "Desactivando…",
+  "studio.sync.notesKept": "Tus notas se quedan en este dispositivo.",
+  "studio.sync.error.unauthorized":
+    "El servidor no acepta esta clave de sincronización.",
+  "studio.sync.error.deleted": "Esta sincronización se eliminó.",
+  "studio.sync.error.tooLarge":
+    "Una nota es demasiado grande para sincronizarse.",
+  "studio.sync.error.server":
+    "La sincronización no está disponible en este momento.",
+  "studio.sync.error.offline":
+    "Sin conexión. Las notas se sincronizarán cuando vuelvas a estar en línea.",
+  "studio.sync.notice.quota":
+    "El almacenamiento de sincronización está lleno. Elimina notas para sincronizar las nuevas.",
+  "studio.sync.notice.newerSchema":
+    "Actualiza Sonolect para sincronizar todas las notas.",
+  "studio.sync.pairing.invalid":
+    "Este no es un código de sincronización de Sonolect.",
+  "studio.sync.pairing.version": "Actualiza Sonolect para usar este código.",
+  "studio.sync.pairing.length": "Revisa el código: tiene 56 caracteres.",
+  "studio.sync.pairing.typo": "Un carácter es incorrecto.",
+  "studio.sync.preview":
+    "La sincronización funciona en la aplicación instalada.",
+  "studio.sync.deleteAllHint":
+    "La sincronización también se desactiva en este dispositivo.",
+  "studio.sync.deleteAllServer":
+    "La sincronización está activada. ¿Eliminar también la copia de tus notas en el servidor? Aceptar la elimina: tus otros dispositivos desactivan la sincronización y conservan sus notas. Cancelar la conserva para ellos.",
+  "studio.privacy.problemSync": "Sincronización: {reason}",
+  "studio.library.synced": "Sincronizada",
+  "studio.library.noAudio":
+    "La grabación se queda en el dispositivo que la hizo.",
+  "studio.library.conflictOf": "Copia en conflicto de la nota del {date}",
+  "studio.library.conflictCopy": "Copia en conflicto",
+  "native.syncNotAvailable":
+    "La sincronización no está disponible en esta versión de Sonolect.",
+  "native.syncKeychainLinux":
+    "La sincronización no está disponible en este sistema: guarda su clave en un llavero (Secret Service, como GNOME Keyring o KWallet) y no hay ninguno en ejecución.",
+  "native.syncKeychainUnavailable":
+    "La sincronización no está disponible en este sistema: no se pudo abrir el llavero.",
+  "native.syncKeychainFailed":
+    "No se pudo leer ni guardar la clave de sincronización en el llavero.",
+  "native.syncInvalidKey": "Esta no es una clave de sincronización válida.",
+  "native.syncKeyExists":
+    "La sincronización ya está activada con otra clave. Desactívala primero.",
+  "native.syncStateFailed":
+    "No se pudo guardar el estado de la sincronización.",
+  "native.syncInterrupted": "La sincronización se interrumpió.",
+  "native.syncInvalidNote": "Nota sincronizada no válida.",
 };

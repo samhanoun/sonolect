@@ -1,0 +1,16 @@
+# gitleaks reads this file from the repository root. Every default rule still
+# applies everywhere; the allowlist below only skips the files it names.
+# Add a file here only with the owner's approval and a row in
+# docs/security-scan-triage.md.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known-answer test vectors: values derived from a fixed, public test key, not credentials"
+paths = [
+  # The vault id, auth token and verifier that deriveVaultKeys gives for the
+  # test root key 0..31 (packages/sync-core/src/test-helpers.ts). Owner
+  # approved 2026-11-21 (PR #168).
+  '''^packages/sync-core/src/crypto\.test\.ts$''',
+]

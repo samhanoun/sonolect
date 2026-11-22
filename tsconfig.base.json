@@ -21,6 +21,9 @@
       "@sonolect/prompts": ["./packages/prompts/src/index.ts"],
       "@sonolect/sdk": ["./packages/sdk/src/index.ts"],
       "@sonolect/service-kit": ["./packages/service-kit/src/index.ts"],
+      "@sonolect/sync-core": ["./packages/sync-core/src/index.ts"],
+      "@sonolect/sync-core/wire": ["./packages/sync-core/src/wire.ts"],
+      "@sonolect/sync-core/testing": ["./packages/sync-core/src/testing.ts"],
       "@sonolect/ui": ["./packages/ui/src/index.ts"]
     }
   }

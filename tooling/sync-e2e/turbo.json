@@ -1,0 +1,33 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/desktop/src/sync/**",
+        "$TURBO_ROOT$/apps/mobile/src/**",
+        "$TURBO_ROOT$/services/sync-service/src/**",
+        "$TURBO_ROOT$/packages/sync-core/src/**"
+      ]
+    },
+    "typecheck": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/desktop/src/sync/**",
+        "$TURBO_ROOT$/apps/mobile/src/**",
+        "$TURBO_ROOT$/services/sync-service/src/**",
+        "$TURBO_ROOT$/packages/sync-core/src/**"
+      ]
+    },
+    "lint": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/desktop/src/sync/**",
+        "$TURBO_ROOT$/apps/mobile/src/**",
+        "$TURBO_ROOT$/services/sync-service/src/**",
+        "$TURBO_ROOT$/packages/sync-core/src/**"
+      ]
+    }
+  }
+}

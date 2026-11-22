@@ -198,7 +198,7 @@ impl Transcript {
                         start_ms: 0,
                         end_ms: length_ms,
                         text: text.to_owned(),
-                        speaker: None,
+                        ..Default::default()
                     });
                 }
                 for segment in &mut found {
@@ -569,14 +569,14 @@ pub fn capture_begin(
         .map_err(|e| e.to_string())?;
     let id = format!("{}-{}", now.as_nanos(), std::process::id());
     let directory = local_history::directory(&app)?;
-    let record = local_history::Capture {
+    let mut record = local_history::Capture {
         id: id.clone(),
         created_at_ms: now.as_millis() as u64,
         duration_ms: 0,
         transcript: None,
         error: Some("Processing was interrupted. Retry this recording.".into()),
         language,
-        segments: vec![],
+        ..Default::default()
     };
     let hold = compact_audio::hold(&id);
     let recorder = Recorder::begin(
@@ -584,7 +584,7 @@ pub fn capture_begin(
         transcribe,
         partial_sink(&app, &id),
     )?;
-    local_history::write_record(&app, &record)?;
+    local_history::write_record(&app, &mut record)?;
     let previous = LIVE
         .lock()
         .map_err(|_| "Speech engine unavailable")?
@@ -659,11 +659,11 @@ pub async fn capture_finish(app: tauri::AppHandle, id: String) -> Result<Whisper
         } = take_live(&id)?;
         let outcome = recorder.finish()?;
         if outcome.duration_ms == 0 {
-            local_history::delete_local_capture(app, id)?;
+            local_history::discard(&app, &id)?;
             return Err("No audio was recorded.".into());
         }
         let result = finished(&mut record, outcome);
-        local_history::write_record(&app, &record)?;
+        local_history::write_record(&app, &mut record)?;
         result
     })
     .await
@@ -675,7 +675,7 @@ pub async fn capture_finish(app: tauri::AppHandle, id: String) -> Result<Whisper
 pub fn capture_cancel(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let live = take_live(&id)?;
     live.recorder.abandon();
-    local_history::delete_local_capture(app, live.id)
+    local_history::discard(&app, &live.id)
 }
 
 /// Transcribes a saved recording again, in chunks, whatever its length.
@@ -690,25 +690,25 @@ pub fn retranscribe(
     let wav = compact_audio::audio_file(&directory, id)
         .unwrap_or_else(|| directory.join(format!("{id}.wav")));
     let transcribe = transcriber(app, language.clone(), model_path, None, None)?;
-    let mut record =
-        local_history::read_record(&directory, id).unwrap_or_else(|| local_history::Capture {
+    let outcome = transcribe_file(&wav, transcribe, partial_sink(app, id));
+    // Read again now: a change that came through sync while this ran stays.
+    local_history::change_record(
+        app,
+        id,
+        || local_history::Capture {
             id: id.to_owned(),
             created_at_ms: modified_ms(&wav),
-            duration_ms: 0,
-            transcript: None,
-            error: None,
             language,
-            segments: vec![],
-        });
-    let result = match transcribe_file(&wav, transcribe, partial_sink(app, id)) {
-        Ok(outcome) => finished(&mut record, outcome),
-        Err(error) => {
-            record.error = Some(error.clone());
-            Err(error)
-        }
-    };
-    local_history::write_record(app, &record)?;
-    result
+            ..Default::default()
+        },
+        |record| match outcome {
+            Ok(outcome) => finished(record, outcome),
+            Err(error) => {
+                record.error = Some(error.clone());
+                Err(error)
+            }
+        },
+    )?
 }
 
 fn modified_ms(path: &Path) -> u64 {
@@ -750,7 +750,7 @@ mod tests {
                     start_ms: 100,
                     end_ms: ms + 5000,
                     text: format!("{ms} ms"),
-                    speaker: None,
+                    ..Default::default()
                 }],
                 language: Some("en".into()),
                 capture_id: None,

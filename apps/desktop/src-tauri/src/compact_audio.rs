@@ -414,7 +414,7 @@ pub fn open(path: &Path) -> Result<Samples<BufReader<File>>, String> {
     ))
 }
 
-const GONE: &str = "The audio of this recording is no longer on this device.";
+pub const GONE: &str = "The audio of this recording is no longer on this device.";
 
 /// Where a recording's audio is, whichever format it is kept in. The WAV
 /// wins while both exist: it is only removed once the Opus file is complete.
@@ -677,7 +677,8 @@ impl Drop for Hold {
     }
 }
 
-fn held(id: &str) -> bool {
+/// Whether a recording's audio is being written or read right now.
+pub fn held(id: &str) -> bool {
     HELD.lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .iter()

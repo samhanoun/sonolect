@@ -1,3 +1,4 @@
+import { useLocales } from "expo-localization";
 import { useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -20,6 +21,7 @@ import {
 } from "../src/domain";
 import { API_FEATURES_ENABLED } from "../src/features";
 import { LANGUAGE_NAMES, strings } from "../src/i18n";
+import { formattingLocale } from "../src/library";
 import { isAllowedApiUrl } from "../src/localApi";
 import { noticeText, storageBanner } from "../src/notices";
 import {
@@ -28,7 +30,9 @@ import {
   historyOffPrompt,
   retentionPrompt,
 } from "../src/settingsPolicy";
-import { useCompanionStore } from "../src/store";
+import { syncController, useCompanionStore } from "../src/store";
+import { useSyncView } from "../src/sync/useSync";
+import { showFailure } from "../src/ui/actions";
 import {
   Button,
   Card,
@@ -42,8 +46,10 @@ import {
   inputColors,
 } from "../src/ui/components";
 import { confirm } from "../src/ui/confirm";
+import { askEraseAll } from "../src/ui/eraseAll";
 import { FadeIn, GlassScreen } from "../src/ui/glass";
 import { useTabBarClearance } from "../src/ui/GlassTabBar";
+import { SyncSection } from "../src/ui/SyncSection";
 import { colors, fonts, glass, radius, space } from "../src/ui/theme";
 import { VoiceKeyboardCard } from "../src/ui/VoiceKeyboardCard";
 
@@ -74,6 +80,13 @@ export default function SettingsScreen() {
   const t = strings(settings.uiLanguage);
   const banner = storageBanner(notice, storageDegraded);
   const clearance = useTabBarClearance();
+  // Builds with a sync server only (features.ts SYNC_URL, never on web).
+  const sync = syncController();
+  const syncOn = useSyncView(sync)?.status === "on";
+  const locale = formattingLocale(
+    settings.uiLanguage,
+    useLocales()[0]?.languageTag,
+  );
 
   const [url, setUrl] = useState(settings.localApiUrl ?? "");
   const [token, setToken] = useState(apiToken ?? "");
@@ -148,7 +161,37 @@ export default function SettingsScreen() {
     await updateSettings({ retentionDays });
   };
 
-  const clearPrompt = clearHistoryPrompt(t, history.length, storageDegraded);
+  const clearPrompt = clearHistoryPrompt(
+    t,
+    history.length,
+    storageDegraded,
+    syncOn,
+  );
+
+  /**
+   * Erase all data. With sync on it also forgets the sync key, and offers
+   * to delete the server copy first; when that fails, nothing is erased.
+   */
+  const erase = async () => {
+    if (confirming.current) return;
+    confirming.current = true;
+    let choice: "here" | "everywhere" | null;
+    try {
+      choice = await askEraseAll(t, syncOn);
+    } finally {
+      confirming.current = false;
+    }
+    if (!choice) return;
+    const outcome = await eraseAll({
+      deleteServerCopy: choice === "everywhere",
+    });
+    if (outcome === "serverCopyKept") {
+      showFailure(t.sync.deleteFailed);
+      return;
+    }
+    setUrl("");
+    setToken("");
+  };
 
   const saveApi = async () => {
     if (!urlValid) return;
@@ -286,6 +329,16 @@ export default function SettingsScreen() {
                 {t.settings.retentionHelp(settings.retentionDays)}
               </Text>
             </FadeIn>
+          ) : null}
+
+          {sync ? (
+            <SyncSection
+              sync={sync}
+              t={t}
+              locale={locale}
+              noteCount={history.length}
+              enterIndex={3}
+            />
           ) : null}
 
           <VoiceKeyboardCard enterIndex={3} />
@@ -510,30 +563,18 @@ export default function SettingsScreen() {
                       destructive: true,
                     }))
                   )
-                    await clearHistory();
+                    await clearHistory("everywhere");
                 }}
               />
               <Button
                 variant="danger"
                 label={t.settings.eraseAll}
-                onPress={async () => {
-                  if (
-                    await confirm({
-                      title: t.settings.eraseTitle,
-                      message: t.settings.eraseMessage,
-                      confirmLabel: t.settings.eraseButton,
-                      cancelLabel: t.common.cancel,
-                      destructive: true,
-                    })
-                  ) {
-                    await eraseAll();
-                    setUrl("");
-                    setToken("");
-                  }
-                }}
+                onPress={() => void erase()}
               />
             </View>
-            <Text style={styles.help}>{t.settings.about}</Text>
+            <Text style={styles.help}>
+              {syncOn ? t.sync.about : t.settings.about}
+            </Text>
             {POLICY_URL ? (
               <TextLink
                 label={t.settings.privacyPolicy}

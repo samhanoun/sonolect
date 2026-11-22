@@ -14,7 +14,38 @@ export type MockCapture = {
     text: string;
     speaker?: string;
   }[];
+  /** False for a note that came through sync: it has no recording here. */
+  hasAudio?: boolean;
+  title?: string;
+  origin?: string;
+  conflictOf?: string;
+  hlc?: { t: number; c: number; d: string };
 };
+
+/** A request the page sends to the sync server, answered by the test. */
+export type MockSyncRequest = {
+  method: "GET" | "POST" | "DELETE";
+  path: string;
+  headers: Record<string, string>;
+  body?: string;
+};
+
+/** The function a test exposes to answer the page's sync requests. */
+export const SYNC_REQUEST_HOOK = "__sonolectE2eSyncRequest";
+
+/** Where the mock keeps the native sync key and state across a reload (session storage). */
+export const SYNC_NATIVE_KEY = "__sonolectE2eSyncNative";
+
+/** The sync key and state the native side holds now. */
+export function nativeSyncState(page: Page) {
+  return page.evaluate((key) => {
+    const saved = JSON.parse(window.sessionStorage.getItem(key) ?? "null") as {
+      key: string | null;
+      state: [string, string][];
+    } | null;
+    return { key: saved?.key ?? null, stateKeys: saved?.state.length ?? 0 };
+  }, SYNC_NATIVE_KEY);
+}
 
 export type MockTauriCall = { command: string; args: unknown };
 
@@ -49,6 +80,12 @@ const toneOpus = readFileSync(
  *
  * With `systemAudio`, the computer's sound can be recorded: once started it
  * adds a second of audio to the live recording every 100 ms, with a level.
+ *
+ * With `sync`, the build has a sync server: the sync key, the sync state and
+ * the notes are kept in the page as the native side keeps them, and each
+ * `sync_request` goes to the function the test exposed as
+ * `SYNC_REQUEST_HOOK` (sync-core's memory server, say). Without it the
+ * build has no sync, as by default.
  */
 export async function installMockTauri(
   page: Page,
@@ -60,6 +97,8 @@ export async function installMockTauri(
     recorderLimitMs?: number;
     /** true: this computer's sound can be recorded. */
     systemAudio?: boolean;
+    /** true: this build syncs notes (see above). */
+    sync?: boolean;
     /** Recordings already kept as Opus. */
     compressed?: string[];
     /** true: the Ogg Opus audio sent cannot be played. */
@@ -76,12 +115,42 @@ export async function installMockTauri(
       recorder,
       recorderLimitMs,
       systemAudio,
+      sync,
+      syncHook,
+      syncNativeKey,
       compressedIds,
       unplayableOpus,
       holdWavReads,
     }) => {
       window.localStorage.clear();
       const library = structuredClone(captures);
+      // What the native side keeps for sync: the key, the state files. The
+      // app's own data survives a reload, so they are kept in the tab's
+      // session storage (the page's localStorage is cleared above).
+      const saved = JSON.parse(
+        window.sessionStorage.getItem(syncNativeKey) ?? "null",
+      ) as { key: string | null; state: [string, string][] } | null;
+      const syncKey: { value: string | null } = { value: saved?.key ?? null };
+      const syncState = new Map<string, string>(saved?.state ?? []);
+      const keepSync = () =>
+        window.sessionStorage.setItem(
+          syncNativeKey,
+          JSON.stringify({ key: syncKey.value, state: [...syncState] }),
+        );
+      type Hlc = { t: number; c: number; d: string };
+      const sameHlc = (a?: Hlc, b?: Hlc) =>
+        a === undefined || b === undefined
+          ? a === b
+          : a.t === b.t && a.c === b.c && a.d === b.d;
+      const syncable = (id: unknown) =>
+        library.find((item) => item.id === id && item.transcript !== null);
+      const expectedHere = (
+        local: (typeof library)[number] | undefined,
+        expected: { exists: boolean; hlc?: Hlc },
+      ) =>
+        local === undefined
+          ? !expected.exists
+          : expected.exists && sameHlc(local.hlc, expected.hlc);
       /** Recordings already turned into Opus. */
       const compressed = new Set<string>(compressedIds);
       const calls: { command: string; args: unknown }[] = [];
@@ -132,6 +201,18 @@ export async function installMockTauri(
         __sonolectE2eNativeCalls: calls,
         __sonolectE2eReleaseReads: () => {
           for (const answer of heldReads.splice(0)) answer();
+        },
+        // Sync writes another device's version of a recording.
+        __sonolectE2eSyncWrite: (
+          id: string,
+          transcript: string,
+          hlc: { t: number; c: number; d: string },
+        ) => {
+          const capture = library.find((item) => item.id === id);
+          if (!capture) throw new Error(`No recording ${id}`);
+          capture.transcript = transcript;
+          capture.segments = [];
+          capture.hlc = hlc;
         },
         __sonolectE2eEmit: emit,
         __sonolectE2eListening: (event: string) =>
@@ -255,9 +336,36 @@ export async function installMockTauri(
                 const capture = library.find((item) => item.id === args.id);
                 if (!capture)
                   throw "This recording is no longer in your library.";
+                // As local_history.rs: a version the studio did not open is
+                // kept as a conflict copy, and the save is the note.
+                const base = args.base as
+                  { hlc: MockCapture["hlc"] | null } | undefined;
+                let conflictCopy: string | undefined;
+                if (
+                  base &&
+                  JSON.stringify(base.hlc ?? null) !==
+                    JSON.stringify(capture.hlc ?? null)
+                ) {
+                  conflictCopy = `${capture.id}-c${(capture.hlc?.t ?? 0).toString(36)}${capture.hlc?.d.slice(0, 4) ?? ""}`;
+                  library.unshift({
+                    ...structuredClone(capture),
+                    id: conflictCopy,
+                    conflictOf: capture.id,
+                    hasAudio: false,
+                  });
+                }
                 capture.transcript = args.transcript as string;
                 capture.segments = args.segments as typeof capture.segments;
-                return null;
+                if (capture.hlc)
+                  capture.hlc = {
+                    t: Math.max(Date.now(), capture.hlc.t + 1),
+                    c: 0,
+                    d: "desk",
+                  };
+                return {
+                  ...(capture.hlc ? { hlc: capture.hlc } : {}),
+                  ...(conflictCopy ? { conflictCopy } : {}),
+                };
               }
               case "purge_local_captures":
                 return 0;
@@ -280,6 +388,129 @@ export async function installMockTauri(
                 return false;
               case "local_model_status":
                 return { ready: true, path: "ggml-base.bin" };
+            }
+            if (!sync) return null;
+            switch (command) {
+              case "sync_config":
+                return { available: true, server: "sync.example.test" };
+              case "sync_key_status":
+                return syncKey.value !== null;
+              case "sync_key_create":
+                if (syncKey.value !== null && syncKey.value !== args.key)
+                  throw "Sync is already on with another key. Turn it off first.";
+                syncKey.value = args.key as string;
+                keepSync();
+                return null;
+              case "sync_key_import":
+                syncKey.value = args.key as string;
+                keepSync();
+                return null;
+              case "sync_key_load":
+                return syncKey.value;
+              case "sync_key_forget":
+                syncKey.value = null;
+                keepSync();
+                return null;
+              case "sync_state_load":
+                return Object.fromEntries(syncState);
+              case "sync_state_save":
+                for (const [key, value] of Object.entries(
+                  args.set as Record<string, string>,
+                ))
+                  syncState.set(key, value);
+                for (const key of args.remove as string[])
+                  syncState.delete(key);
+                keepSync();
+                return null;
+              case "sync_state_clear":
+                syncState.clear();
+                keepSync();
+                return null;
+              case "sync_pending_deletes":
+                return [];
+              case "sync_pending_deletes_done":
+                return null;
+              case "list_sync_notes":
+                return library
+                  .filter((item) => item.transcript !== null)
+                  .map(({ id, hlc, createdAtMs }) => ({
+                    id,
+                    createdAtMs,
+                    ...(hlc ? { hlc } : {}),
+                  }));
+              case "read_sync_note": {
+                const note = syncable(args.id);
+                if (!note) return null;
+                const { hasAudio: _hasAudio, ...stored } =
+                  structuredClone(note);
+                return stored;
+              }
+              case "upsert_synced_capture": {
+                const capture = args.capture as (typeof library)[number];
+                const expected = args.expected as {
+                  exists: boolean;
+                  hlc?: Hlc;
+                } | null;
+                const existing = library.find((item) => item.id === capture.id);
+                if (expected && !expectedHere(syncable(capture.id), expected))
+                  return "changed";
+                const next = {
+                  ...capture,
+                  error: existing?.error ?? null,
+                  hasAudio: existing?.hasAudio ?? false,
+                };
+                if (existing) library[library.indexOf(existing)] = next;
+                else {
+                  library.push(next);
+                  library.sort((a, b) => b.createdAtMs - a.createdAtMs);
+                }
+                return "written";
+              }
+              case "apply_remote_delete": {
+                const existing = syncable(args.id);
+                if (
+                  !expectedHere(
+                    existing,
+                    args.expected as { exists: boolean; hlc?: Hlc },
+                  )
+                )
+                  return "changed";
+                if (existing) library.splice(library.indexOf(existing), 1);
+                return "written";
+              }
+              case "sync_request": {
+                const body = args.body as string | null;
+                const bearer = args.bearer as string | null;
+                const answer = (
+                  window as unknown as Record<
+                    string,
+                    (request: unknown) => Promise<{
+                      status: number;
+                      body: string;
+                      retryAfter?: string;
+                    }>
+                  >
+                )[syncHook];
+                try {
+                  return await answer!({
+                    method: args.method,
+                    path: args.path,
+                    headers: {
+                      accept: "application/json",
+                      ...(body !== null
+                        ? { "content-type": "application/json" }
+                        : {}),
+                      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+                    },
+                    ...(body !== null ? { body } : {}),
+                  });
+                } catch {
+                  throw {
+                    kind: "network",
+                    message: "The sync server could not be reached.",
+                  };
+                }
+              }
               default:
                 return null;
             }
@@ -298,6 +529,9 @@ export async function installMockTauri(
       recorder: options.recorder ?? true,
       recorderLimitMs: options.recorderLimitMs,
       systemAudio: options.systemAudio ?? false,
+      sync: options.sync ?? false,
+      syncHook: SYNC_REQUEST_HOOK,
+      syncNativeKey: SYNC_NATIVE_KEY,
       compressedIds: options.compressed ?? [],
       unplayableOpus: options.unplayableOpus ?? false,
       holdWavReads: options.holdWavReads ?? false,
@@ -311,6 +545,28 @@ export function releaseHeldReads(page: Page) {
     (
       window as typeof window & { __sonolectE2eReleaseReads: () => void }
     ).__sonolectE2eReleaseReads(),
+  );
+}
+
+/** Sync writes another device's version of a saved recording. */
+export function writeFromSync(
+  page: Page,
+  id: string,
+  transcript: string,
+  hlc: { t: number; c: number; d: string },
+) {
+  return page.evaluate(
+    ({ id, transcript, hlc }) =>
+      (
+        window as typeof window & {
+          __sonolectE2eSyncWrite: (
+            id: string,
+            transcript: string,
+            hlc: { t: number; c: number; d: string },
+          ) => void;
+        }
+      ).__sonolectE2eSyncWrite(id, transcript, hlc),
+    { id, transcript, hlc },
   );
 }
 

@@ -185,6 +185,12 @@ const en = {
     sync: { local: "LOCAL", queued: "QUEUED", synced: "SYNCED" },
     original: "Original",
     typed: "TYPED",
+    /** A note sync kept when two devices changed it at once. */
+    conflictCopy: "CONFLICT COPY",
+    conflictCopyOf: (date: string) =>
+      `Conflict copy of the note from ${date}: it was changed on two devices, and both versions are kept.`,
+    conflictCopyOfGone:
+      "Conflict copy of a note changed on two devices: both versions were kept.",
     expandHint: "Shows the whole transcript",
     collapseHint: "Shows less",
   },
@@ -307,6 +313,70 @@ const en = {
         "Tip: in Shortcuts, add “Open URLs” with sonolect://dictate and assign it to the Action button or Back Tap.",
       tryQuick: "Try Quick dictation",
     },
+  },
+  /** Sync (Settings and the join link); only builds with a sync server show it. */
+  sync: {
+    title: "SYNC",
+    intro:
+      "Sync your notes with your other devices, end-to-end encrypted. Recordings don't sync.",
+    shareWarning: "Joining shares every note with whoever holds the code.",
+    turnOn: "Turn on sync",
+    join: "Join with a code",
+    codeLabel: "Sync code",
+    codePlaceholder: "Paste or type the 56-character code",
+    codeNext: "Next",
+    showCode: "Show sync code",
+    hideCode: "Hide sync code",
+    codeHelp:
+      "Scan this QR code with your other phone, or type the code there.",
+    qrLabel: "QR code to join this sync",
+    turnOff: "Turn off sync",
+    turnOffTitle: "Turn off sync?",
+    turnOffMessage:
+      "Your notes stay on this phone. Keep the server copy for your other devices, or delete it: they then stop syncing and keep their notes.",
+    keepServerCopy: "Keep server copy",
+    deleteServerCopy: "Delete server copy",
+    deleteFailed:
+      "The server copy could not be deleted. Check your connection and try again.",
+    syncing: "Syncing…",
+    never: "Not synced yet.",
+    lastSync: (time: string) => `Last synced ${time}.`,
+    paused: {
+      historyOff: "Paused while Save history is off.",
+      storage: "Paused: some notes on this phone could not be read.",
+    },
+    problems: {
+      unauthorized: "This sync key is not accepted by the server.",
+      deleted: "This sync was deleted.",
+      tooLarge: "A note is too large to sync.",
+      server: "Sync is unavailable right now.",
+      network: "Offline. Notes will sync when you're back online.",
+      quotaExceeded: "Sync storage is full. Delete notes to sync new ones.",
+      newerSchema: "Update Sonolect to sync every note.",
+    },
+    pairingErrors: {
+      invalid: "This is not a Sonolect sync code.",
+      version: "Update Sonolect to use this code.",
+      length: "Check the code: it has 56 characters.",
+      typo: "A character is wrong.",
+    },
+    joinScreenTitle: "Join sync",
+    joinTitle: "Join this sync?",
+    joinNotes: (n: number) =>
+      n === 0
+        ? "This phone has no notes to copy yet."
+        : `This phone's ${n === 1 ? "note" : `${n} notes`} will be copied into this sync.`,
+    joinInvalidTitle: "This link can't be used",
+    joinConfirm: "Join",
+    alreadyJoined: "This phone already uses this sync.",
+    otherVaultOn: "Sync is already on. Turn it off to join another sync.",
+    openSettings: "Open Settings",
+    eraseMessage:
+      "All Sonolect data on this phone will be erased. This can't be undone. Delete the server copy too, and your other devices stop syncing.",
+    eraseDeleteServerCopy: "Erase and delete server copy",
+    eraseThisPhone: "Erase this phone only",
+    clearEverywhere: "They are deleted on your other devices too.",
+    about: "Sonolect mobile · your notes sync end-to-end encrypted",
   },
   onboarding: {
     title: "Speak. Refine. Act.",
@@ -516,6 +586,11 @@ const fr: Strings = {
     sync: { local: "LOCAL", queued: "EN ATTENTE", synced: "SYNCHRONISÉ" },
     original: "Original",
     typed: "SAISI",
+    conflictCopy: "COPIE EN CONFLIT",
+    conflictCopyOf: (date: string) =>
+      `Copie en conflit de la note du ${date} : elle a été modifiée sur deux appareils, et les deux versions sont conservées.`,
+    conflictCopyOfGone:
+      "Copie en conflit d'une note modifiée sur deux appareils : les deux versions ont été conservées.",
     expandHint: "Affiche toute la transcription",
     collapseHint: "Affiche moins",
   },
@@ -637,6 +712,77 @@ const fr: Strings = {
         "Astuce : dans Raccourcis, ajoutez « Ouvrir les URL » avec sonolect://dictate et associez-le au bouton Action ou à « Toucher le dos de l'appareil ».",
       tryQuick: "Essayer la dictée rapide",
     },
+  },
+  sync: {
+    title: "SYNCHRONISATION",
+    intro:
+      "Synchronisez vos notes avec vos autres appareils, chiffrées de bout en bout. Les enregistrements ne sont pas synchronisés.",
+    shareWarning:
+      "Rejoindre partage toutes les notes avec quiconque détient le code.",
+    turnOn: "Activer la synchronisation",
+    join: "Rejoindre avec un code",
+    codeLabel: "Code de synchronisation",
+    codePlaceholder: "Collez ou saisissez le code de 56 caractères",
+    codeNext: "Suivant",
+    showCode: "Afficher le code",
+    hideCode: "Masquer le code",
+    codeHelp:
+      "Scannez ce QR code avec votre autre téléphone, ou saisissez-y le code.",
+    qrLabel: "QR code pour rejoindre cette synchronisation",
+    turnOff: "Désactiver la synchronisation",
+    turnOffTitle: "Désactiver la synchronisation ?",
+    turnOffMessage:
+      "Vos notes restent sur ce téléphone. Gardez la copie du serveur pour vos autres appareils, ou supprimez-la : ils arrêtent alors de synchroniser et gardent leurs notes.",
+    keepServerCopy: "Garder la copie du serveur",
+    deleteServerCopy: "Supprimer la copie du serveur",
+    deleteFailed:
+      "La copie du serveur n'a pas pu être supprimée. Vérifiez votre connexion et réessayez.",
+    syncing: "Synchronisation…",
+    never: "Pas encore synchronisé.",
+    lastSync: (time: string) => `Dernière synchronisation : ${time}.`,
+    paused: {
+      historyOff: "En pause tant que l'historique est désactivé.",
+      storage:
+        "En pause : certaines notes de ce téléphone n'ont pas pu être lues.",
+    },
+    problems: {
+      unauthorized: "Le serveur n'accepte pas cette clé de synchronisation.",
+      deleted: "Cette synchronisation a été supprimée.",
+      tooLarge: "Une note est trop volumineuse pour être synchronisée.",
+      server: "La synchronisation est indisponible pour le moment.",
+      network:
+        "Hors ligne. Les notes se synchroniseront dès votre retour en ligne.",
+      quotaExceeded:
+        "L'espace de synchronisation est plein. Supprimez des notes pour en synchroniser de nouvelles.",
+      newerSchema: "Mettez Sonolect à jour pour synchroniser toutes les notes.",
+    },
+    pairingErrors: {
+      invalid: "Ce n'est pas un code de synchronisation Sonolect.",
+      version: "Mettez Sonolect à jour pour utiliser ce code.",
+      length: "Vérifiez le code : il compte 56 caractères.",
+      typo: "Un caractère est erroné.",
+    },
+    joinScreenTitle: "Rejoindre la synchronisation",
+    joinTitle: "Rejoindre cette synchronisation ?",
+    joinNotes: (n: number) =>
+      n === 0
+        ? "Ce téléphone n'a pas encore de notes à copier."
+        : n === 1
+          ? "La note de ce téléphone sera copiée dans cette synchronisation."
+          : `Les ${n} notes de ce téléphone seront copiées dans cette synchronisation.`,
+    joinInvalidTitle: "Ce lien ne peut pas être utilisé",
+    joinConfirm: "Rejoindre",
+    alreadyJoined: "Ce téléphone utilise déjà cette synchronisation.",
+    otherVaultOn:
+      "La synchronisation est déjà activée. Désactivez-la pour en rejoindre une autre.",
+    openSettings: "Ouvrir les réglages",
+    eraseMessage:
+      "Toutes les données Sonolect de ce téléphone seront effacées. C'est irréversible. Supprimez aussi la copie du serveur, et vos autres appareils arrêtent de synchroniser.",
+    eraseDeleteServerCopy: "Effacer et supprimer la copie du serveur",
+    eraseThisPhone: "Effacer ce téléphone seulement",
+    clearEverywhere: "Elles sont aussi supprimées sur vos autres appareils.",
+    about:
+      "Sonolect mobile · vos notes se synchronisent chiffrées de bout en bout",
   },
   onboarding: {
     title: "Parlez. Raffinez. Agissez.",
