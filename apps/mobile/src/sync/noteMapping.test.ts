@@ -11,7 +11,12 @@ import {
 import type { NoteSegment, TranscriptTurn } from "../domain";
 import { MAX_SEGMENTS } from "../noteSegments";
 import { MAX_TEXT_LENGTH, sanitizeTurn } from "../storageCore";
-import { noteToTurn, parseCompanion, turnToNote } from "./noteMapping";
+import {
+  type Companion,
+  noteToTurn,
+  parseCompanion,
+  turnToNote,
+} from "./noteMapping";
 
 const NOW = Date.parse("2026-11-20T12:00:00.000Z");
 const HLC: Hlc = { t: NOW - 1000, c: 2, d: "deviceA" };
@@ -441,28 +446,17 @@ describe("note mapping: segments", () => {
     assert.equal(companion, null);
   });
 
-  it("sends the segments a companion kept in extra before the phone showed them", () => {
+  it("keeps another device's segments in extra, which earlier builds also send back", () => {
     const note = desktopNote();
     const { turn, companion } = noteToTurn("note-1", note, HLC, NOW);
-    // The turn and companion an earlier build stored: no segments shown,
-    // and the segments in extra.
+    // A build from before Subtitles sends a companion's extra back as it
+    // is, and does not know `kept` segments.
+    const stored = JSON.parse(companion!) as Companion;
+    assert.deepEqual(stored.extra.segments, note.segments);
+    assert.equal("segments" in stored.kept, false);
+    // The turn such a build stored shows no segments; this build still
+    // sends them back.
     const { segments: _shown, ...oldTurn } = turn;
-    const { segments: _kept, ...oldKept } = parseCompanion(companion)!.kept;
-    assert.ok(_kept, "this build keeps them in kept");
-    const oldCompanion = JSON.stringify({
-      v: 1,
-      extra: {
-        title: note.title,
-        updatedAt: note.updatedAt,
-        origin: note.origin,
-        segments: note.segments,
-        futureField: note.futureField,
-      },
-      kept: oldKept,
-    });
-    const parsed = parseCompanion(oldCompanion);
-    assert.equal("segments" in parsed!.extra, false);
-    const sent = turnToNote(oldTurn, parsed);
-    assert.deepEqual(sent, note);
+    assert.deepEqual(turnToNote(oldTurn, parseCompanion(companion)), note);
   });
 });

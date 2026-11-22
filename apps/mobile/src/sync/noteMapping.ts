@@ -13,21 +13,23 @@ import { MAX_TEXT_LENGTH, sanitizeTurn } from "../storageCore";
  * a note changed on the phone goes back with every field another device
  * wrote:
  * - `extra`: fields the phone has no place for (title, origin, updatedAt
- *   and fields it does not know), written back unchanged;
+ *   and fields it does not know), and the segments another device wrote,
+ *   written back unchanged;
  * - `kept`: fields the phone shows another way, such as a desktop "system"
- *   source shown as "remote", a text cut at 200,000 characters, an absent
- *   language shown as "auto", or segments with speakers, or too many for
- *   the phone to show. Each keeps the note's value and a digest of what the
- *   phone showed: while the phone still shows that, the note's value goes
- *   back; once the user changed the field here, the phone's does.
+ *   source shown as "remote", a text cut at 200,000 characters or an absent
+ *   language shown as "auto". Each keeps the note's value and a digest of
+ *   what the phone showed: while the phone still shows that, the note's
+ *   value goes back; once the user changed the field here, the phone's does.
  *
  * Segments: a phone dictation sends its own (noteSegments.ts), with the
  * phone-only `approx` mark, which sync-core and the desktop keep as an
  * unknown field of the segment. The phone shows a synced note's segments,
  * without speakers, for its Subtitles, when they all fit its limits
  * (segmentsToShow), and none otherwise. It never changes them: a refine
- * changes the refined text and leaves the segments as they are, and the
- * segments another device wrote always go back as they came.
+ * changes the refined text and leaves the segments as they are. Segments
+ * the turn does not send as its own (with speakers, unknown fields, or too
+ * many to show) stay in `extra` and always go back as they came. Builds
+ * from before Subtitles keep them there too, so they also send them back.
  *
  * Local only, never synced: `syncState` (the dormant API sync).
  */
@@ -44,7 +46,6 @@ const SHOWN_FIELDS = [
   "pinned",
   "conflictOf",
   "privacyMode",
-  "segments",
 ] as const;
 type ShownField = (typeof SHOWN_FIELDS)[number];
 const SHOWN = new Set<string>(SHOWN_FIELDS);
@@ -100,7 +101,6 @@ function ownFields(turn: TranscriptTurn): Record<ShownField, unknown> {
     pinned: turn.pinned === true ? true : undefined,
     conflictOf: turn.conflictOf,
     privacyMode: turn.privacyMode,
-    segments: ownSegments(turn),
   };
 }
 
@@ -111,8 +111,6 @@ function shownValue(turn: TranscriptTurn, field: ShownField): unknown {
       return turn.pinned === true;
     case "conflictOf":
       return turn.conflictOf ?? null;
-    case "segments":
-      return turn.segments ?? null;
     default:
       return turn[field];
   }
@@ -189,6 +187,8 @@ export function noteToTurn(
   const extra: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(note))
     if (!SHOWN.has(key) && value !== undefined) extra[key] = value;
+  // The turn sends its own segments; anything else stays in extra.
+  if (sameValue(ownSegments(turn), note.segments)) delete extra.segments;
   const own = ownFields(turn);
   const kept: Companion["kept"] = {};
   for (const field of SHOWN_FIELDS) {
@@ -234,10 +234,6 @@ export function parseCompanion(
           ? { shown: entry.shown, value: entry.value }
           : { shown: entry.shown };
     }
-  // Written before the phone showed segments: they were in `extra`, and the
-  // turn stored with it shows none.
-  if (isRecord(value.extra) && "segments" in value.extra && !kept.segments)
-    kept.segments = { shown: digest(null), value: value.extra.segments };
   return { v: 1, extra, kept };
 }
 
@@ -254,17 +250,18 @@ export function turnToNote(
   const fields: Record<string, unknown> = { ...(companion?.extra ?? {}) };
   for (const field of SHOWN_FIELDS) {
     const kept = companion?.kept[field];
-    // Unchanged here: the value another device wrote. The phone never
-    // changes a synced note's segments, so they always go back as they came.
-    if (
-      kept &&
-      (field === "segments" || kept.shown === digest(shownValue(turn, field)))
-    ) {
+    if (kept && kept.shown === digest(shownValue(turn, field))) {
+      // Unchanged here: the value another device wrote.
       if ("value" in kept) fields[field] = kept.value;
       continue;
     }
     const value = own[field];
     if (value !== undefined) fields[field] = value;
+  }
+  // Another device's segments came in extra, and go back as they came.
+  if (!("segments" in fields)) {
+    const segments = ownSegments(turn);
+    if (segments) fields.segments = segments;
   }
   if (typeof fields.origin !== "string" || !fields.origin)
     fields.origin = "mobile";
