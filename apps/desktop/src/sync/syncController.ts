@@ -39,6 +39,7 @@ import {
   parsePairing,
   pendingDeletesOf,
   qrMatrix,
+  withSyncedVersions,
 } from "@sonolect/sync-core";
 
 import { createDesktopNoteStore } from "./desktopNotes";
@@ -525,18 +526,39 @@ export class SyncController {
    * Closes the engine and forgets its state, keeping the deletes it had not
    * uploaded (and those it had not been handed yet) for a later rejoin of
    * the same vault. They are read from the saved state, so this works even
-   * when the key cannot be read.
+   * when the key cannot be read. Each keeps the version of its note this
+   * device last synced: the next engine then knows the server's copy as the
+   * version deleted here, and does not bring the note back as a conflict
+   * copy.
    */
   private async forgetStateKeepingDeletes() {
     const engine = this.engine;
     this.engine = null;
     if (engine) await engine.close();
     await this.settled();
-    const kept = await pendingDeletesOf(
-      createDesktopStateStore(this.platform.invoke),
-    );
+    const state = createDesktopStateStore(this.platform.invoke);
+    const kept = await pendingDeletesOf(state);
+    let deletes: (LocalDelete | PendingDelete)[] = kept?.deletes ?? [];
+    if (kept) {
+      // Not handed to the engine yet (made while it was closed, or with a
+      // key it could not read): they belong to this state's vault.
+      const waiting = (
+        (await this.call<PendingDelete[]>("sync_pending_deletes")) ?? []
+      ).filter(
+        ({ vault, synced }) =>
+          !synced && (vault === undefined || vault === kept.vaultId),
+      );
+      const known = await withSyncedVersions(state, kept.vaultId, waiting);
+      deletes = [
+        ...deletes,
+        ...waiting.flatMap((waited, index) => {
+          const synced = known[index]?.synced;
+          return synced ? [{ ...waited, synced }] : [];
+        }),
+      ];
+    }
     await this.call("sync_state_clear", {
-      keep: { vault: kept?.vaultId ?? null, deletes: kept?.deletes ?? [] },
+      keep: { vault: kept?.vaultId ?? null, deletes },
     });
   }
 

@@ -701,6 +701,42 @@ describe("the sync controller", () => {
     assert.deepEqual(first.native.deletes.get(gone)?.vault, vault);
   });
 
+  it("a delete kept while the keychain could not be read stays deleted on a rejoin", async () => {
+    const w = world();
+    const first = await syncedDesktop(w);
+    const gone = first.native.record("Deleted before quitting");
+    first.native.record("Kept");
+    await w.clock.advance(LOCAL_CHANGE_DELAY_MS);
+    const second = await joinedDesktop(w, first);
+    const code = (await second.controller.pairing())!.code;
+    const synced = first.native.captures.get(gone)!.hlc;
+    first.native.deleteByUser(gone);
+    await first.controller.close();
+    // The keychain is locked at the next launch, and sync is turned off
+    // with the server copy kept: the delete never reached an engine.
+    first.native.failNextKeychain = "locked";
+    const again = new SyncController({
+      platform: fakePlatform(first.native.invoke, w.clock),
+      retentionDays: () => 0,
+    });
+    await again.start();
+    first.native.failNextKeychain = "locked";
+    await again.turnOff({ deleteServerCopy: false });
+    assert.equal(again.getView().phase, "off");
+    // Kept with the version this desktop last synced.
+    assert.deepEqual(first.native.deletes.get(gone)?.synced?.hlc, synced);
+
+    // Joining the vault again: the server's copy is the version deleted
+    // here, not an edit made elsewhere, so no conflict copy brings it back.
+    await again.join(code);
+    await w.clock.advance(0);
+    assert.equal(first.native.deletes.size, 0);
+    assert.deepEqual(first.native.transcripts(), ["Kept"]);
+    second.controller.syncNow();
+    await w.clock.advance(0);
+    assert.deepEqual(second.native.transcripts(), ["Kept"]);
+  });
+
   it("refreshes the library after a run that wrote notes and then failed", async () => {
     const w = world();
     let failUploads = 0;
