@@ -42,6 +42,7 @@ import {
   normalizeOnlineEditing,
   normalizeProviderKey,
 } from "./onlineRefine";
+import { providerFetch } from "./providerFetch";
 import type { ProviderKeyStatus } from "./providerKeys";
 import { NO_PROVIDER_KEYS } from "./providerKeys";
 import {
@@ -923,6 +924,8 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         dictionary: state.dictionary,
         snippets: state.snippets,
         readKey: (provider) => mobileStorage.loadProviderKey(provider),
+        // Refuses redirects on the phone too (providerFetch.ts).
+        fetchImpl: providerFetch,
         current: () => (epoch === dataEpoch ? findTurn(turnId) : undefined),
         onSend: (editing) => {
           sentTo = editing.provider;

@@ -13,6 +13,7 @@ import {
   filterModels,
   onlineEditingStatus,
 } from "../onlineSettings";
+import { providerFetch } from "../providerFetch";
 import { useCompanionStore } from "../store";
 import {
   Button,
@@ -90,7 +91,7 @@ export function OnlineEditingSection() {
   const loadModels = async () => {
     const request = ++catalogRequest.current;
     setCatalog({ state: "loading" });
-    const models = await loadModelCatalog(provider);
+    const models = await loadModelCatalog(provider, providerFetch);
     if (request !== catalogRequest.current) return;
     setCatalog(models ? { state: "loaded", models } : { state: "failed" });
   };

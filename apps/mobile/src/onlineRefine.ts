@@ -300,8 +300,11 @@ export async function refineOnline(input: {
       body: JSON.stringify(request.body),
       signal: controller.signal,
       // Like the desktop: a redirect is an error, so the key is never sent
-      // on to another address (where the runtime's fetch supports it).
+      // on to another address. On the phone the store passes Expo's fetch,
+      // which honours this (providerFetch.ts).
       redirect: "error",
+      // No cookies: the key is the only credential, as on the desktop.
+      credentials: "omit",
     });
     if (!response.ok) {
       return { status: "failed", reason: failureForStatus(response.status) };
@@ -428,6 +431,7 @@ export async function loadModelCatalog(
       headers: { accept: "application/json" },
       signal: controller.signal,
       redirect: "error",
+      credentials: "omit",
     });
     if (!response.ok) return undefined;
     return parseModelCatalog(provider, await response.json());

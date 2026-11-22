@@ -396,6 +396,7 @@ describe("what is never sent", () => {
       { status: "failed", reason: "failed" },
     );
     assert.equal(calls[0]?.init.redirect, "error");
+    assert.equal(calls[0]?.init.credentials, "omit");
   });
 });
 
@@ -604,6 +605,8 @@ describe("model catalogs", () => {
     const headers = JSON.stringify(calls[0]?.init.headers ?? {});
     assert.ok(!/authorization|api-key/i.test(headers));
     assert.equal(calls[0]?.init.body, undefined);
+    assert.equal(calls[0]?.init.redirect, "error");
+    assert.equal(calls[0]?.init.credentials, "omit");
   });
 
   it("gives up on a catalog that never answers", async () => {
