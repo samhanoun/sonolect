@@ -66,10 +66,19 @@ export const languageTagSchema = z
     "language must be a language tag such as en, fr-CA or zh-Hant",
   );
 
+/**
+ * An audio media type such as audio/webm. Recorders add parameters, for
+ * example `audio/webm;codecs=opus` in Chromium. They are accepted and
+ * dropped, so the parsed value is always the bare, lower-case media type.
+ */
 export const audioMimeTypeSchema = z
   .string()
   .max(100)
-  .regex(/^audio\/[a-z0-9.+-]+$/i, "mimeType must be an audio MIME type");
+  .regex(
+    /^audio\/[a-z0-9.+-]+(?:[ \t]*;[ \t]*[a-z0-9!#$%&'*+.^_`|~-]+=(?:"[^"\\\r\n]*"|[a-z0-9!#$%&'*+.^_`|~-]+))*$/i,
+    "mimeType must be an audio MIME type",
+  )
+  .transform((value) => value.split(";")[0]!.trim().toLowerCase());
 
 /** IDs for users, devices and records: no whitespace, slashes or control characters. */
 export const userIdSchema = z
@@ -122,7 +131,11 @@ export const updateTranscriptSchema = z
 export const listTranscriptsQuerySchema = z.object({
   cursor: z.string().max(512).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(25),
-  includeDeleted: z.coerce.boolean().default(false),
+  // Query values are strings. z.coerce.boolean() would read "false" as true.
+  // Only these words are accepted, in any case; "yes" or "off" get 400.
+  includeDeleted: z
+    .stringbool({ truthy: ["true", "1"], falsy: ["false", "0"] })
+    .default(false),
 });
 
 export const commandExecutionRequestSchema = z.object({
@@ -154,6 +167,8 @@ export const createAudioUploadJobSchema = z.object({
   durationMs: z.number().int().positive(),
   source: audioUploadSourceSchema.default("desktop"),
   transcriptTitle: z.string().min(1).max(200).optional(),
+  /** The transcript's language. The API uses "en" when it is not sent. */
+  language: languageTagSchema.optional(),
 });
 
 export const transcriptionJobRequestSchema = z.object({

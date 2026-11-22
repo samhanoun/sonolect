@@ -60,6 +60,44 @@ try {
   } finally {
     await secondApp.close();
   }
+
+  // Saves and reads at the same time must not lose an acknowledged save.
+  const concurrentPath = join(tempDir, "concurrent-store.json");
+  const concurrentApp = await createApp({
+    logger: false,
+    storePath: concurrentPath,
+  });
+  try {
+    const responses = await Promise.all(
+      Array.from({ length: 24 }, (_, index) =>
+        index % 3 === 2
+          ? concurrentApp.inject({
+              method: "GET",
+              url: "/transcripts?limit=100",
+            })
+          : concurrentApp.inject({
+              method: "POST",
+              url: "/transcripts",
+              payload: { title: `Concurrent ${index}`, rawText: `${index}` },
+            }),
+      ),
+    );
+    const createdIds = responses
+      .filter((response) => response.statusCode === 201)
+      .map((response) => response.json<Transcript>().id);
+    for (const response of responses)
+      assert.ok([200, 201].includes(response.statusCode), response.body);
+    assert.equal(createdIds.length, 16);
+    const stored = JSON.parse(await readFile(concurrentPath, "utf8")) as {
+      transcripts: Transcript[];
+    };
+    assert.deepEqual(
+      stored.transcripts.map((item) => item.id).sort(),
+      [...createdIds].sort(),
+    );
+  } finally {
+    await concurrentApp.close();
+  }
 } finally {
   await rm(tempDir, { recursive: true, force: true });
 }

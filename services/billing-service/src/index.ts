@@ -125,6 +125,8 @@ interface BillingStores {
   stripeCustomers?: Map<string, string>;
   /** Stripe event IDs already applied, so a redelivery is not applied twice. */
   processedStripeEvents?: Map<string, true>;
+  /** Per user, the `created` time of the last Stripe event that set the plan. */
+  planChangedAt?: Map<string, number>;
 }
 
 const createStores = (): Required<BillingStores> => ({
@@ -134,6 +136,7 @@ const createStores = (): Required<BillingStores> => ({
   usageEvents: new BoundedMap(MAX_USAGE_EVENTS),
   stripeCustomers: new BoundedMap(MAX_TRACKED_USERS),
   processedStripeEvents: new BoundedMap(MAX_REMEMBERED_STRIPE_EVENTS),
+  planChangedAt: new BoundedMap(MAX_TRACKED_USERS),
 });
 
 const stripeLookupKeys: Readonly<Record<string, PaidPlan>> = Object.fromEntries(
@@ -339,8 +342,30 @@ export async function createApp(
       const userId = isValidUserId(candidateUserId)
         ? candidateUserId
         : undefined;
-      const planApplied = Boolean(userId && change.plan);
-      if (userId && change.plan) stores.userPlans.set(userId, change.plan);
+      // Stripe does not deliver events in order, and retries a failed one
+      // later. A plan change older than the last one applied for the user is
+      // stale: a late "updated" (active) must not undo a newer "deleted".
+      const created =
+        typeof event.created === "number" && Number.isFinite(event.created)
+          ? event.created
+          : undefined;
+      const lastChangedAt = userId
+        ? stores.planChangedAt.get(userId)
+        : undefined;
+      const stale =
+        created !== undefined &&
+        lastChangedAt !== undefined &&
+        created < lastChangedAt;
+      const planApplied = Boolean(userId && change.plan && !stale);
+      if (userId && change.plan && !stale) {
+        stores.userPlans.set(userId, change.plan);
+        if (created !== undefined) stores.planChangedAt.set(userId, created);
+      }
+      if (stale)
+        request.log.info(
+          { eventId, eventType: event.type },
+          "Stripe event is older than the last plan change and was not applied",
+        );
       if (change.plan && !userId)
         request.log.warn(
           { eventId, eventType: event.type },

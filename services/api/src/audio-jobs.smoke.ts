@@ -1,7 +1,7 @@
 import { createAuthenticatedTestApp as createApp } from "./test-app.js";
 import { strict as assert } from "node:assert";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { getAudioDir, type InMemoryStores } from "./index.js";
 import type { AudioUploadJob, Transcript, User } from "@sonolect/types";
@@ -417,6 +417,167 @@ try {
     );
   } finally {
     await reloadedApp.close();
+  }
+
+  // Chromium records audio/webm;codecs=opus, and the desktop sends that type
+  // when it creates the job and when it uploads. The language it sends
+  // reaches the transcript, which the local worker passes to the engine.
+  const opusCreated = await app.inject({
+    method: "POST",
+    url: "/audio/jobs",
+    headers: { authorization: "Bearer audio-user" },
+    payload: {
+      fileName: "sonolect-capture.webm",
+      mimeType: "audio/webm;codecs=opus",
+      sizeBytes: 5,
+      durationMs: 1_000,
+      language: "fr",
+    },
+  });
+  assert.equal(opusCreated.statusCode, 201, opusCreated.body);
+  const opusJob = opusCreated.json<AudioUploadJob>();
+  assert.equal(opusJob.mimeType, "audio/webm");
+  const opusUploaded = await app.inject({
+    method: "POST",
+    url: `/audio/jobs/${opusJob.id}/audio`,
+    headers: {
+      authorization: "Bearer audio-user",
+      "content-type": "audio/webm;codecs=opus",
+    },
+    payload: Buffer.from("opus!"),
+  });
+  assert.equal(opusUploaded.statusCode, 200, opusUploaded.body);
+  assert.equal(
+    opusUploaded.json<AudioUploadJob>().upload.mimeType,
+    "audio/webm",
+  );
+  const opusTranscript = await app.inject({
+    method: "GET",
+    url: `/transcripts/${opusJob.transcriptId}`,
+    headers: { authorization: "Bearer audio-user" },
+  });
+  assert.equal(opusTranscript.json<Transcript>().language, "fr");
+  assert.equal(transcript.language, "en");
+  const badLanguage = await app.inject({
+    method: "POST",
+    url: "/audio/jobs",
+    headers: { authorization: "Bearer audio-user" },
+    payload: {
+      mimeType: "audio/webm",
+      sizeBytes: 5,
+      durationMs: 1_000,
+      language: "--model=/etc/passwd",
+    },
+  });
+  assert.equal(badLanguage.statusCode, 400, badLanguage.body);
+
+  // The longest file name the schema accepts still fits in a file name on
+  // disk, next to the job id and the temp-file suffix.
+  const longFileName = `${"a".repeat(250)}.webm`;
+  const longNameCreated = await app.inject({
+    method: "POST",
+    url: "/audio/jobs",
+    headers: { authorization: "Bearer audio-user" },
+    payload: {
+      fileName: longFileName,
+      mimeType: "audio/webm",
+      sizeBytes: 4,
+      durationMs: 1_000,
+    },
+  });
+  assert.equal(longNameCreated.statusCode, 201, longNameCreated.body);
+  const longNameJob = longNameCreated.json<AudioUploadJob>();
+  assert.equal(longNameJob.fileName, longFileName);
+  const longNameUploaded = await app.inject({
+    method: "POST",
+    url: `/audio/jobs/${longNameJob.id}/audio`,
+    headers: {
+      authorization: "Bearer audio-user",
+      "content-type": "audio/webm",
+    },
+    payload: Buffer.from("long"),
+  });
+  assert.equal(longNameUploaded.statusCode, 200, longNameUploaded.body);
+  const longNamePath =
+    longNameUploaded.json<AudioUploadJob>().upload.localPath!;
+  assert.ok(basename(longNamePath).length <= 255);
+  assert.ok(basename(longNamePath).startsWith(longNameJob.id));
+  assert.ok(longNamePath.endsWith(".webm"));
+  assert.deepEqual(await readFile(longNamePath), Buffer.from("long"));
+
+  // Jobs created, read and uploaded at the same time against one store file
+  // must all survive: a read must never drop a job another request is
+  // writing.
+  const concurrentStorePath = join(storeDir, "concurrent-store.json");
+  const concurrentApp = await createApp({
+    logger: false,
+    audioDir,
+    storePath: concurrentStorePath,
+  });
+  try {
+    const asUser = { authorization: "Bearer concurrent-user" };
+    const createJob = (index: number) =>
+      concurrentApp.inject({
+        method: "POST",
+        url: "/audio/jobs",
+        headers: asUser,
+        payload: {
+          mimeType: "audio/webm",
+          sizeBytes: 3,
+          durationMs: 1_000 + index,
+        },
+      });
+    const first = (await createJob(0)).json<AudioUploadJob>();
+    const getFirst = () =>
+      concurrentApp.inject({
+        method: "GET",
+        url: `/audio/jobs/${first.id}`,
+        headers: asUser,
+      });
+    const burst = await Promise.all(
+      Array.from({ length: 12 }, (_, index) =>
+        index % 2 === 0 ? createJob(index + 1) : getFirst(),
+      ),
+    );
+    const createdJobs = [first];
+    for (const response of burst) {
+      assert.ok([200, 201].includes(response.statusCode), response.body);
+      if (response.statusCode === 201)
+        createdJobs.push(response.json<AudioUploadJob>());
+    }
+    const uploads = await Promise.all(
+      createdJobs.flatMap((job) => [
+        concurrentApp.inject({
+          method: "POST",
+          url: `/audio/jobs/${job.id}/audio`,
+          headers: { ...asUser, "content-type": "audio/webm" },
+          payload: Buffer.from(job.id),
+        }),
+        concurrentApp.inject({
+          method: "GET",
+          url: `/transcripts?limit=100`,
+          headers: asUser,
+        }),
+      ]),
+    );
+    for (const response of uploads)
+      assert.equal(response.statusCode, 200, response.body);
+    const stored = JSON.parse(await readFile(concurrentStorePath, "utf8")) as {
+      audioJobs: AudioUploadJob[];
+      transcripts: Transcript[];
+    };
+    assert.equal(stored.audioJobs.length, createdJobs.length);
+    assert.equal(stored.transcripts.length, createdJobs.length);
+    for (const job of createdJobs) {
+      const storedJob = stored.audioJobs.find((item) => item.id === job.id);
+      assert.equal(storedJob?.upload.storage, "local-file", job.id);
+      assert.ok(
+        stored.transcripts.some((item) => item.id === job.transcriptId),
+        job.transcriptId,
+      );
+    }
+  } finally {
+    await concurrentApp.close();
   }
 
   const invalidAudioDirPath = join(storeDir, "not-a-directory");

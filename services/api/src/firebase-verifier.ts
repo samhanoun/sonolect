@@ -8,6 +8,13 @@ const firebaseKeys = createRemoteJWKSet(
   { timeoutDuration: 5000 },
 );
 
+/**
+ * How far in the future iat and auth_time may be. Google stamps them with its
+ * own clock, and a client uses a token as soon as it gets one, so a server
+ * clock a few seconds behind would otherwise reject fresh tokens.
+ */
+const CLOCK_SKEW_SECONDS = 60;
+
 /** Verifies Firebase client ID tokens, not admin custom tokens or caller identities. */
 export function createFirebaseVerifier(
   projectId: string,
@@ -23,14 +30,14 @@ export function createFirebaseVerifier(
       audience: projectId,
       requiredClaims: ["sub", "exp", "iat", "auth_time"],
     });
-    const now = Math.floor(Date.now() / 1000);
+    const latest = Math.floor(Date.now() / 1000) + CLOCK_SKEW_SECONDS;
     if (
       !payload.sub ||
       payload.sub.length > 128 ||
       !Number.isInteger(payload.iat) ||
-      payload.iat! > now ||
+      payload.iat! > latest ||
       !Number.isInteger(payload.auth_time) ||
-      (payload.auth_time as number) > now ||
+      (payload.auth_time as number) > latest ||
       (payload.auth_time as number) < 0
     )
       throw new Error("Invalid Firebase identity claims");

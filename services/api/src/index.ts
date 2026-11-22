@@ -21,9 +21,10 @@ import { z } from "zod";
 import {
   FileTranscriptRepository,
   InMemoryTranscriptRepository,
+  InvalidCursorError,
   readFileStore,
   type TranscriptRepository,
-  writeFileStore,
+  updateFileStore,
 } from "./repositories.js";
 import {
   registerAuthMiddleware,
@@ -34,8 +35,10 @@ import {
 export {
   FileTranscriptRepository,
   InMemoryTranscriptRepository,
+  InvalidCursorError,
   readFileStore,
   type TranscriptRepository,
+  updateFileStore,
   writeFileStore,
 } from "./repositories.js";
 export {
@@ -241,6 +244,13 @@ const extensionForAudioMimeType = (mimeType: string): string => {
   return safePathSegment(subtype) || "bin";
 };
 
+/**
+ * The longest part of the client's file name kept on disk. With the job id
+ * and the temp-file suffix, the name stays under the usual 255-byte limit.
+ * The end is kept, so the extension survives.
+ */
+const MAX_STORED_FILE_NAME_CHARS = 100;
+
 const storageFileNameForAudioJob = (
   job: AudioUploadJob,
   mimeType: string,
@@ -248,7 +258,10 @@ const storageFileNameForAudioJob = (
   const configuredFileName = job.fileName?.trim();
   const safeJobId = safePathSegment(job.id);
   if (configuredFileName) {
-    return `${safeJobId}-${safePathSegment(configuredFileName)}`;
+    const safeFileName = safePathSegment(configuredFileName).slice(
+      -MAX_STORED_FILE_NAME_CHARS,
+    );
+    return `${safeJobId}-${safeFileName}`;
   }
   const extension = extensionForAudioMimeType(mimeType);
   return `${safeJobId}.${extension}`;
@@ -444,39 +457,52 @@ export async function createApp(
     (storePath
       ? new FileTranscriptRepository(storePath)
       : new InMemoryTranscriptRepository(stores.transcripts));
+  // With a store file, the file is the record: the local audio worker
+  // completes jobs in it. A read takes every job from the file. It never
+  // clears the map, so it cannot drop a job that another request is writing.
   const syncAudioJobsFromFileStore = async (): Promise<void> => {
     if (!storePath) return;
     const payload = await readFileStore(storePath);
-    stores.audioJobs.clear();
     for (const job of payload.audioJobs ?? []) {
       if (job?.id) {
         stores.audioJobs.set(job.id, job);
       }
     }
   };
-  const persistAudioJobsToFileStore = async (): Promise<void> => {
+  // Writes only this job, into the file as it is now. Other jobs in the file,
+  // and the transcripts, stay as they are.
+  const saveAudioJob = async (job: AudioUploadJob): Promise<void> => {
+    stores.audioJobs.set(job.id, job);
     if (!storePath) return;
-    const payload = await readFileStore(storePath);
-    const mergedAudioJobs = new Map<string, AudioUploadJob>();
-    for (const job of payload.audioJobs ?? []) {
-      mergedAudioJobs.set(job.id, job);
-    }
-    for (const job of Array.from(stores.audioJobs.values())) {
-      const existing = mergedAudioJobs.get(job.id);
-      const existingUpdatedAt = existing ? Date.parse(existing.updatedAt) : -1;
-      const nextUpdatedAt = Date.parse(job.updatedAt);
-      if (!existing || nextUpdatedAt >= existingUpdatedAt) {
-        mergedAudioJobs.set(job.id, job);
-      }
-    }
-    await writeFileStore(storePath, {
+    await updateFileStore(storePath, (payload) => ({
       ...payload,
-      audioJobs: Array.from(mergedAudioJobs.values()).sort((a, b) =>
-        a.createdAt.localeCompare(b.createdAt),
-      ),
-    });
+      audioJobs: [
+        ...(payload.audioJobs ?? []).filter((item) => item?.id !== job.id),
+        job,
+      ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    }));
   };
   const app = Fastify({ logger: options.logger ?? true });
+  // Set before any route, so every route uses it. A 5xx error can carry server
+  // details, such as a storage path in a file system error: it is logged and
+  // answered with a generic message. A 4xx error describes the request and
+  // keeps Fastify's answer. The rate limiter throws a plain object, not an
+  // Error, which is sent as it is with its status.
+  app.setErrorHandler((error, request, reply) => {
+    const { statusCode } = error as { statusCode?: unknown };
+    if (
+      typeof statusCode === "number" &&
+      statusCode >= 400 &&
+      statusCode < 500
+    ) {
+      reply.status(statusCode);
+      return reply.send(error);
+    }
+    request.log.error({ err: error }, "request failed");
+    return reply
+      .status(500)
+      .send({ error: "internal_error", message: "Internal server error" });
+  });
   if (production) {
     if (previewRoutesOn)
       app.log.warn(
@@ -492,8 +518,10 @@ export async function createApp(
   // Routes registered on `preview` exist only when preview routes are on.
   const preview = previewRoutesOn ? app : undefined;
 
+  // Fastify tests the pattern against the whole header, parameters included,
+  // and recorders send types such as `audio/webm;codecs=opus`.
   app.addContentTypeParser(
-    /^audio\/[a-z0-9.+-]+$/i,
+    /^audio\/[a-z0-9.+-]+(?:\s*;.*)?$/i,
     { parseAs: "buffer", bodyLimit: audioMaxBytes },
     (_request, body, done) => done(null, body),
   );
@@ -536,7 +564,7 @@ export async function createApp(
         const transcript: Transcript = {
           id: randomUUID(),
           userId,
-          language: "en",
+          language: input.language ?? "en",
           mode: "dictate",
           privacyMode: false,
           status: "processing",
@@ -565,8 +593,7 @@ export async function createApp(
           updatedAt: now,
           ...optionalProps({ fileName: input.fileName }),
         } as AudioUploadJob;
-        stores.audioJobs.set(job.id, job);
-        await persistAudioJobsToFileStore();
+        await saveAudioJob(job);
         return reply.status(201).send(job);
       } catch (error) {
         return sendValidationError(reply, error);
@@ -657,8 +684,7 @@ export async function createApp(
         },
         updatedAt: now,
       };
-      stores.audioJobs.set(updatedJob.id, updatedJob);
-      await persistAudioJobsToFileStore();
+      await saveAudioJob(updatedJob);
       return updatedJob;
     },
   );
@@ -685,6 +711,10 @@ export async function createApp(
           ...optionalProps({ nextCursor: result.nextCursor }),
         } as ListResponse<Transcript>;
       } catch (error) {
+        if (error instanceof InvalidCursorError)
+          return reply
+            .status(400)
+            .send({ error: "invalid_cursor", message: error.message });
         return sendValidationError(reply, error);
       }
     },
@@ -874,9 +904,13 @@ export async function createApp(
   );
 
   // Only routes that opt in (the paid /v1 AI routes) are limited. Runs after
-  // authentication so limits are keyed by the verified account.
-  await app.register(rateLimit, { global: false, hook: "preHandler" });
-  registerAiRoutes(app, options.aiRouteLimits, options.aiProviders);
+  // authentication (onRequest), so limits are keyed by the verified account,
+  // and before the body is read, so an account over budget cannot make the
+  // API buffer more audio.
+  await app.register(rateLimit, { global: false, hook: "preParsing" });
+  registerAiRoutes(app, options.aiRouteLimits, options.aiProviders, {
+    maxAudioBytes: audioMaxBytes,
+  });
 
   return app;
 }
