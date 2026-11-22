@@ -31,6 +31,12 @@ describe("afterShareFailure", () => {
     assert.equal(afterShareFailure("ios", abort), "dismissed");
   });
 
+  it("does nothing when a second click comes while the dialog is open", () => {
+    const busy = new Error("An earlier share has not yet completed.");
+    busy.name = "InvalidStateError";
+    assert.equal(afterShareFailure("web", busy), "dismissed");
+  });
+
   it("saves the note in a browser that would not open its dialog", () => {
     assert.equal(afterShareFailure("web", refused), "download");
     assert.equal(afterShareFailure("web", new Error("boom")), "download");
