@@ -286,6 +286,10 @@ export const REFINE_NOTICE_KINDS = [
   ...ONLINE_NOTICE_KINDS,
 ] as const satisfies readonly NoticeKind[];
 
+export function isRefineNotice(kind: NoticeKind): boolean {
+  return (REFINE_NOTICE_KINDS as readonly NoticeKind[]).includes(kind);
+}
+
 /**
  * What a refinement does to the notice: it shows its own (`next`), or
  * clears an earlier one of its own. Any other notice, such as a dictation's
@@ -297,13 +301,33 @@ export function refineNoticeChange(
   next: Notice | null,
 ): NoticeChange | null {
   if (next) return replaceNotice(status, next);
-  if (
-    current &&
-    (REFINE_NOTICE_KINDS as readonly NoticeKind[]).includes(current.kind)
-  ) {
+  if (current && isRefineNotice(current.kind)) {
     return replaceNotice(status, null);
   }
   return null;
+}
+
+/**
+ * What an online edit that failed does to the notice. Its answer can come a
+ * minute after the tap, so a notice raised since then, such as a newer
+ * dictation's error with its ATTENTION status, stays as it is. The failure
+ * shows when that loses nothing: no notice shows, a refinement's own shows,
+ * or the notice from the tap still shows with the note that was sent.
+ */
+export function lateRefineNoticeChange(input: {
+  current: Notice | null;
+  /** The notice when the note was sent. */
+  atSend: Notice | null;
+  status: CaptureStatus;
+  next: Notice;
+  /** The note that was sent is still the one on the Capture screen. */
+  noteShown: boolean;
+}): NoticeChange | null {
+  const { current } = input;
+  const nothingLost = current === null || isRefineNotice(current.kind);
+  const fromTap = current === input.atSend && input.noteShown;
+  if (!nothingLost && !fromTap) return null;
+  return refineNoticeChange(current, input.status, input.next);
 }
 
 export function noticeText(t: Strings, notice: Notice): string {

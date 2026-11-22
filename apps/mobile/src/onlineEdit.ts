@@ -48,6 +48,27 @@ export function planOnlineEdit(input: {
   });
 }
 
+/** What the store keeps about the refinement in progress. */
+export interface RefiningState {
+  refining: boolean;
+  refiningId: string | null;
+  refiningMode: RefinementMode | null;
+  sendingTo: OnlineProvider | null;
+}
+
+/**
+ * The refinement a note's card shows as busy, or null. Only the note being
+ * refined shows it: a note dictated or typed meanwhile keeps its chips.
+ */
+export function refiningFor(
+  state: Readonly<RefiningState>,
+  noteId: string,
+): { mode: RefinementMode | null; sendingTo: OnlineProvider | null } | null {
+  return state.refining && state.refiningId === noteId
+    ? { mode: state.refiningMode, sendingTo: state.sendingTo }
+    : null;
+}
+
 export type OnlineEditOutcome =
   /** Not an online edit: the store refines on the phone, as before. */
   | { kind: "local" }

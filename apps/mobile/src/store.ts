@@ -30,6 +30,7 @@ import { createKeepAwake } from "./keepAwake";
 import type { Notice, NoticeChange, NoticeKind } from "./notices";
 import {
   emptyEndOutcome,
+  lateRefineNoticeChange,
   noticeFor,
   refineNoticeChange,
   replaceNotice,
@@ -114,6 +115,11 @@ interface CompanionState {
   /** A language pack download is in progress. */
   downloading: boolean;
   refining: boolean;
+  /**
+   * The note being refined. The Capture screen shows the busy state on
+   * that note only: a note made meanwhile keeps its chips.
+   */
+  refiningId: string | null;
   /** The mode being applied while refining. */
   refiningMode: RefinementMode | null;
   /** The provider an online edit is waiting for, if any. */
@@ -452,9 +458,20 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
 
   const doneRefining = {
     refining: false,
+    refiningId: null,
     refiningMode: null,
     sendingTo: null,
   } as const;
+
+  /**
+   * Ends a note's busy state, unless the screen already shows another
+   * note's refinement, which keeps its own.
+   */
+  const finishRefining = (turnId: string) =>
+    get().refiningId === turnId ? doneRefining : {};
+
+  /** The notes being refined: one refinement at a time for each. */
+  const refiningNotes = new Set<string>();
 
   /**
    * After a 'not-allowed' error, reads the permissions again to tell a denial
@@ -672,6 +689,170 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     }
   };
 
+  /** The store's refine, for one note (see refine below). */
+  const refineNote = async (
+    turnId: string,
+    mode: RefinementMode,
+    options: { consentedTo?: OnlineChoice } | undefined,
+  ): Promise<void> => {
+    const web = Platform.OS === "web";
+    const state = get();
+    // Rewrite and Reply need a model: online editing with the user's own
+    // key, or the dormant API. Without one they are not offered.
+    const onlineReady = isOnlineEditingReady(
+      state.settings,
+      state.onlineKeySaved,
+      web,
+    );
+    if (!availableRefinementModes(onlineReady).includes(mode)) return;
+    const first = findTurn(turnId);
+    if (!first) return;
+
+    // A refinement clears only its own notices: a dictation's error stays
+    // with its ATTENTION status.
+    const clearOwnNotice = () =>
+      noticePatch(refineNoticeChange(get().notice, get().capture.status, null));
+    // Erase all, Clear history or going Ephemeral bumps the epoch.
+    const epoch = dataEpoch;
+    let sentTo: OnlineProvider | null = null;
+    // The notice when the request went out: one raised later stays.
+    let noticeAtSend = get().notice;
+    const online = await runOnlineEdit({
+      turn: first,
+      mode,
+      consentedTo: options?.consentedTo,
+      web,
+      settings: state.settings,
+      ephemeralNote: ephemeralNotes.has(turnId),
+      keySaved: state.onlineKeySaved,
+      dictionary: state.dictionary,
+      snippets: state.snippets,
+      readKey: (provider) => mobileStorage.loadProviderKey(provider),
+      // Refuses redirects on the phone too (providerFetch.ts).
+      fetchImpl: providerFetch,
+      current: () => (epoch === dataEpoch ? findTurn(turnId) : undefined),
+      onSend: (editing) => {
+        sentTo = editing.provider;
+        set({
+          refining: true,
+          refiningId: turnId,
+          refiningMode: mode,
+          sendingTo: editing.provider,
+          ...clearOwnNotice(),
+        });
+        noticeAtSend = get().notice;
+      },
+    });
+    switch (online.kind) {
+      case "ask":
+        // Nothing was sent: the Capture screen asks first.
+        return;
+      case "stale":
+        set(finishRefining(turnId));
+        return;
+      case "failed":
+        set({
+          ...finishRefining(turnId),
+          // The key was not found at send time: the chips go until one is
+          // saved again.
+          ...(online.notice === "onlineSetup" && sentTo
+            ? {
+                onlineKeySaved: {
+                  ...get().onlineKeySaved,
+                  [sentTo]: false,
+                },
+              }
+            : {}),
+          // The answer can come a minute after the tap: a notice raised
+          // since then, such as a newer dictation's error, stays.
+          ...noticePatch(
+            lateRefineNoticeChange({
+              current: get().notice,
+              atSend: noticeAtSend,
+              status: get().capture.status,
+              next: noticeFor(online.notice),
+              noteShown: get().latest?.id === turnId,
+            }),
+          ),
+        });
+        return;
+      case "applied": {
+        set(finishRefining(turnId));
+        const turn = online.turn;
+        if (get().latest?.id === turnId) set({ latest: turn });
+        if (get().history.some((item) => item.id === turnId)) {
+          await replaceTurn(turn);
+        }
+        return;
+      }
+      case "local":
+        break;
+    }
+
+    const { history, settings, apiToken, dictionary, snippets } = get();
+    const source = findTurn(turnId);
+    if (!source) return;
+    set({
+      refining: true,
+      refiningId: turnId,
+      refiningMode: mode,
+      sendingTo: null,
+      ...clearOwnNotice(),
+    });
+
+    let refined: TranscriptTurn | null = null;
+    let notice: Notice | null = null;
+    try {
+      const context = { language: source.language, dictionary, snippets };
+      let refinedText = refineLocally(source.rawText, mode, context);
+
+      const config = apiConfig(settings, apiToken);
+      if (config.apiUrl) {
+        const result = await refineWithApi(
+          source.rawText,
+          stylePresetForMode(mode),
+          config,
+          {
+            locale: source.language,
+            dictionary: dictionary.map((entry) => ({
+              spoken: entry.spoken,
+              written: entry.replacement,
+            })),
+          },
+        );
+        if (result.status === "completed") refinedText = result.text;
+        else if (modeNeedsModel(mode)) notice = noticeFor("needsModel");
+      } else if (modeNeedsModel(mode)) {
+        notice = noticeFor("needsModel");
+      }
+
+      refined = {
+        ...source,
+        mode,
+        refinedText,
+        syncState:
+          source.syncState === "synced" || source.syncState === "queued"
+            ? "queued"
+            : source.syncState,
+      };
+    } catch {
+      // The note stays as it was. The Capture screen calls `void refine()`,
+      // so a throw would only be an unhandled rejection: say so instead.
+      notice = noticeFor("refineFailed");
+    }
+    set({
+      ...finishRefining(turnId),
+      ...noticePatch(
+        refineNoticeChange(get().notice, get().capture.status, notice),
+      ),
+    });
+    if (!refined) return;
+    if (get().latest?.id === turnId) set({ latest: refined });
+    if (history.some((turn) => turn.id === turnId)) {
+      await replaceTurn(refined);
+    }
+  };
+
   return {
     hydrated: false,
     // Until hydrate reads the stored settings, and if it cannot.
@@ -686,6 +867,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     storageDegraded: false,
     downloading: false,
     refining: false,
+    refiningId: null,
     refiningMode: null,
     sendingTo: null,
     onlineKeySaved: { ...NO_PROVIDER_KEYS },
@@ -899,151 +1081,15 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     },
 
     refine: async (turnId, mode, options) => {
-      const web = Platform.OS === "web";
-      const state = get();
-      // Rewrite and Reply need a model: online editing with the user's own
-      // key, or the dormant API. Without one they are not offered.
-      const onlineReady = isOnlineEditingReady(
-        state.settings,
-        state.onlineKeySaved,
-        web,
-      );
-      if (!availableRefinementModes(onlineReady).includes(mode)) return;
-      // One refinement at a time: the chips are disabled meanwhile.
-      if (state.refining) return;
-      const first = findTurn(turnId);
-      if (!first) return;
-
-      // A refinement clears only its own notices: a dictation's error stays
-      // with its ATTENTION status.
-      const clearOwnNotice = () =>
-        noticePatch(
-          refineNoticeChange(get().notice, get().capture.status, null),
-        );
-      // Erase all, Clear history or going Ephemeral bumps the epoch.
-      const epoch = dataEpoch;
-      let sentTo: OnlineProvider | null = null;
-      const online = await runOnlineEdit({
-        turn: first,
-        mode,
-        consentedTo: options?.consentedTo,
-        web,
-        settings: state.settings,
-        ephemeralNote: ephemeralNotes.has(turnId),
-        keySaved: state.onlineKeySaved,
-        dictionary: state.dictionary,
-        snippets: state.snippets,
-        readKey: (provider) => mobileStorage.loadProviderKey(provider),
-        // Refuses redirects on the phone too (providerFetch.ts).
-        fetchImpl: providerFetch,
-        current: () => (epoch === dataEpoch ? findTurn(turnId) : undefined),
-        onSend: (editing) => {
-          sentTo = editing.provider;
-          set({
-            refining: true,
-            refiningMode: mode,
-            sendingTo: editing.provider,
-            ...clearOwnNotice(),
-          });
-        },
-      });
-      switch (online.kind) {
-        case "ask":
-          // Nothing was sent: the Capture screen asks first.
-          return;
-        case "stale":
-          set(doneRefining);
-          return;
-        case "failed":
-          set({
-            ...doneRefining,
-            // The key was not found at send time: the chips go until one is
-            // saved again.
-            ...(online.notice === "onlineSetup" && sentTo
-              ? {
-                  onlineKeySaved: {
-                    ...get().onlineKeySaved,
-                    [sentTo]: false,
-                  },
-                }
-              : {}),
-            ...noticePatch(
-              refineNoticeChange(
-                get().notice,
-                get().capture.status,
-                noticeFor(online.notice),
-              ),
-            ),
-          });
-          return;
-        case "applied": {
-          set(doneRefining);
-          const turn = online.turn;
-          if (get().latest?.id === turnId) set({ latest: turn });
-          if (get().history.some((item) => item.id === turnId)) {
-            await replaceTurn(turn);
-          }
-          return;
-        }
-        case "local":
-          break;
-      }
-
-      const { history, settings, apiToken, dictionary, snippets } = get();
-      const source = findTurn(turnId);
-      if (!source || get().refining) return;
-      set({ refining: true, refiningMode: mode, ...clearOwnNotice() });
-
-      let refined: TranscriptTurn | null = null;
-      let notice: Notice | null = null;
+      // One refinement at a time for each note: its chips are disabled
+      // meanwhile. Another note, such as one dictated while an online edit
+      // waits for the provider, can still be refined.
+      if (refiningNotes.has(turnId)) return;
+      refiningNotes.add(turnId);
       try {
-        const context = { language: source.language, dictionary, snippets };
-        let refinedText = refineLocally(source.rawText, mode, context);
-
-        const config = apiConfig(settings, apiToken);
-        if (config.apiUrl) {
-          const result = await refineWithApi(
-            source.rawText,
-            stylePresetForMode(mode),
-            config,
-            {
-              locale: source.language,
-              dictionary: dictionary.map((entry) => ({
-                spoken: entry.spoken,
-                written: entry.replacement,
-              })),
-            },
-          );
-          if (result.status === "completed") refinedText = result.text;
-          else if (modeNeedsModel(mode)) notice = noticeFor("needsModel");
-        } else if (modeNeedsModel(mode)) {
-          notice = noticeFor("needsModel");
-        }
-
-        refined = {
-          ...source,
-          mode,
-          refinedText,
-          syncState:
-            source.syncState === "synced" || source.syncState === "queued"
-              ? "queued"
-              : source.syncState,
-        };
-      } catch {
-        // The note stays as it was. The Capture screen calls `void refine()`,
-        // so a throw would only be an unhandled rejection: say so instead.
-        notice = noticeFor("refineFailed");
-      }
-      set({
-        ...doneRefining,
-        ...noticePatch(
-          refineNoticeChange(get().notice, get().capture.status, notice),
-        ),
-      });
-      if (!refined) return;
-      if (get().latest?.id === turnId) set({ latest: refined });
-      if (history.some((turn) => turn.id === turnId)) {
-        await replaceTurn(refined);
+        await refineNote(turnId, mode, options);
+      } finally {
+        refiningNotes.delete(turnId);
       }
     },
 

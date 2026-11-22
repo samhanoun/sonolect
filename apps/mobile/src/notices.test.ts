@@ -13,6 +13,7 @@ import {
   actionLabel,
   emptyEndOutcome,
   isStorageNotice,
+  lateRefineNoticeChange,
   noticeFor,
   noticeText,
   onlineFailureNotice,
@@ -317,6 +318,79 @@ describe("refineNoticeChange", () => {
       notice: failed,
       resetStatus: false,
     });
+  });
+});
+
+describe("lateRefineNoticeChange", () => {
+  const timeout = noticeFor("onlineTimeout");
+
+  it("keeps a notice raised after the tap, and its ATTENTION status", () => {
+    // A newer dictation failed while the provider was answering.
+    const micDenied = noticeFor("micDenied");
+    for (const noteShown of [true, false]) {
+      assert.equal(
+        lateRefineNoticeChange({
+          current: micDenied,
+          atSend: null,
+          status: "error",
+          next: timeout,
+          noteShown,
+        }),
+        null,
+      );
+    }
+    // Not even an equal notice raised again counts as the one from the tap.
+    assert.equal(
+      lateRefineNoticeChange({
+        current: noticeFor("storageWriteError"),
+        atSend: noticeFor("storageWriteError"),
+        status: "ready",
+        next: timeout,
+        noteShown: true,
+      }),
+      null,
+    );
+  });
+
+  it("shows the failure when no other notice would be lost", () => {
+    for (const current of [null, noticeFor("onlineNetwork")]) {
+      for (const noteShown of [true, false]) {
+        assert.deepEqual(
+          lateRefineNoticeChange({
+            current,
+            atSend: null,
+            status: "ready",
+            next: timeout,
+            noteShown,
+          }),
+          { notice: timeout, resetStatus: false },
+        );
+      }
+    }
+  });
+
+  it("replaces the notice from the tap only while that note is shown", () => {
+    const network = noticeFor("network");
+    assert.deepEqual(
+      lateRefineNoticeChange({
+        current: network,
+        atSend: network,
+        status: "error",
+        next: timeout,
+        noteShown: true,
+      }),
+      { notice: timeout, resetStatus: true },
+    );
+    assert.equal(
+      lateRefineNoticeChange({
+        current: network,
+        atSend: network,
+        status: "error",
+        next: timeout,
+        noteShown: false,
+      }),
+      null,
+    );
   });
 });
 

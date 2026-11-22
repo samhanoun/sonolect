@@ -20,6 +20,7 @@ import { strings } from "../src/i18n";
 import { formatDuration } from "../src/library";
 import { actionLabel, noticeText, type NoticeAction } from "../src/notices";
 import type { RefinementMode } from "../src/domain";
+import { refiningFor } from "../src/onlineEdit";
 import {
   PROVIDER_NAMES,
   isOnlineEditingReady,
@@ -68,6 +69,7 @@ export default function CaptureScreen() {
   const storePlan = useCompanionStore((s) => s.plan);
   const downloading = useCompanionStore((s) => s.downloading);
   const refining = useCompanionStore((s) => s.refining);
+  const refiningId = useCompanionStore((s) => s.refiningId);
   const refiningMode = useCompanionStore((s) => s.refiningMode);
   const sendingTo = useCompanionStore((s) => s.sendingTo);
   const onlineKeySaved = useCompanionStore((s) => s.onlineKeySaved);
@@ -126,6 +128,11 @@ export default function CaptureScreen() {
   )
     ? settings.onlineEditing
     : undefined;
+  // Only the note being refined shows as busy: one dictated or typed while
+  // an online edit waits keeps its chips.
+  const busyNote = latest
+    ? refiningFor({ refining, refiningId, refiningMode, sendingTo }, latest.id)
+    : null;
 
   useEffect(() => {
     const animation = Animated.timing(glow, {
@@ -578,10 +585,10 @@ export default function CaptureScreen() {
                     {t.modeTag[latest.mode] ?? latest.mode}
                   </Label>
                   <Label>
-                    {refining
-                      ? sendingTo
+                    {busyNote
+                      ? busyNote.sendingTo
                         ? t.settings.onlineEditing.sending(
-                            PROVIDER_NAMES[sendingTo],
+                            PROVIDER_NAMES[busyNote.sendingTo],
                           )
                         : t.capture.refining
                       : latest.source === "typed"
@@ -620,7 +627,7 @@ export default function CaptureScreen() {
                 <View style={styles.chips}>
                   {availableRefinementModes(onlineEditing !== undefined).map(
                     (mode) => {
-                      const busy = refining && refiningMode === mode;
+                      const busy = busyNote?.mode === mode;
                       // The cloud marks a chip that sends the note out.
                       const online =
                         onlineEditing !== undefined && isOnlineMode(mode)
@@ -637,8 +644,8 @@ export default function CaptureScreen() {
                           key={mode}
                           label={t.modes[mode]}
                           selected={latest.mode === mode}
-                          // One refinement at a time.
-                          disabled={refining && !busy}
+                          // One refinement at a time for this note.
+                          disabled={busyNote !== null && !busy}
                           busy={busy}
                           {...online}
                           onPress={() => void onRefine(latest.id, mode)}

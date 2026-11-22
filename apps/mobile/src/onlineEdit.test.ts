@@ -4,7 +4,12 @@ import { describe, it } from "node:test";
 import type { CompanionSettings, TranscriptTurn } from "./domain";
 import { DEFAULT_SETTINGS } from "./domain";
 import type { OnlineEditInput } from "./onlineEdit";
-import { consentCovers, planOnlineEdit, runOnlineEdit } from "./onlineEdit";
+import {
+  consentCovers,
+  planOnlineEdit,
+  refiningFor,
+  runOnlineEdit,
+} from "./onlineEdit";
 import type { OnlineEditing } from "./onlineRefine";
 import type { SecureItemStore } from "./providerKeys";
 import { createProviderKeyStore } from "./providerKeys";
@@ -444,5 +449,34 @@ describe("the key", () => {
       notice: "onlineSetup",
     });
     assert.equal(after.calls.length, 0);
+  });
+});
+
+describe("the busy state", () => {
+  it("shows only on the note that was sent", () => {
+    const state = {
+      refining: true,
+      refiningId: TURN.id,
+      refiningMode: "rewrite",
+      sendingTo: "openrouter",
+    } as const;
+    assert.deepEqual(refiningFor(state, TURN.id), {
+      mode: "rewrite",
+      sendingTo: "openrouter",
+    });
+    // A note dictated while the provider answers keeps its chips.
+    assert.equal(refiningFor(state, "turn_2"), null);
+    assert.equal(
+      refiningFor(
+        {
+          refining: false,
+          refiningId: null,
+          refiningMode: null,
+          sendingTo: null,
+        },
+        TURN.id,
+      ),
+      null,
+    );
   });
 });
