@@ -35,6 +35,7 @@ export {
   localMatches,
   openSyncEngine,
   pendingDeletesOf,
+  withSyncedVersions,
 } from "./engine";
 export {
   SyncClosedError,

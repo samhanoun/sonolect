@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { base64urlDecode } from "./encoding";
-import { openSyncEngine, pendingDeletesOf, type SyncEngine } from "./engine";
+import {
+  openSyncEngine,
+  pendingDeletesOf,
+  type SyncEngine,
+  withSyncedVersions,
+} from "./engine";
 import { SyncClosedError, SyncError } from "./errors";
 import { deriveVaultKeys, generateRootKey, recordId } from "./keys";
 import { conflictCopyId, isPastRetention, type SyncNote } from "./payload";
@@ -891,6 +896,99 @@ describe("sync engine", () => {
       server
         .records(keys.vaultId)
         .some((r) => r.rid === recordId(keys, "gone") && r.deleted),
+    );
+  });
+
+  it("a delete the app kept outside the state does not come back from a fresh state", async () => {
+    const { device, keys } = setup();
+    const a = await device();
+    const b = await device();
+    a.edit("keep", "keep me");
+    a.edit("gone", "delete me everywhere");
+    await a.engine.sync();
+    await b.engine.sync();
+    // The vault is not open (its key cannot be read): the app keeps the
+    // delete itself, stamped when it was made, then the state is forgotten.
+    const hlc = a.notes.get("gone")!.hlc;
+    const deletedAt = a.engine.stamp(hlc);
+    await a.engine.close();
+    a.notes.remove("gone");
+    const kept = await withSyncedVersions(a.state, keys.vaultId, [
+      { id: "gone", hlc, deletedAt },
+    ]);
+    assert.deepEqual(kept[0]?.synced?.hlc, hlc);
+    await a.state.clear();
+    const again = await device({ notes: a.notes, state: a.state });
+    await again.engine.recordDeletes(kept);
+    const report = await again.engine.sync();
+    assert.deepEqual(report.conflictCopies, [], "no copy of the deleted note");
+    assert.deepEqual(again.ids(), ["keep"]);
+    await b.engine.sync();
+    assert.deepEqual(b.ids(), ["keep"]);
+  });
+
+  it("a kept delete still loses to a later edit elsewhere, and keeps an edit it did not see", async () => {
+    const { device, keys, clock } = setup();
+    const a = await device();
+    const b = await device();
+    a.edit("early", "early");
+    a.edit("late", "late");
+    await a.engine.sync();
+    await b.engine.sync();
+    await a.engine.close();
+    // B edits one note before A deletes both, and the other after.
+    clock.advance(1000);
+    b.edit("early", "edited on B before the delete");
+    const unseen = b.notes.get("early")!.hlc;
+    await b.engine.sync();
+    clock.advance(1000);
+    const deletes = ["early", "late"].map((id) => {
+      const hlc = a.notes.get(id)!.hlc;
+      a.notes.remove(id);
+      return { id, hlc, deletedAt: a.engine.stamp(hlc) };
+    });
+    clock.advance(1000);
+    b.edit("late", "edited on B after the delete");
+    await b.engine.sync();
+    const kept = await withSyncedVersions(a.state, keys.vaultId, deletes);
+    await a.state.clear();
+    const again = await device({ notes: a.notes, state: a.state });
+    await again.engine.recordDeletes(kept);
+    const report = await again.engine.sync();
+    const copy = conflictCopyId("early", unseen!);
+    assert.deepEqual(report.conflictCopies, [copy]);
+    assert.equal(again.text("late"), "edited on B after the delete");
+    assert.equal(again.text(copy), "edited on B before the delete");
+    assert.deepEqual(again.ids(), sorted([copy, "late"]));
+    await b.engine.sync();
+    assert.deepEqual(b.ids(), sorted([copy, "late"]));
+  });
+
+  it("adds a synced version only from a state of the same vault that synced the note", async () => {
+    const { device, keys } = setup();
+    const a = await device();
+    a.edit("synced", "on the server");
+    await a.engine.sync();
+    a.edit("local", "never uploaded");
+    await a.engine.close();
+    const given = { hlc: { t: 1, c: 0, d: "dev" } };
+    const deletes = [
+      { id: "synced" },
+      { id: "local" },
+      { id: "given", synced: given },
+    ];
+    const filled = await withSyncedVersions(a.state, keys.vaultId, deletes);
+    assert.deepEqual(filled[0]?.synced?.hlc, a.notes.get("synced")!.hlc);
+    assert.equal(typeof filled[0]?.synced?.fp, "string");
+    assert.deepEqual(filled.slice(1), deletes.slice(1));
+    const other = deriveVaultKeys(generateRootKey(randomBytes)).vaultId;
+    assert.deepEqual(
+      await withSyncedVersions(a.state, other, deletes),
+      deletes,
+    );
+    assert.deepEqual(
+      await withSyncedVersions(createMemoryStateStore(), keys.vaultId, deletes),
+      deletes,
     );
   });
 });

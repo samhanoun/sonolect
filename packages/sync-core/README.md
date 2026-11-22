@@ -157,6 +157,14 @@ const report = await engine.sync();
   first, keeps them with the vault id, and passes them to `recordDeletes` of
   the next engine for that vault. A delete therefore still reaches the other
   devices, and a later rejoin does not bring the note back.
+  - Deletes the app holds itself and has not handed to an engine yet (made
+    while the vault was not open, at launch or with a key that could not be
+    read) go through `withSyncedVersions(state, vaultId, deletes)` first.
+    Each then carries the version of its note the state last synced, as the
+    state's own deletes do, so the next engine does not take the server's
+    copy for an edit made elsewhere and keep it as a conflict copy. An edit
+    made elsewhere after that version still wins, or is kept as a conflict
+    copy.
   - Local retention never calls it. A note that expires locally is simply
     no longer listed, and the server copy stays.
   - The engine does not import a note that `isExpired` says this device's
@@ -336,9 +344,10 @@ describes the routes. Every byte string is unpadded base64url.
 - known-answer vectors for the keys, the record ids and the envelope;
 - the pairing formats and the QR matrix;
 - the HLC, the state store and the transport error mapping;
-- 29 engine scenarios against the in-memory server: two devices, conflicts,
+- 33 engine scenarios against the in-memory server: two devices, conflicts,
   deletes beating and losing to edits, deletes dated when they were made,
   retention, paging, batching, rollback refusal, a server restored from a
   backup, a wiped server, purged tombstones, a server that answers
   `cursor_expired` and leaves records out, vault deletion, lost answers,
-  restarts, interrupted runs and deletes handed to a fresh state.
+  restarts, interrupted runs, and deletes handed to a fresh state, from the
+  saved state or kept by the app.

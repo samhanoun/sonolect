@@ -29,6 +29,7 @@ import {
   type RecordState,
   type SyncMeta,
   type SyncStateChange,
+  type SyncStateSnapshot,
   type SyncStateStore,
   cloneMeta,
 } from "./state";
@@ -1218,6 +1219,20 @@ class Engine implements SyncEngine {
   }
 }
 
+/** The version of each note a saved state last synced (the server had it), by note id. */
+function syncedVersions(
+  snapshot: SyncStateSnapshot,
+): Map<string, NonNullable<LocalDelete["synced"]>> {
+  const synced = new Map<string, NonNullable<LocalDelete["synced"]>>();
+  for (const record of snapshot.records.values())
+    if (!record.deleted && record.rev > 0)
+      synced.set(record.id, {
+        hlc: toHlc(record.hlc),
+        ...(record.fp ? { fp: record.fp } : {}),
+      });
+  return synced;
+}
+
 /**
  * The deletes a saved sync state has not uploaded yet, read without the
  * vault keys. For an app about to forget the state while the server copy
@@ -1230,9 +1245,7 @@ export async function pendingDeletesOf(
 ): Promise<{ vaultId: string; deletes: LocalDelete[] } | null> {
   const snapshot = await state.load();
   if (!snapshot) return null;
-  const synced = new Map<string, RecordState>();
-  for (const record of snapshot.records.values())
-    if (!record.deleted && record.rev > 0) synced.set(record.id, record);
+  const synced = syncedVersions(snapshot);
   return {
     vaultId: snapshot.meta.vaultId,
     deletes: Object.entries(snapshot.meta.pendingDeletes).map(
@@ -1241,18 +1254,40 @@ export async function pendingDeletesOf(
         return {
           id,
           deletedAt: toHlc(deletedAt),
-          ...(known
-            ? {
-                synced: {
-                  hlc: toHlc(known.hlc),
-                  ...(known.fp ? { fp: known.fp } : {}),
-                },
-              }
-            : {}),
+          ...(known ? { synced: known } : {}),
         };
       },
     ),
   };
+}
+
+/**
+ * Deletes the app holds itself for `vaultId`, outside the sync state (made
+ * while no engine had the vault open: at launch, or while the key could not
+ * be read), each with the version of its note that the saved state last
+ * synced, read without the vault keys. Call it, like `pendingDeletesOf`,
+ * before forgetting the state while the server copy stays, and keep what it
+ * returns: the next engine of the vault then knows the server's copy as the
+ * version that was deleted, not as an edit made elsewhere that would come
+ * back as a conflict copy. Only the exact version synced is known: an edit
+ * made elsewhere since still wins over the delete, or is kept as a conflict
+ * copy. A delete that already has `synced`, of a note the state never
+ * synced, or a state of another vault, leaves the delete as it is. Close the
+ * engine first.
+ */
+export async function withSyncedVersions(
+  state: SyncStateStore,
+  vaultId: string,
+  deletes: readonly LocalDelete[],
+): Promise<LocalDelete[]> {
+  if (deletes.every((entry) => entry.synced)) return [...deletes];
+  const snapshot = await state.load();
+  if (!snapshot || snapshot.meta.vaultId !== vaultId) return [...deletes];
+  const synced = syncedVersions(snapshot);
+  return deletes.map((entry) => {
+    const known = entry.synced ? undefined : synced.get(entry.id);
+    return known ? { ...entry, synced: known } : entry;
+  });
 }
 
 /**
