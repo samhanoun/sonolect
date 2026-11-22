@@ -303,11 +303,12 @@ joining shares every note with whoever holds the code.
 
 ## Threat model
 
-- **The server sees only:** vault ids, the SHA-256 of the bearer token
-  (one token per vault, shared by every device in it), record ids,
-  revisions, sequence numbers, the vault's epoch, which records are deletes
-  (tombstones) and when they were written, record sizes (rounded up to 256
-  bytes), timestamps, the apps' user agent, IP addresses and ciphertext.
+- **The server sees only:** vault ids, the bearer token (one token per
+  vault, shared by every device in it; the server stores only its
+  SHA-256), record ids, revisions, sequence numbers, the vault's epoch,
+  which records are deletes (tombstones) and when they were written, record
+  sizes (rounded up to 256 bytes), timestamps, the apps' user agent, IP
+  addresses and ciphertext.
 - **The server never sees:** a key, a note id or a word of a note. The apps
   never send or log the root key, `encKey` or `idKey`, and never log tokens
   or request bodies.
