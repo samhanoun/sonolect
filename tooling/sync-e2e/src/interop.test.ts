@@ -14,6 +14,11 @@ import {
   syncNote,
 } from "@sonolect/sync-core";
 
+import {
+  type TranscriptSegment,
+  segmentsFromCapture,
+  segmentsToText,
+} from "../../../apps/desktop/src/segmentEditor";
 import { createDesktopNoteStore } from "../../../apps/desktop/src/sync/desktopNotes";
 import { LOCAL_CHANGE_DELAY_MS } from "../../../apps/desktop/src/sync/syncController";
 import { SYNC_COMPANION_PREFIX } from "../../../apps/mobile/src/storageCore";
@@ -121,6 +126,42 @@ async function desktopNote(desk: Desktop, id: string) {
 /** The phone's notes with this conflict origin. */
 const phoneCopiesOf = (phone: Phone, id: string) =>
   phone.notes.history.filter((turn) => turn.conflictOf === id);
+
+/**
+ * The studio opens a note of the library (appStore's openCapture), lets
+ * `change` edit its segments, and saves it back (StudioWorkbench's
+ * update_local_capture): returns the transcript it sent.
+ */
+function studioSave(
+  desk: Desktop,
+  id: string,
+  change: (segments: TranscriptSegment[]) => TranscriptSegment[],
+) {
+  const capture = desk.capture(id);
+  assert.ok(capture, "the note is in the desktop's library");
+  const segments = change(
+    segmentsFromCapture({
+      id,
+      durationMs: capture.durationMs ?? 0,
+      transcript: capture.transcript ?? null,
+      segments: capture.segments ?? null,
+    }),
+  );
+  const transcript = segmentsToText(segments);
+  desk.native.edit(
+    id,
+    transcript,
+    segments
+      .filter((segment) => segment.text.trim())
+      .map((segment) => ({
+        startMs: Math.round(segment.startMs),
+        endMs: Math.round(Math.max(segment.startMs, segment.endMs)),
+        text: segment.text.trim(),
+        ...(segment.speaker ? { speaker: segment.speaker } : {}),
+      })),
+  );
+  return transcript;
+}
 
 const desktopCopiesOf = (desk: Desktop, id: string) =>
   [...desk.native.captures.values()].filter(
@@ -408,6 +449,56 @@ describe("desktop and phone sync through the sync service", () => {
       "the phone shows it",
     );
     assert.equal(turn?.rawText, "Buy oat milk and eggs.");
+  });
+
+  it("a studio save that changes no word keeps the phone's refined text", async () => {
+    const w = await world();
+    const { desk, phone } = await paired(w);
+    const { id } = await phone.dictate(
+      "Um so buy milk. Then call Ana about Friday.",
+      { refinedText: "Buy milk, then call Ana about Friday." },
+    );
+    await phone.sync();
+    await desk.sync();
+    assert.equal(
+      desk.capture(id)?.refinedText,
+      "Buy milk, then call Ana about Friday.",
+    );
+
+    // Only a speaker named: the studio still sends its own spacing back.
+    await w.clock.advance(10_000);
+    const sent = studioSave(desk, id, (segments) =>
+      segments.map((segment, index) =>
+        index === 0 ? { ...segment, speaker: "Ana" } : segment,
+      ),
+    );
+    assert.notEqual(sent, "Um so buy milk. Then call Ana about Friday.");
+    await desk.sync();
+    await phone.sync();
+    assert.equal(
+      desk.capture(id)?.refinedText,
+      "Buy milk, then call Ana about Friday.",
+    );
+    assert.equal(desk.capture(id)?.segments?.[0]?.speaker, "Ana");
+    assert.equal(
+      phone.turn(id)?.refinedText,
+      "Buy milk, then call Ana about Friday.",
+      "the phone still shows its refined text",
+    );
+    assert.equal(phone.turn(id)?.rawText, sent);
+
+    // A word edited in the studio: both apps show the edit.
+    await w.clock.advance(10_000);
+    const edited = studioSave(desk, id, (segments) =>
+      segments.map((segment, index) =>
+        index === 0 ? { ...segment, text: "Um so buy oat milk." } : segment,
+      ),
+    );
+    await desk.sync();
+    await phone.sync();
+    assert.equal(desk.capture(id)?.refinedText, undefined);
+    assert.equal(phone.turn(id)?.refinedText, edited);
+    assert.equal(phone.turn(id)?.rawText, edited);
   });
 
   it("deletes go both ways and stay deleted", async () => {

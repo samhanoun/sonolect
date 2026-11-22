@@ -54,6 +54,15 @@ const VAULT_ID = /^[A-Za-z0-9_-]{22}$/;
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 const ROOT_KEY = /^[A-Za-z0-9_-]{43}$/;
 
+/** local_history.rs `same_words`: the same words, whatever the spacing. */
+const sameWords = (saved: string | null, edited: string) => {
+  if (saved === null) return false;
+  const words = (text: string) => text.split(/\s+/).filter(Boolean);
+  const a = words(saved);
+  const b = words(edited);
+  return a.length === b.length && a.every((word, index) => word === b[index]);
+};
+
 /** Two entries of deletes.json are the same delete (sync.rs compares them whole). */
 const sameDelete = (a: FakeDelete, b: FakeDelete) =>
   hlcEquals(a.hlc, b.hlc) &&
@@ -134,8 +143,10 @@ export class FakeNative {
     const capture = this.captures.get(id);
     if (!capture)
       throw new Error("This recording is no longer in your library.");
-    // As local_history.rs: a text edit drops the refined text.
-    if (capture.transcript !== transcript) delete capture.refinedText;
+    // As local_history.rs: an edit that changes a word drops the refined
+    // text; one that only changes the spacing keeps it.
+    if (!sameWords(capture.transcript ?? null, transcript))
+      delete capture.refinedText;
     capture.transcript = transcript;
     if (segments) capture.segments = segments;
     capture.updatedAtMs = this.options.now();

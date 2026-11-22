@@ -460,6 +460,15 @@ fn keep_segment_extras(saved: &[super::WhisperSegment], edited: &mut [super::Whi
     }
 }
 
+/// Whether two transcripts say the same words, whatever the spacing. The
+/// studio does not send a note's text back as it was stored: it splits a
+/// text without timings into sentences, trims each segment and joins them
+/// with blank lines (a recording's own text joins them with a space), so a
+/// save that only names a speaker still changes the whitespace.
+fn same_words(saved: &str, edited: &str) -> bool {
+    saved.split_whitespace().eq(edited.split_whitespace())
+}
+
 /// Saves a studio edit. With a `base` (the version the studio opened), a
 /// note that sync changed meanwhile is not overwritten unseen: the edit
 /// becomes the note, as the latest change, and the version the studio never
@@ -496,10 +505,14 @@ fn update_record(
     };
     keep_segment_extras(&record.segments, &mut segments);
     // The studio edits the transcript, and the phone shows a note's refined
-    // text when it has one. Once the text is edited here, that refined text
+    // text when it has one. Once a word is edited here, that refined text
     // no longer says what the note says: it is dropped, so the phone shows
-    // the edit too.
-    if record.transcript.as_deref() != Some(transcript.as_str()) {
+    // the edit too. A save that changes no word keeps it.
+    if !record
+        .transcript
+        .as_deref()
+        .is_some_and(|saved| same_words(saved, &transcript))
+    {
         record.refined_text = None;
     }
     record.transcript = Some(transcript);
@@ -1542,6 +1555,96 @@ mod tests {
         let edited = read_record(&notes.captures, "3-1").unwrap();
         assert_eq!(edited.transcript.as_deref(), Some("Buy oat milk and eggs."));
         assert_eq!(edited.refined_text, None);
+    }
+
+    #[test]
+    fn a_save_that_changes_no_word_keeps_the_refined_text() {
+        let folder = tempfile::tempdir().unwrap();
+        let notes = synced_library(folder.path());
+        sync_on(notes.sync.as_ref().unwrap(), "desk");
+        // A phone dictation has no timings: the studio splits it into
+        // sentences and sends them back joined with a blank line.
+        record(&notes.captures, "3-1", 5);
+        let mut dictated = read_record(&notes.captures, "3-1").unwrap();
+        dictated.transcript = Some("Um so buy milk. Then call Ana about Friday.".into());
+        dictated.refined_text = Some("Buy milk, then call Ana about Friday.".into());
+        dictated.segments = vec![];
+        store(&notes.captures, &dictated).unwrap();
+        update_record(
+            &notes,
+            "3-1",
+            "Um so buy milk.\n\nThen call Ana about Friday.".into(),
+            vec![
+                segment(0, 1_500, "Um so buy milk.", Some("Ana")),
+                segment(1_500, 4_000, "Then call Ana about Friday.", None),
+            ],
+            None,
+        )
+        .unwrap();
+        let kept = read_record(&notes.captures, "3-1").unwrap();
+        assert_eq!(
+            kept.refined_text.as_deref(),
+            Some("Buy milk, then call Ana about Friday.")
+        );
+        assert_eq!(kept.segments[0].speaker.as_deref(), Some("Ana"));
+        // A recording made here joins its segments with a space, the studio
+        // with a blank line; the phone refined it meanwhile.
+        record(&notes.captures, "3-2", 6);
+        let mut recorded = read_record(&notes.captures, "3-2").unwrap();
+        recorded.transcript = Some("so buy milk then call Ana".into());
+        recorded.refined_text = Some("Buy milk, then call Ana.".into());
+        recorded.segments = vec![
+            segment(0, 900, "so buy milk", None),
+            segment(1_000, 2_000, "then call Ana", None),
+        ];
+        store(&notes.captures, &recorded).unwrap();
+        let named = vec![
+            segment(0, 900, "so buy milk", Some("Sam")),
+            segment(1_000, 2_000, "then call Ana", None),
+        ];
+        update_record(
+            &notes,
+            "3-2",
+            "so buy milk\n\nthen call Ana".into(),
+            named,
+            None,
+        )
+        .unwrap();
+        let kept = read_record(&notes.captures, "3-2").unwrap();
+        assert_eq!(
+            kept.refined_text.as_deref(),
+            Some("Buy milk, then call Ana.")
+        );
+        // A word edited in one segment: the phone shows the edit.
+        update_record(
+            &notes,
+            "3-2",
+            "so buy oat milk\n\nthen call Ana".into(),
+            vec![
+                segment(0, 900, "so buy oat milk", Some("Sam")),
+                segment(1_000, 2_000, "then call Ana", None),
+            ],
+            None,
+        )
+        .unwrap();
+        let edited = read_record(&notes.captures, "3-2").unwrap();
+        assert_eq!(
+            edited.transcript.as_deref(),
+            Some("so buy oat milk\n\nthen call Ana")
+        );
+        assert_eq!(edited.refined_text, None);
+    }
+
+    #[test]
+    fn same_words_ignores_only_the_spacing() {
+        assert!(same_words("a b. C d", "a b.\n\nC d"));
+        assert!(same_words("  a\tb ", "a b"));
+        assert!(same_words("", "  \n"));
+        assert!(!same_words("a b", "a c"));
+        assert!(!same_words("a b", "ab"));
+        assert!(!same_words("a b", "a b."));
+        assert!(!same_words("a b", "A b"));
+        assert!(!same_words("a b", "b a"));
     }
 
     #[test]
