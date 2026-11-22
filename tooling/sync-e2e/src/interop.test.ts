@@ -432,6 +432,31 @@ describe("desktop and phone sync through the sync service", () => {
     );
   });
 
+  it("a phone's delete not uploaded yet survives history going off and on", async () => {
+    const w = await world();
+    const { desk, phone } = await paired(w);
+    const gone = desk.native.record("Delete me everywhere.");
+    const kept = desk.native.record("Keep me.");
+    await desk.sync();
+    await phone.sync();
+    assert.ok(phone.turn(gone) && phone.turn(kept));
+
+    // Offline, the phone deletes the note; an hour later history goes off
+    // and on again, and only then is the phone back online.
+    phone.network.offline = true;
+    await phone.delete(gone);
+    await w.clock.advance(CHANGE_DELAY_MS);
+    await w.clock.advance(60 * 60_000);
+    await phone.historyOffAndOn();
+    phone.network.offline = false;
+    await phone.sync();
+    await desk.sync();
+    assert.equal(phone.turn(gone), undefined, "not back on the phone");
+    assert.ok(phone.turn(kept), "the other note downloads again");
+    assert.equal(desk.capture(gone), undefined, "deleted on the desktop");
+    assert.ok(desk.capture(kept));
+  });
+
   it("a conflict keeps the phone's losing text as a copy on the phone", async () => {
     const w = await world();
     const { desk, phone } = await paired(w);

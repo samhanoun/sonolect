@@ -1,5 +1,6 @@
 import {
   ROOT_KEY_BYTES,
+  VAULT_ID_PATTERN,
   base64urlDecode,
   base64urlEncode,
   deriveVaultKeys,
@@ -43,6 +44,8 @@ export interface SyncKeyStore {
   save(root: Uint8Array): Promise<void>;
   /** Forgets the key: the marker first, so a key left behind is deleted at the next load. */
   remove(): Promise<void>;
+  /** The vault the marker names (sync is on with its key), read without the key. */
+  vaultId(): Promise<string | null>;
 }
 
 const decodeRoot = (raw: string): Uint8Array | null => {
@@ -93,5 +96,11 @@ export function createSyncKeyStore(
       }
     },
     remove: forget,
+    async vaultId() {
+      const marker = await markers.getItem(SYNC_KEY_MARKER);
+      return typeof marker === "string" && VAULT_ID_PATTERN.test(marker)
+        ? marker
+        : null;
+    },
   };
 }

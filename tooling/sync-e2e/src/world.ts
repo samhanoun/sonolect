@@ -302,14 +302,20 @@ export async function startPhone(
   const notes = new TestPhone(clock.now);
   await notes.load();
   const secrets = new MemorySecrets();
+  /** No network on this phone while set. */
+  const network = { offline: false };
   const controller = new PhoneSyncController({
     request: createFetchRequester({
       baseUrl: SERVER_URL,
-      fetch: server.fetch,
+      fetch: (url, init) =>
+        network.offline
+          ? Promise.reject(new TypeError("Network request failed"))
+          : server.fetch(url, init),
       timers: clock.timers,
     }),
     keyStore: createSyncKeyStore(secrets, notes.kv),
     state: createKeyValueStateStore(notes.kv, SYNC_STATE_PREFIX),
+    kept: notes.kv,
     notes: notes.notes,
     randomBytes,
     now: clock.now,
@@ -324,7 +330,20 @@ export async function startPhone(
     notes,
     secrets,
     controller,
+    network,
     view: () => controller.view(),
+    /**
+     * History turned off, then on again (store.ts updateSettings): the notes
+     * are cleared on this phone only, then download again.
+     */
+    async historyOffAndOn() {
+      notes.writable = false;
+      controller.refresh();
+      await notes.wipe();
+      await controller.notesClearedLocally();
+      notes.writable = true;
+      controller.refresh();
+    },
     /** A dictation, as store.ts adds one: stamped, saved, then a change for sync. */
     async dictate(rawText: string, patch: Partial<TranscriptTurn> = {}) {
       const turn = await notes.add(

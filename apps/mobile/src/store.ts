@@ -903,10 +903,13 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       dataEpoch += 1;
       const recorded = recordDeletes(tombstones);
       set({ history: [], latest: undefined });
-      if (await persist(() => mobileStorage.clearNotes())) {
-        set({ storageDegraded: false });
-      }
+      const cleared = await persist(() => mobileStorage.clearNotes());
+      if (cleared) set({ storageDegraded: false });
       await recorded;
+      // From this phone only (the recovery screen): sync forgets what it
+      // knew, so the other devices' notes download again, and the deletes
+      // made here before still reach them.
+      if (cleared && scope === "here") await sync?.notesClearedLocally();
       sync?.refresh();
       sweepCacheWhenIdle();
     },

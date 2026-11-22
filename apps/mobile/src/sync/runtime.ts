@@ -48,6 +48,7 @@ export function createAppSync(options: {
     }),
     keyStore: createSyncKeyStore(secrets, AsyncStorage),
     state: createKeyValueStateStore(AsyncStorage, SYNC_STATE_PREFIX),
+    kept: AsyncStorage,
     notes: options.notes,
     randomBytes: secureRandomBytes,
     now: Date.now,

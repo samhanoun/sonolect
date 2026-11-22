@@ -40,11 +40,18 @@ function world() {
     const notes = new TestPhone(clock.now);
     await notes.load();
     const secrets = new MemorySecrets();
+    /** No network on this phone (or for its uploads only) while set. */
+    const link = { offline: false, uploadsFail: false };
     const make = () =>
       new SyncController({
-        request: server.request,
+        request: (request) =>
+          link.offline ||
+          (link.uploadsFail && request.path.endsWith("/records"))
+            ? Promise.reject(new TypeError("Network request failed"))
+            : server.request(request),
         keyStore: createSyncKeyStore(secrets, notes.kv),
         state: createKeyValueStateStore(notes.kv, SYNC_STATE_PREFIX),
+        kept: notes.kv,
         notes: notes.notes,
         randomBytes: testRandomBytes,
         now: clock.now,
@@ -53,7 +60,7 @@ function world() {
         paused: options.pause ?? (() => (notes.writable ? null : "historyOff")),
         retentionDays: () => options.retentionDays ?? 0,
       });
-    const device = { notes, secrets, sync: make(), make };
+    const device = { notes, secrets, link, sync: make(), make };
     return device;
   };
   return { clock, server, phone };
@@ -425,6 +432,176 @@ describe("sync controller: local changes", () => {
       0,
       "no tombstones",
     );
+  });
+
+  it("a delete not uploaded yet still reaches the others after the notes are cleared here", async () => {
+    const w = world();
+    const a = await w.phone();
+    const b = await w.phone();
+    const gone = await dictate(a, "delete me everywhere");
+    await dictate(a, "keep me");
+    await a.sync.turnOn();
+    await w.clock.advance(0);
+    await pair(a, b);
+    await w.clock.advance(0);
+    // Offline, the phone deletes a note, then history is turned off and on.
+    a.link.offline = true;
+    await a.notes.delete([gone.id], "everywhere", (t) =>
+      a.sync.recordDeletes(t),
+    );
+    await w.clock.advance(CHANGE_DELAY_MS);
+    await a.notes.wipe();
+    await a.sync.notesClearedLocally();
+    a.link.offline = false;
+    a.sync.setForeground(true);
+    await w.clock.advance(0);
+    assert.deepEqual(
+      a.notes.history.map((turn) => turn.rawText),
+      ["keep me"],
+      "the other notes download again, not the deleted one",
+    );
+    b.sync.setForeground(true);
+    await w.clock.advance(0);
+    assert.deepEqual(
+      b.notes.history.map((turn) => turn.rawText),
+      ["keep me"],
+    );
+  });
+
+  it("turning off with the server copy kept still sends the deletes made here", async () => {
+    const w = world();
+    const a = await w.phone();
+    const b = await w.phone();
+    const gone = await dictate(a, "deleted just before turning off");
+    await dictate(a, "kept");
+    await a.sync.turnOn();
+    await w.clock.advance(0);
+    await pair(a, b);
+    await w.clock.advance(0);
+    await a.notes.delete([gone.id], "everywhere", (t) =>
+      a.sync.recordDeletes(t),
+    );
+    await a.sync.turnOff(false);
+    assert.equal(a.sync.view().status, "off");
+    b.sync.setForeground(true);
+    await w.clock.advance(0);
+    assert.deepEqual(
+      b.notes.history.map((turn) => turn.rawText),
+      ["kept"],
+    );
+  });
+
+  it("keeps the deletes it could not send when turned off, and sends them on a rejoin of the vault", async () => {
+    const w = world();
+    const a = await w.phone();
+    const b = await w.phone();
+    const gone = await dictate(a, "deleted while offline");
+    await dictate(a, "kept");
+    await a.sync.turnOn();
+    await w.clock.advance(0);
+    await pair(a, b);
+    await w.clock.advance(0);
+    const code = await b.sync.pairing();
+    assert.ok(code);
+    a.link.offline = true;
+    await a.notes.delete([gone.id], "everywhere", (t) =>
+      a.sync.recordDeletes(t),
+    );
+    await a.sync.turnOff(false);
+    assert.equal(a.sync.view().status, "off");
+    a.link.offline = false;
+    // Another vault does not take them.
+    await a.sync.turnOn();
+    await w.clock.advance(0);
+    await a.sync.turnOff(false);
+    // Rejoining the vault sends them, and the note does not come back.
+    await a.sync.join(parsePairingCode(code.groups.join("")));
+    await w.clock.advance(0);
+    assert.deepEqual(
+      a.notes.history.map((turn) => turn.rawText),
+      ["kept"],
+    );
+    b.sync.setForeground(true);
+    await w.clock.advance(0);
+    assert.deepEqual(
+      b.notes.history.map((turn) => turn.rawText),
+      ["kept"],
+    );
+  });
+
+  it("a delete made at launch, before the vault is open, still reaches the others", async () => {
+    const w = world();
+    const a = await w.phone();
+    const b = await w.phone();
+    const gone = await dictate(a, "deleted at launch");
+    await dictate(a, "kept");
+    await a.sync.turnOn();
+    await w.clock.advance(0);
+    await pair(a, b);
+    await w.clock.advance(0);
+    await a.sync.shutdown();
+    // The app starts again; the note is deleted before sync has started.
+    await a.notes.restart();
+    a.sync = a.make();
+    await a.notes.delete([gone.id], "everywhere", (t) =>
+      a.sync.recordDeletes(t),
+    );
+    await a.sync.start();
+    await w.clock.advance(0);
+    b.sync.setForeground(true);
+    await w.clock.advance(0);
+    assert.deepEqual(
+      b.notes.history.map((turn) => turn.rawText),
+      ["kept"],
+    );
+    assert.deepEqual(
+      a.notes.history.map((turn) => turn.rawText),
+      ["kept"],
+    );
+  });
+
+  it("erase all keeping the server copy still sends the deletes made here", async () => {
+    const w = world();
+    const a = await w.phone();
+    const b = await w.phone();
+    const gone = await dictate(a, "deleted just before erasing");
+    await dictate(a, "kept elsewhere");
+    await a.sync.turnOn();
+    await w.clock.advance(0);
+    await pair(a, b);
+    await w.clock.advance(0);
+    await a.notes.delete([gone.id], "everywhere", (t) =>
+      a.sync.recordDeletes(t),
+    );
+    await a.sync.eraseAll(false);
+    assert.equal(a.sync.view().status, "off");
+    b.sync.setForeground(true);
+    await w.clock.advance(0);
+    assert.deepEqual(
+      b.notes.history.map((turn) => turn.rawText),
+      ["kept elsewhere"],
+    );
+  });
+
+  it("shows the notes a run wrote even when the run then failed", async () => {
+    const w = world();
+    const a = await w.phone();
+    const b = await w.phone();
+    await a.sync.turnOn();
+    await w.clock.advance(0);
+    await pair(a, b);
+    await w.clock.advance(0);
+    await dictate(a, "made on the first phone");
+    await w.clock.advance(CHANGE_DELAY_MS);
+    // The second phone pulls it, then its own upload fails.
+    await dictate(b, "made on the second phone");
+    b.link.uploadsFail = true;
+    await w.clock.advance(CHANGE_DELAY_MS);
+    assert.equal(b.sync.view().problem, "network");
+    assert.deepEqual(b.notes.history.map((turn) => turn.rawText).sort(), [
+      "made on the first phone",
+      "made on the second phone",
+    ]);
   });
 
   it("erase all deletes the server copy when asked and forgets the key and state", async () => {

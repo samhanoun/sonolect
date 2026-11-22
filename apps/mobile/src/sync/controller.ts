@@ -2,6 +2,7 @@ import {
   type Hlc,
   HlcClock,
   type HttpRequester,
+  type LocalDelete,
   type NoteStore,
   type RandomBytes,
   SYNC_ERROR_CODES,
@@ -17,8 +18,10 @@ import {
   openSyncEngine,
   pairingCodeGroups,
   pairingLink,
+  pendingDeletesOf,
 } from "@sonolect/sync-core";
 
+import { type KeptDeletesStorage, createKeptDeletes } from "./keptDeletes";
 import type { SyncKeyStore } from "./keyStore";
 import { NotesChangedError } from "./noteStore";
 import type { Timers } from "./timers";
@@ -34,6 +37,10 @@ import type { Timers } from "./timers";
  * - A refused key stops syncing until the next launch. A deleted vault
  *   turns sync off, keeping the notes.
  * - Nothing syncs while history is off or some notes could not be read.
+ * - A delete made here reaches the other devices even when the vault is
+ *   not open (yet), sync is turned off with the server copy kept, or the
+ *   notes are cleared on this phone only: what no engine holds is kept
+ *   (keptDeletes.ts) for the next engine of the same vault.
  *
  * Platform calls (storage, HTTP, timers, the clock, randomness) are passed
  * in, so the tests run it in Node with a fake clock (controller.test.ts).
@@ -78,6 +85,8 @@ export interface SyncControllerOptions {
   request: HttpRequester;
   keyStore: SyncKeyStore;
   state: SyncStateStore;
+  /** Where deletes no open vault holds are kept (AsyncStorage). */
+  kept: KeptDeletesStorage;
   notes: NoteStore;
   randomBytes: RandomBytes;
   now: () => number;
@@ -138,11 +147,13 @@ export class SyncController {
   private started = false;
   private actions: Promise<unknown> = Promise.resolve();
   private readonly offline: HlcClock;
+  private readonly kept: ReturnType<typeof createKeptDeletes>;
   private viewState: SyncView = INITIAL_VIEW;
   private readonly listeners = new Set<() => void>();
 
   constructor(private readonly options: SyncControllerOptions) {
     this.offline = new HlcClock(OFFLINE_DEVICE_ID, options.now);
+    this.kept = createKeptDeletes(options.kept);
   }
 
   // ---- what Settings reads ----
@@ -218,7 +229,11 @@ export class SyncController {
     deletes: readonly { id: string; hlc?: Hlc | undefined }[],
   ): Promise<void> {
     const engine = this.engine;
-    if (!engine || deletes.length === 0) return;
+    if (deletes.length === 0) return;
+    if (!engine) {
+      await this.keepWhileClosed(deletes);
+      return;
+    }
     // The engine records them before its first await: a run that starts
     // now does not upload these notes.
     const recorded = engine.recordDeletes(deletes);
@@ -233,13 +248,16 @@ export class SyncController {
   /**
    * The notes were deleted on this phone only (history turned off, or the
    * recovery screen): this device forgets what it knew, so they download
-   * again once history is back on. Nothing is deleted elsewhere.
+   * again once history is back on. Nothing is deleted elsewhere, but the
+   * deletes the user made here before still reach the other devices.
    */
   notesClearedLocally(): Promise<void> {
     return this.exclusive(async () => {
       const engine = this.detach();
-      if (!engine) return;
-      await engine.forget().catch(() => undefined);
+      if (!engine && this.viewState.status === "off") return;
+      await engine?.close().catch(() => undefined);
+      if (await this.keepStateDeletes())
+        await this.options.state.clear().catch(() => undefined);
       await this.openFromKeyStore();
     });
   }
@@ -296,7 +314,8 @@ export class SyncController {
       const engine = this.engine;
       if (!engine) return;
       await this.busy(async () => {
-        await this.forgetVault(engine, deleteServerCopy);
+        if (deleteServerCopy) await this.forgetVault(engine, true);
+        else await this.leaveVault(engine);
         this.update({
           status: "off",
           problem: null,
@@ -311,13 +330,19 @@ export class SyncController {
   /**
    * Erase all data: forgets the key and the sync state, after deleting the
    * server copy when asked. A failed delete throws and erases nothing.
+   * Keeping the server copy, it first tries once to upload the deletes
+   * made here; nothing is kept on the phone.
    */
   eraseAll(deleteServerCopy: boolean): Promise<void> {
     return this.exclusive(async () => {
       const engine = this.engine;
-      if (engine) await this.forgetVault(engine, deleteServerCopy);
+      if (engine) {
+        if (!deleteServerCopy) await this.pushDeletes(engine);
+        await this.forgetVault(engine, deleteServerCopy);
+      }
       this.detach();
       await this.options.state.clear().catch(() => undefined);
+      await this.kept.clear().catch(() => undefined);
       await this.options.keyStore.remove().catch(() => undefined);
       this.started = true;
       this.update({ ...INITIAL_VIEW, status: "off" });
@@ -349,7 +374,22 @@ export class SyncController {
     for (const listener of [...this.listeners]) listener();
   }
 
+  /** Opens the vault's engine, with the deletes kept for it. */
   private async openEngine(root: Uint8Array): Promise<SyncEngine> {
+    const engine = await this.openSyncEngine(root);
+    try {
+      // Before its first run: a pull must not bring back a deleted note.
+      await this.kept.take(engine.vaultId, (deletes) =>
+        engine.recordDeletes(deletes),
+      );
+    } catch (error) {
+      await engine.close().catch(() => undefined);
+      throw error;
+    }
+    return engine;
+  }
+
+  private async openSyncEngine(root: Uint8Array): Promise<SyncEngine> {
     const keys = deriveVaultKeys(root);
     const { now } = this.options;
     return openSyncEngine({
@@ -391,6 +431,8 @@ export class SyncController {
 
   /** A new or joined vault: a fresh sync state, then the key. */
   private async openNew(root: Uint8Array): Promise<void> {
+    // An earlier vault's deletes wait for a rejoin of that vault.
+    await this.keepStateDeletes();
     await this.options.state.clear();
     await this.options.keyStore.save(root);
     try {
@@ -428,6 +470,74 @@ export class SyncController {
     this.cancelTimer();
     this.update({ syncing: false });
     return engine;
+  }
+
+  /**
+   * Keeps the deletes the saved sync state has not uploaded (no engine may
+   * have it open). False when they could not be read or kept: the state
+   * must then stay, with them.
+   */
+  private async keepStateDeletes(): Promise<boolean> {
+    try {
+      const pending = await pendingDeletesOf(this.options.state);
+      if (pending) await this.kept.keep(pending.vaultId, pending.deletes);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Deletes made while sync is on but its vault is not open (at launch, or
+   * a key that cannot be read yet): kept for it, stamped now.
+   */
+  private async keepWhileClosed(
+    deletes: readonly { id: string; hlc?: Hlc | undefined }[],
+  ): Promise<void> {
+    if (this.viewState.status === "off") return;
+    const stamped: LocalDelete[] = deletes.map(({ id, hlc }) => ({
+      id,
+      ...(hlc ? { hlc } : {}),
+      deletedAt: this.offline.tick(hlc),
+    }));
+    try {
+      const vaultId = await this.options.keyStore.vaultId();
+      if (!vaultId) return;
+      await this.kept.keep(vaultId, stamped);
+      // Opened meanwhile: it takes them now.
+      const engine = this.engine;
+      if (engine?.vaultId === vaultId) {
+        await this.kept.take(vaultId, (kept) => engine.recordDeletes(kept));
+        this.noteChanged();
+      }
+    } catch (error) {
+      if (!(error instanceof SyncClosedError)) throw error;
+    }
+  }
+
+  /** One last try to upload the deletes made here, before the vault is left. */
+  private async pushDeletes(engine: SyncEngine): Promise<void> {
+    if (engine.status().pendingDeletes === 0 || this.options.paused()) return;
+    try {
+      await engine.sync();
+    } catch {
+      // Those not uploaded are kept (turning off) or go (erase all).
+    }
+  }
+
+  /**
+   * Sync turned off with the server copy kept: one last try to upload the
+   * deletes made here, then those not uploaded are kept for a rejoin of
+   * this vault, and the state is forgotten.
+   */
+  private async leaveVault(engine: SyncEngine): Promise<void> {
+    await this.pushDeletes(engine);
+    this.detach();
+    await engine.close().catch(() => undefined);
+    // Not kept: the state stays with them, and the next turn on or join
+    // keeps them first.
+    if (await this.keepStateDeletes())
+      await this.options.state.clear().catch(() => undefined);
   }
 
   /** Deletes the vault when asked (a failure throws), then forgets it here. */

@@ -63,6 +63,7 @@ async function livePhone(name: string, baseUrl: string): Promise<LivePhone> {
     request,
     keyStore: createSyncKeyStore(secrets, phone.kv),
     state: createKeyValueStateStore(phone.kv, SYNC_STATE_PREFIX),
+    kept: phone.kv,
     notes: phone.notes,
     randomBytes: testRandomBytes,
     now: Date.now,
