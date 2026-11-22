@@ -1252,13 +1252,15 @@ export function StudioLibrary({
                     )}
                   </button>
                 )}
-                <button
-                  className="studio-link"
-                  onClick={() => void saveAudio(item)}
-                >
-                  <Download size={14} />
-                  {t("studio.library.saveAudio")}
-                </button>
+                {item.hasAudio !== false && (
+                  <button
+                    className="studio-link"
+                    onClick={() => void saveAudio(item)}
+                  >
+                    <Download size={14} />
+                    {t("studio.library.saveAudio")}
+                  </button>
+                )}
                 <button
                   className="studio-link"
                   disabled={!item.transcript}

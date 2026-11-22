@@ -277,6 +277,49 @@ test.describe("high-quality recordings", () => {
       { id: "1700000000000-2", format: "file" },
     ]);
   });
+
+  test("Save audio is offered only where the recording's audio is", async ({
+    page,
+  }) => {
+    // Recordings do not sync: this note's audio stays on the phone.
+    const fromPhone: MockCapture = {
+      ...capture("1700000000000-9", 2000),
+      transcript: "From the phone.",
+      origin: "mobile",
+      hasAudio: false,
+    };
+    // Made here, but its audio was removed from this device.
+    const gone: MockCapture = {
+      ...capture("1700000000000-5", 1000),
+      transcript: "Its audio is gone.",
+      hasAudio: false,
+    };
+    await installMockTauri(page, [
+      fromPhone,
+      gone,
+      capture("1700000000000-1", 1000),
+    ]);
+    await page.goto("/");
+    await nav(page, "Library").click();
+    const cards = page.locator(".studio-card");
+    await expect(cards).toHaveCount(3);
+    const saveAudio = (text: string) =>
+      cards
+        .filter({ hasText: text })
+        .getByRole("button", { name: "Save audio" });
+
+    await expect(cards.filter({ hasText: "From the phone." })).toContainText(
+      "The recording stays on the device that made it.",
+    );
+    await expect(saveAudio("From the phone.")).toHaveCount(0);
+    await expect(cards.filter({ hasText: "Its audio is gone." })).toContainText(
+      "The audio of this recording is no longer on this device.",
+    );
+    await expect(saveAudio("Its audio is gone.")).toHaveCount(0);
+    // A recording whose audio is here still has it.
+    await expect(saveAudio("Saved words.")).toBeVisible();
+    expect(await nativeCalls(page, "read_local_capture_audio")).toEqual([]);
+  });
 });
 
 test.describe("playing compressed recordings", () => {
