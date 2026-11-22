@@ -150,8 +150,8 @@ interface CompanionState {
     mode: RefinementMode,
     options?: { consentedTo?: OnlineChoice },
   ) => Promise<void>;
-  /** What a tap on this mode's chip does: refine here, ask, or send. */
-  onlinePlan: (mode: RefinementMode) => OnlinePlan;
+  /** What a tap on a note's chip does: refine here, ask, or send. */
+  onlinePlan: (turnId: string, mode: RefinementMode) => OnlinePlan;
   deleteTurn: (turnId: string) => Promise<void>;
   togglePin: (turnId: string) => Promise<void>;
   /**
@@ -253,6 +253,12 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
   let dataEpoch = 0;
   const stillAllowed = (epoch: number) =>
     epoch === dataEpoch && keepsHistory(get().settings);
+  /**
+   * The notes dictated or typed in Ephemeral. One can stay on the Capture
+   * screen after the user leaves Ephemeral, and online editing still asks
+   * before sending it.
+   */
+  const ephemeralNotes = new Set<string>();
 
   /**
    * Runs a write to the phone's storage. A failure keeps the change in
@@ -416,6 +422,9 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
   };
 
   const addTurn = async (captured: TranscriptTurn) => {
+    if (get().settings.privacyLevel === "ephemeral") {
+      ephemeralNotes.add(captured.id);
+    }
     const { history, turn } = addNote(get().history, captured, stamp);
     set({ latest: turn });
     if (keepsHistory(get().settings)) {
@@ -920,6 +929,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         consentedTo: options?.consentedTo,
         web,
         settings: state.settings,
+        ephemeralNote: ephemeralNotes.has(turnId),
         keySaved: state.onlineKeySaved,
         dictionary: state.dictionary,
         snippets: state.snippets,
@@ -1037,7 +1047,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       }
     },
 
-    onlinePlan: (mode) => {
+    onlinePlan: (turnId, mode) => {
       const { settings, onlineKeySaved } = get();
       return planOnlineEdit({
         mode,
@@ -1045,6 +1055,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         keySaved: onlineKeySaved,
         web: Platform.OS === "web",
         consentedNow: false,
+        ephemeralNote: ephemeralNotes.has(turnId),
       });
     },
 

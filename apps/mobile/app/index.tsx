@@ -314,7 +314,7 @@ export default function CaptureScreen() {
    */
   const onRefine = async (turnId: string, mode: RefinementMode) => {
     if (consenting.current) return;
-    const plan = onlinePlan(mode);
+    const plan = onlinePlan(turnId, mode);
     if (plan.kind !== "ask") {
       await refine(turnId, mode);
       return;

@@ -343,7 +343,8 @@ export type OnlinePlan =
 /**
  * What a tap on a refinement chip does. Sending needs a saved key, a valid
  * choice and the user's agreement: for this note (consentedNow), or "Always
- * allow", which Ephemeral ignores.
+ * allow", which Ephemeral ignores. A note made in Ephemeral is asked for
+ * like one, even after the user left Ephemeral.
  */
 export function planOnlineRefine(input: {
   mode: RefinementMode;
@@ -353,12 +354,15 @@ export function planOnlineRefine(input: {
   hasKey: boolean;
   web: boolean;
   consentedNow: boolean;
+  /** The note was dictated or typed while the privacy level was Ephemeral. */
+  ephemeralNote?: boolean;
 }): OnlinePlan {
   if (!isOnlineMode(input.mode)) return { kind: "local" };
   const editing = normalizeOnlineEditing(input.settings.onlineEditing);
   if (input.web || !input.hasKey || !editing) return { kind: "unavailable" };
-  const remembered =
-    editing.alwaysAllow && input.settings.privacyLevel !== "ephemeral";
+  const ephemeral =
+    input.settings.privacyLevel === "ephemeral" || input.ephemeralNote === true;
+  const remembered = editing.alwaysAllow && !ephemeral;
   return input.consentedNow || remembered
     ? { kind: "send", editing }
     : { kind: "ask", editing };

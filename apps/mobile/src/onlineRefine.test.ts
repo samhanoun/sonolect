@@ -524,6 +524,20 @@ describe("consent", () => {
       "ask",
     );
   });
+
+  it("asks for a note made in Ephemeral after the user left it", () => {
+    const always = { ...editing, alwaysAllow: true };
+    for (const privacyLevel of ["local_first", "standard"] as const) {
+      const settings = { privacyLevel, onlineEditing: always };
+      assert.equal(plan({ settings, ephemeralNote: true }), "ask");
+      assert.equal(plan({ settings, ephemeralNote: false }), "send");
+      // The dialog's Send still sends it.
+      assert.equal(
+        plan({ settings, ephemeralNote: true, consentedNow: true }),
+        "send",
+      );
+    }
+  });
 });
 
 describe("stored settings", () => {

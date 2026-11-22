@@ -132,6 +132,24 @@ describe("asking first", () => {
     );
   });
 
+  it("asks for a note made in Ephemeral after the user left Ephemeral", async () => {
+    const always = { ...EDITING, alwaysAllow: true };
+    for (const privacyLevel of ["local_first", "standard"] as const) {
+      const { input, calls, keyReads } = setup({
+        consentedTo: undefined,
+        ephemeralNote: true,
+        settings: { privacyLevel, onlineEditing: always },
+      });
+      assert.equal((await runOnlineEdit(input)).kind, "ask");
+      assert.equal(calls.length, 0);
+      assert.equal(keyReads.length, 0);
+      assert.equal(
+        (await runOnlineEdit({ ...input, consentedTo: always })).kind,
+        "applied",
+      );
+    }
+  });
+
   it("leaves Clean up, Summarize, Tasks and the web preview on the phone", async () => {
     for (const mode of ["dictate", "summarize", "task_creation"] as const) {
       const { input, calls } = setup({ mode });

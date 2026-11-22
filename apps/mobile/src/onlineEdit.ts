@@ -34,6 +34,8 @@ export function planOnlineEdit(input: {
   keySaved: Readonly<ProviderKeyStatus>;
   web: boolean;
   consentedNow: boolean;
+  /** The note was made in Ephemeral: it is asked for like one. */
+  ephemeralNote?: boolean | undefined;
 }): OnlinePlan {
   const editing = normalizeOnlineEditing(input.settings.onlineEditing);
   return planOnlineRefine({
@@ -42,6 +44,7 @@ export function planOnlineEdit(input: {
     hasKey: editing ? input.keySaved[editing.provider] : false,
     web: input.web,
     consentedNow: input.consentedNow,
+    ephemeralNote: input.ephemeralNote === true,
   });
 }
 
@@ -88,6 +91,11 @@ export interface OnlineEditInput {
   consentedTo?: OnlineChoice | undefined;
   web: boolean;
   settings: PlanSettings;
+  /**
+   * The note was dictated or typed in Ephemeral. "Send without asking"
+   * never covers it, even after the user left Ephemeral.
+   */
+  ephemeralNote?: boolean | undefined;
   keySaved: Readonly<ProviderKeyStatus>;
   dictionary: readonly DictionaryEntry[];
   snippets: readonly Snippet[];
