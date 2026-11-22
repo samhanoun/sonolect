@@ -341,6 +341,10 @@ export const en = {
   "studio.transcribe.exportFormat": "Export format",
   "studio.transcribe.export": "Export transcript",
   "studio.transcribe.exportTitle": "Sonolect transcript",
+  "studio.transcribe.previewNotice":
+    "Browser preview. You can type, edit and export text here. Recording and transcription need the Sonolect desktop app.",
+  "studio.transcribe.previewImport":
+    "The browser preview cannot transcribe audio files. Open this file in the Sonolect desktop app. Nothing was sent.",
   "studio.export.txt": "Plain text (.txt)",
   "studio.export.md": "Markdown (.md)",
   "studio.export.srt": "Subtitles (.srt)",
@@ -657,7 +661,9 @@ export const en = {
   "voice.localUnavailableApp":
     "Local transcription unavailable. Check your installed model in Settings. No audio was uploaded.",
   "voice.localUnavailablePreview":
-    "Local transcription runs in the Windows app. This browser preview did not upload any audio.",
+    "The browser preview cannot transcribe speech. Use the Sonolect desktop app. This recording was not saved or sent.",
+  "voice.previewCannotTranscribe":
+    "The browser preview cannot transcribe speech. Use the Sonolect desktop app to record and transcribe. Nothing was recorded or sent.",
   "voice.notConfigured":
     "Online transcription is not configured. Your recording stayed on this device.",
   "voice.unreachable":

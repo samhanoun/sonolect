@@ -347,6 +347,10 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.transcribe.exportFormat": "Format d'export",
   "studio.transcribe.export": "Exporter la transcription",
   "studio.transcribe.exportTitle": "Transcription Sonolect",
+  "studio.transcribe.previewNotice":
+    "Aperçu dans le navigateur. Vous pouvez saisir, modifier et exporter du texte ici. L'enregistrement et la transcription nécessitent l'application de bureau Sonolect.",
+  "studio.transcribe.previewImport":
+    "L'aperçu dans le navigateur ne peut pas transcrire de fichiers audio. Ouvrez ce fichier dans l'application de bureau Sonolect. Rien n'a été envoyé.",
   "studio.export.txt": "Texte brut (.txt)",
   "studio.export.md": "Markdown (.md)",
   "studio.export.srt": "Sous-titres (.srt)",
@@ -682,7 +686,9 @@ export const fr: Record<LocaleKeys, string> = {
   "voice.localUnavailableApp":
     "Transcription locale indisponible. Vérifiez le modèle installé dans Réglages. Aucun audio n'a été envoyé.",
   "voice.localUnavailablePreview":
-    "La transcription locale fonctionne dans l'application Windows. Cet aperçu dans le navigateur n'a envoyé aucun audio.",
+    "L'aperçu dans le navigateur ne peut pas transcrire la parole. Utilisez l'application de bureau Sonolect. Cet enregistrement n'a été ni conservé ni envoyé.",
+  "voice.previewCannotTranscribe":
+    "L'aperçu dans le navigateur ne peut pas transcrire la parole. Utilisez l'application de bureau Sonolect pour enregistrer et transcrire. Rien n'a été enregistré ni envoyé.",
   "voice.notConfigured":
     "La transcription en ligne n'est pas configurée. Votre enregistrement est resté sur cet appareil.",
   "voice.unreachable":

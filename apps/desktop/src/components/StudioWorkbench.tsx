@@ -39,7 +39,7 @@ import {
   singleCaptureId,
   type SavedCaptureSegment,
 } from "../segmentEditor";
-import { submitCapturedAudioCloud } from "../voiceApi";
+import { previewCanTranscribe, submitCapturedAudioCloud } from "../voiceApi";
 import { prepareLocalAudio } from "../localAudio";
 import { copyTranscript } from "../richClipboard";
 import {
@@ -424,6 +424,18 @@ export function StudioTranscribe({
   const importAudio = async (file?: File) => {
     if (!file) return;
     const native = isTauriRuntime();
+    // The browser preview has no speech engine: say so before the file is read.
+    if (
+      !native &&
+      !previewCanTranscribe({
+        privacyLevel: useDesktopStore.getState().privacyLevel,
+        sttProvider: preferences.stt.provider,
+      })
+    ) {
+      setMessage(t("studio.transcribe.previewImport"));
+      if (input.current) input.current.value = "";
+      return;
+    }
     if (native && isCapturing(useDesktopStore.getState().recordingState))
       return;
     if (native) useDesktopStore.setState({ importingAudio: true });
@@ -640,6 +652,9 @@ export function StudioTranscribe({
           onChange={(event) => void importAudio(event.target.files?.[0])}
         />
       </div>
+      {!isTauriRuntime() && (
+        <p className="studio-notice">{t("studio.transcribe.previewNotice")}</p>
+      )}
       <div className="studio-editor-layout">
         <section className="studio-card studio-editor">
           <div className="studio-section-heading">
