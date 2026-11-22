@@ -2,6 +2,8 @@
 
 This project keeps release validation CI-friendly and PR-safe: macOS and Windows jobs build unsigned native packages by default, while signing and updater credentials are optional secrets for protected release branches/tags.
 
+Only the native installers ship. The browser preview of the desktop Studio (`pnpm --filter @sonolect/desktop dev`) is a developer tool. It is not packaged or hosted. Outside one developer setup with a Sonolect API, it cannot record or transcribe ([voice-capture-device-readiness.md](voice-capture-device-readiness.md#browser-preview)).
+
 ## Versioning
 
 - Keep these versions identical for every release:

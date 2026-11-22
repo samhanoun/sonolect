@@ -42,6 +42,10 @@ The Linux build emits native bundles under:
 - `apps/desktop/src-tauri/target/release/bundle/deb/`
 - `apps/desktop/src-tauri/target/release/bundle/appimage/`
 
+### Desktop browser preview
+
+`pnpm --filter @sonolect/desktop dev` serves the desktop Studio in a browser. This preview is a developer tool, and the Playwright tests run against it. It is not shipped or hosted. It cannot record or transcribe: it says so before the microphone opens and sends nothing. Recording and local speech need the desktop app (`pnpm --filter @sonolect/desktop tauri dev` or an installed build). One developer setup is the exception: started with `VITE_SONOLECT_API_URL`, with Cloud enabled and Local Whisper as the speech model, the preview transcribes through that Sonolect API. See [docs/voice-capture-device-readiness.md](docs/voice-capture-device-readiness.md#browser-preview).
+
 ### Desktop local API and Whisper
 
 Sonolect is local/offline-first on desktop. If `VITE_SONOLECT_API_URL` is set, new captures can be sent to that local HTTP API; if it is not set, captures stay local. The Settings screen shows the active URL/offline state.
