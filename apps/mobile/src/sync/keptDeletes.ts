@@ -141,6 +141,27 @@ export function createKeptDeletes(storage: KeptDeletesStorage) {
         await write(storage, kept);
       });
     },
+    /**
+     * Replaces this vault's kept deletes with what `change` makes of them
+     * (sync-core's withSyncedVersions, before the vault's state is
+     * forgotten).
+     */
+    update(
+      vaultId: string,
+      change: (deletes: LocalDelete[]) => Promise<readonly LocalDelete[]>,
+    ): Promise<void> {
+      return serialized(async () => {
+        const kept = await read(storage);
+        const deletes = kept[vaultId];
+        if (!deletes) return;
+        const changed = (await change(deletes))
+          .map(parseDelete)
+          .filter((entry): entry is LocalDelete => entry !== null);
+        if (changed.length > 0) kept[vaultId] = changed;
+        else delete kept[vaultId];
+        await write(storage, kept);
+      });
+    },
     /** The ids kept for a vault (for the tests). */
     async ids(vaultId: string): Promise<string[]> {
       return serialized(async () =>

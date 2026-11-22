@@ -19,6 +19,7 @@ import {
   pairingCodeGroups,
   pairingLink,
   pendingDeletesOf,
+  withSyncedVersions,
 } from "@sonolect/sync-core";
 
 import { type KeptDeletesStorage, createKeptDeletes } from "./keptDeletes";
@@ -479,8 +480,17 @@ export class SyncController {
    */
   private async keepStateDeletes(): Promise<boolean> {
     try {
-      const pending = await pendingDeletesOf(this.options.state);
-      if (pending) await this.kept.keep(pending.vaultId, pending.deletes);
+      const { state } = this.options;
+      const pending = await pendingDeletesOf(state);
+      if (!pending) return true;
+      // Those kept while the vault was closed get the version of their
+      // note the state last synced, as the state's own deletes have it: a
+      // rejoin then knows the server's copy as the version deleted here and
+      // does not bring the note back as a conflict copy.
+      await this.kept.update(pending.vaultId, (deletes) =>
+        withSyncedVersions(state, pending.vaultId, deletes),
+      );
+      await this.kept.keep(pending.vaultId, pending.deletes);
       return true;
     } catch {
       return false;

@@ -42,6 +42,34 @@ describe("the deletes kept while no vault is open", () => {
     assert.deepEqual(await kept.ids(VAULT), ["a"]);
   });
 
+  it("updates one vault's deletes in place, such as their synced versions", async () => {
+    const kv = new MemoryKv();
+    const kept = createKeptDeletes(kv);
+    await kept.keep(VAULT, [
+      { id: "a", deletedAt: at(5) },
+      { id: "b", deletedAt: at(4) },
+    ]);
+    await kept.keep(OTHER, [{ id: "c", deletedAt: at(1) }]);
+    await kept.update(VAULT, async (deletes) =>
+      deletes.map((entry) =>
+        entry.id === "a"
+          ? { ...entry, synced: { hlc: at(2), fp: "f" } }
+          : entry,
+      ),
+    );
+    await kept.update(OTHER, async () => []);
+    const taken: unknown[] = [];
+    await kept.take(VAULT, async (deletes) => {
+      taken.push(...deletes);
+    });
+    assert.deepEqual(taken, [
+      { id: "a", deletedAt: at(5), synced: { hlc: at(2), fp: "f" } },
+      { id: "b", deletedAt: at(4) },
+    ]);
+    assert.deepEqual(await kept.ids(OTHER), []);
+    assert.equal(kv.data.has(SYNC_KEPT_DELETES_ITEM), false);
+  });
+
   it("ignores what is not a delete, and a damaged value", async () => {
     const kv = new MemoryKv();
     await kv.setItem(

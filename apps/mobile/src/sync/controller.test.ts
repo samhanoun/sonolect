@@ -560,6 +560,48 @@ describe("sync controller: local changes", () => {
     );
   });
 
+  it("a delete made while the key cannot be read stays deleted after the notes are cleared here", async () => {
+    const w = world();
+    const a = await w.phone();
+    const b = await w.phone();
+    const gone = await dictate(a, "deleted while the key was locked");
+    await dictate(a, "kept");
+    await a.sync.turnOn();
+    await w.clock.advance(0);
+    await pair(a, b);
+    await w.clock.advance(0);
+    await a.sync.shutdown();
+    // The app starts again and the key cannot be read: the vault stays
+    // closed, and the delete is kept for it.
+    await a.notes.restart();
+    a.secrets.fail = (op) => op === "get";
+    a.sync = a.make();
+    await a.sync.start();
+    assert.equal(a.sync.view().status, "loading");
+    await a.notes.delete([gone.id], "everywhere", (t) =>
+      a.sync.recordDeletes(t),
+    );
+    // History turned off and on: the notes and the sync state go.
+    await a.notes.wipe();
+    await a.sync.notesClearedLocally();
+    // Once the key can be read, the notes download again, but not the
+    // deleted one, not even as a conflict copy.
+    a.secrets.fail = () => false;
+    await a.sync.start();
+    await w.clock.advance(0);
+    assert.equal(a.sync.view().status, "on");
+    assert.deepEqual(
+      a.notes.history.map((turn) => turn.rawText),
+      ["kept"],
+    );
+    b.sync.setForeground(true);
+    await w.clock.advance(0);
+    assert.deepEqual(
+      b.notes.history.map((turn) => turn.rawText),
+      ["kept"],
+    );
+  });
+
   it("erase all keeping the server copy still sends the deletes made here", async () => {
     const w = world();
     const a = await w.phone();
