@@ -629,23 +629,20 @@ export default function CaptureScreen() {
                     label={copied ? t.capture.copied : t.capture.copy}
                     onPress={() => void copyLatest()}
                   />
-                  {currentShareTarget() === "download" ? (
-                    <Button
-                      compact
-                      icon="download"
-                      label={t.capture.download}
-                      onPress={() =>
-                        void shareText(latest.refinedText, t, latest.createdAt)
-                      }
-                    />
-                  ) : (
-                    <Button
-                      compact
-                      icon="share"
-                      label={t.capture.share}
-                      onPress={() => void shareText(latest.refinedText, t)}
-                    />
-                  )}
+                  <Button
+                    compact
+                    icon={
+                      currentShareTarget() === "download" ? "download" : "share"
+                    }
+                    label={
+                      currentShareTarget() === "download"
+                        ? t.capture.download
+                        : t.capture.share
+                    }
+                    onPress={() =>
+                      void shareText(latest.refinedText, t, latest.createdAt)
+                    }
+                  />
                 </View>
                 <View style={styles.chips}>
                   {availableRefinementModes(onlineEditing !== undefined).map(

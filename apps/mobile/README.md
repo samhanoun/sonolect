@@ -245,9 +245,11 @@ pnpm --filter @sonolect/mobile exec expo run:android   # or run:ios on macOS
 ```
 
 Browser preview (uses the Web Speech API where the browser has it; Export
-downloads the file, since most desktop browsers have no share sheet, and in
-such a browser a note's Share button becomes Download and saves the note as a
-text file):
+downloads the file. A note's Share button opens the browser's share dialog
+where there is one. Where there is none, as in Firefox, Chrome on Linux or a
+page served over plain http, it reads Download and saves the note as a text
+file, and so does a browser that refuses to open its dialog, such as in a
+frame without `allow="web-share"`):
 
 ```bash
 pnpm --filter @sonolect/mobile web

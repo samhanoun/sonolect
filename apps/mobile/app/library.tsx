@@ -208,23 +208,16 @@ export default function LibraryScreen() {
             label={copiedId === item.id ? t.capture.copied : t.capture.copy}
             onPress={() => void copyItem(item)}
           />
-          {currentShareTarget() === "download" ? (
-            <Button
-              compact
-              icon="download"
-              label={t.capture.download}
-              onPress={() =>
-                void shareText(item.refinedText, t, item.createdAt)
-              }
-            />
-          ) : (
-            <Button
-              compact
-              icon="share"
-              label={t.capture.share}
-              onPress={() => void shareText(item.refinedText, t)}
-            />
-          )}
+          <Button
+            compact
+            icon={currentShareTarget() === "download" ? "download" : "share"}
+            label={
+              currentShareTarget() === "download"
+                ? t.capture.download
+                : t.capture.share
+            }
+            onPress={() => void shareText(item.refinedText, t, item.createdAt)}
+          />
           {tts.ownerId === item.id ? (
             <Button
               compact
