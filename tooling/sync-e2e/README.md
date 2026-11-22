@@ -21,6 +21,9 @@ syncs run as they do in the apps, without waiting.
 The tests prove that:
 
 - a desktop capture reaches the phone with every field;
+- a phone dictation's segments reach the desktop, whose studio saves them as
+  subtitles, and a desktop note's segments are the phone's subtitles and go
+  back as they came;
 - the phone's edit, refine and pin come back to the desktop;
 - deletes go both ways;
 - a conflict leaves a copy on the side that loses;

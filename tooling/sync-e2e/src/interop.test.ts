@@ -10,6 +10,7 @@ import {
   NOTE_ID_PATTERN,
   base64urlEncode,
   deriveVaultKeys,
+  noteFingerprint,
   parsePairing,
   syncNote,
 } from "@sonolect/sync-core";
@@ -21,9 +22,12 @@ import {
 } from "../../../apps/desktop/src/segmentEditor";
 import { createDesktopNoteStore } from "../../../apps/desktop/src/sync/desktopNotes";
 import { LOCAL_CHANGE_DELAY_MS } from "../../../apps/desktop/src/sync/syncController";
+import { exportTranscript } from "../../../apps/desktop/src/transcriptExport";
+import type { NoteSegment } from "../../../apps/mobile/src/domain";
 import { SYNC_COMPANION_PREFIX } from "../../../apps/mobile/src/storageCore";
 import { CHANGE_DELAY_MS } from "../../../apps/mobile/src/sync/controller";
 import { SYNC_KEY_ITEM } from "../../../apps/mobile/src/sync/keyStore";
+import { subtitleCues, toSrt, toVtt } from "../../../apps/mobile/src/subtitles";
 import {
   type Desktop,
   type Phone,
@@ -711,6 +715,146 @@ describe("desktop and phone sync through the sync service", () => {
     await future.engine.close();
   });
 
+  it("a phone dictation's segments reach the desktop, whose studio saves them as subtitles", async () => {
+    const w = await world();
+    const { desk, phone } = await paired(w);
+    // As the phone's capture loop records them: what was said, when, and
+    // one part its clock timed.
+    const segments: NoteSegment[] = [
+      { startMs: 400, endMs: 1_300, text: "um so buy milk" },
+      { startMs: 1_900, endMs: 2_600, text: "and bread.", approx: true },
+      { startMs: 3_200, endMs: 4_100, text: "Then call Ana" },
+    ];
+    const rawText = segments.map((segment) => segment.text).join(" ");
+    const refinedText = "Buy milk and bread. Then call Ana.";
+    const { id } = await phone.dictate(rawText, {
+      refinedText,
+      durationMs: 4_500,
+      segments,
+    });
+    await phone.sync();
+    await desk.sync();
+    const capture = desk.capture(id);
+    assert.ok(capture, "the dictation is on the desktop");
+    assert.equal(capture.transcript, rawText);
+    assert.deepEqual(capture.segments, segments, "every time, and approx");
+    // Both apps give their engine the same note: one content hash.
+    const onDesk = await desktopNote(desk, id);
+    const onPhone = await phone.syncedNote(id);
+    assert.ok(onDesk && onPhone);
+    assert.deepEqual(onDesk, onPhone);
+    assert.equal(noteFingerprint(onDesk), noteFingerprint(onPhone));
+
+    // The studio opens it with the phone's times and saves it as SRT.
+    const opened = segmentsFromCapture({
+      id,
+      durationMs: capture.durationMs,
+      transcript: capture.transcript,
+      segments: capture.segments,
+    });
+    assert.deepEqual(
+      opened.map((segment) => [segment.startMs, segment.endMs]),
+      segments.map((segment) => [segment.startMs, segment.endMs]),
+    );
+    const srt = exportTranscript({
+      format: "srt",
+      transcript: segmentsToText(opened),
+      segments: opened,
+    }).content;
+    assert.match(srt, /^1\n00:00:00,400 --> 00:00:01,300\num so buy milk/);
+    assert.match(srt, /3\n00:00:03,200 --> 00:00:04,100\nThen call Ana/);
+
+    // A studio save that changes no word (a speaker named) keeps the
+    // phone's refined text and approx mark; the phone shows the same
+    // segments, and sends the speaker back.
+    await w.clock.advance(10_000);
+    studioSave(desk, id, (list) =>
+      list.map((segment, index) =>
+        index === 0 ? { ...segment, speaker: "Sam" } : segment,
+      ),
+    );
+    await desk.sync();
+    await phone.sync();
+    assert.equal(desk.capture(id)?.refinedText, refinedText);
+    assert.equal(desk.capture(id)?.segments[1]?.approx, true);
+    const turn = phone.turn(id);
+    assert.equal(turn?.refinedText, refinedText);
+    assert.deepEqual(turn?.segments, segments, "the speaker is not shown");
+    assert.deepEqual(await phone.syncedNote(id), await desktopNote(desk, id));
+    assert.deepEqual(phoneCopiesOf(phone, id), []);
+    assert.deepEqual(desktopCopiesOf(desk, id), []);
+
+    assertServerBlind(w.server, desk.root(), [
+      "um so buy milk",
+      "Then call Ana",
+      "Sam",
+    ]);
+  });
+
+  it("a desktop note's segments are the phone's subtitles, and go back as they came", async () => {
+    const w = await world();
+    const { desk, phone } = await paired(w);
+    const segments = [
+      { startMs: 0, endMs: 1_900, text: "Call the bakery", speaker: "Ana" },
+      {
+        startMs: 2_400,
+        endMs: 4_200,
+        text: "about the order.",
+        speaker: "Ben",
+        confidence: 0.8,
+      },
+    ];
+    const id = desk.native.record("Call the bakery about the order.", {
+      durationMs: 4_200,
+      segments,
+    });
+    await desk.sync();
+    await phone.sync();
+    const turn = phone.turn(id);
+    assert.ok(turn, "the note is on the phone");
+    assert.deepEqual(turn.segments, [
+      { startMs: 0, endMs: 1_900, text: "Call the bakery" },
+      { startMs: 2_400, endMs: 4_200, text: "about the order." },
+    ]);
+    // The phone's Subtitles of it: real times, so no approximate note.
+    const cues = subtitleCues(turn.segments!);
+    assert.equal(
+      toSrt(cues),
+      "1\n00:00:00,000 --> 00:00:01,900\nCall the bakery\n\n2\n00:00:02,400 --> 00:00:04,200\nabout the order.\n",
+    );
+    assert.ok(!toVtt(cues).includes("NOTE"));
+
+    // The phone pins it, then the desktop edits it, before either syncs.
+    // The pin changed no content, so the desktop's later edit wins with no
+    // conflict copy on either side.
+    await w.clock.advance(10_000);
+    await phone.change(id, { pinned: true });
+    await w.clock.advance(1_000);
+    desk.native.edit(id, "Call the bakery about Saturday's order.");
+    await phone.sync();
+    await desk.sync();
+    await phone.sync();
+    assert.deepEqual(desktopCopiesOf(desk, id), []);
+    assert.deepEqual(phoneCopiesOf(phone, id), []);
+    assert.equal(
+      phone.turn(id)?.rawText,
+      "Call the bakery about Saturday's order.",
+    );
+    assert.deepEqual(desk.capture(id)?.segments, segments, "as they came");
+
+    // A refine on the phone leaves the segments as they are.
+    await w.clock.advance(10_000);
+    await phone.change(id, {
+      mode: "summarize",
+      refinedText: "Bakery: Saturday's order.",
+    });
+    await phone.sync();
+    await desk.sync();
+    assert.equal(desk.capture(id)?.refinedText, "Bakery: Saturday's order.");
+    assert.deepEqual(desk.capture(id)?.segments, segments);
+    assert.deepEqual(desktopCopiesOf(desk, id), []);
+  });
+
   it("a pin on the phone keeps every segment and the whole transcript of a long desktop note", async () => {
     const w = await world();
     const { desk, phone } = await paired(w);
@@ -737,6 +881,11 @@ describe("desktop and phone sync through the sync service", () => {
     assert.equal(desk.view().problem, undefined);
     await phone.sync();
     assert.ok(phone.turn(id), "the phone has the note");
+    assert.equal(
+      phone.turn(id)?.segments,
+      undefined,
+      "too many for the phone's subtitles",
+    );
 
     // The user pins it on the phone: a change of metadata only.
     await w.clock.advance(10_000);
@@ -747,6 +896,8 @@ describe("desktop and phone sync through the sync service", () => {
     assert.equal(back?.pinned, true);
     assert.equal(back?.transcript, transcript, "the whole transcript");
     assert.deepEqual(back?.segments, segments, "every segment");
+    assert.deepEqual(desktopCopiesOf(desk, id), []);
+    assert.deepEqual(phoneCopiesOf(phone, id), []);
   });
 
   it("retention stays on each device: no deletes elsewhere, old notes not imported", async () => {
