@@ -60,9 +60,11 @@ export interface TranscriptTurn {
   conflictOf?: string;
   /**
    * When each part was said, for subtitles. Dictations from this version on,
-   * and a synced note's segments when they all fit (sync/noteMapping.ts);
-   * typed notes and older notes have none. Never changed after the capture:
-   * a refine leaves them as they are.
+   * and a synced note's segments when they all fit and have times
+   * (sync/noteMapping.ts). Typed notes have none. An older note has none,
+   * unless the desktop's studio saved it: its times are then estimates,
+   * marked approx. Never changed after the capture: a refine leaves them as
+   * they are.
    */
   segments?: NoteSegment[];
 }

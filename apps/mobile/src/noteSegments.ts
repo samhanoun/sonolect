@@ -328,16 +328,22 @@ const hasWords = (item: unknown): boolean =>
  * The segments the phone shows for a note that came through sync: all of
  * them, or none when the phone's limits (sanitizeSegments: 2 000 segments,
  * the text limit, six hours) would drop one that has words. Subtitles of
- * part of a note would be wrong. The note keeps every segment for sync
- * either way (sync/noteMapping.ts).
+ * part of a note would be wrong. A note with no length, or whose segments
+ * all have none, shows none either: those are no times. The desktop's
+ * studio gives such parts to a typed note, which lasts 0 ms. The note
+ * keeps every segment for sync either way (sync/noteMapping.ts).
  */
 export function segmentsToShow(
   value: unknown,
   maxTextLength: number,
+  durationMs: number,
 ): NoteSegment[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  if (!Array.isArray(value) || !(durationMs > 0)) return undefined;
   const segments = sanitizeSegments(value, maxTextLength);
-  return segments && segments.length === value.filter(hasWords).length
+  if (!segments || segments.length !== value.filter(hasWords).length) {
+    return undefined;
+  }
+  return segments.some((segment) => segment.endMs > segment.startMs)
     ? segments
     : undefined;
 }

@@ -179,7 +179,7 @@ export function noteToTurn(
       pinned: note.pinned,
       conflictOf: note.conflictOf,
       hlc,
-      segments: segmentsToShow(note.segments, MAX_TEXT_LENGTH),
+      segments: segmentsToShow(note.segments, MAX_TEXT_LENGTH, note.durationMs),
     },
     nowMs,
   );

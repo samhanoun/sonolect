@@ -331,7 +331,7 @@ describe("segments of a note that came through sync", () => {
   ];
 
   it("shows every segment that fits, without the fields the phone does not use", () => {
-    assert.deepEqual(segmentsToShow(desktop, 1_000), [
+    assert.deepEqual(segmentsToShow(desktop, 1_000, 3_000), [
       { startMs: 0, endMs: 1_200, text: "first" },
       { startMs: 1_200, endMs: 3_000, text: "speaker said hello" },
     ]);
@@ -340,11 +340,12 @@ describe("segments of a note that came through sync", () => {
       segmentsToShow(
         [...desktop, { startMs: 3_000, endMs: 3_100, text: " " }],
         1_000,
+        3_100,
       )?.length,
       2,
     );
-    assert.equal(segmentsToShow(undefined, 1_000), undefined);
-    assert.equal(segmentsToShow([], 1_000), undefined);
+    assert.equal(segmentsToShow(undefined, 1_000, 3_000), undefined);
+    assert.equal(segmentsToShow([], 1_000, 3_000), undefined);
   });
 
   it("shows none when the phone's limits would cut one with words", () => {
@@ -353,8 +354,12 @@ describe("segments of a note that came through sync", () => {
       endMs: i * 10 + 5,
       text: "w",
     }));
-    assert.equal(segmentsToShow(many, 1_000_000), undefined);
-    assert.equal(segmentsToShow(desktop, 10), undefined, "past the text limit");
+    assert.equal(segmentsToShow(many, 1_000_000, 30_000), undefined);
+    assert.equal(
+      segmentsToShow(desktop, 10, 3_000),
+      undefined,
+      "past the text limit",
+    );
     assert.equal(
       segmentsToShow(
         [
@@ -366,9 +371,31 @@ describe("segments of a note that came through sync", () => {
           },
         ],
         1_000,
+        MAX_SEGMENT_MS + 1_000,
       ),
       undefined,
       "past six hours",
+    );
+  });
+
+  it("shows none for times that are no times: a note of 0 ms, or parts of 0 ms", () => {
+    // What the desktop's studio saves for a typed note: its sentences
+    // spread over the note's length, 0 ms.
+    const typed = [
+      { startMs: 0, endMs: 0, text: "Buy milk.", approx: true },
+      { startMs: 0, endMs: 0, text: "Call Ana.", approx: true },
+    ];
+    assert.equal(segmentsToShow(typed, 1_000, 0), undefined);
+    assert.equal(segmentsToShow(typed, 1_000, 5_000), undefined);
+    assert.equal(segmentsToShow(desktop, 1_000, 0), undefined);
+    // One part with a length is enough.
+    assert.equal(
+      segmentsToShow(
+        [...typed, { startMs: 0, endMs: 900, text: "Then ship it." }],
+        1_000,
+        900,
+      )?.length,
+      3,
     );
   });
 

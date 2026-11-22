@@ -63,11 +63,14 @@ server stores only ciphertext. Recordings don't sync (the phone keeps none).
 - **Segments**: a dictation sends its segments with it, so the desktop gets
   when each part was said and its studio can save the note's subtitles. A
   segment the phone's clock timed carries `approx: true`, which sync-core
-  and the desktop keep like any field they do not know. The phone shows a
-  synced note's segments (without speakers) for its _Subtitles_ when they
+  and the desktop keep like any field they do not know. The desktop's
+  studio marks the parts it timed by estimate the same way. The phone shows
+  a synced note's segments (without speakers) for its _Subtitles_ when they
   all fit its limits (2,000 segments, 200,000 characters, six hours), and
-  none otherwise. It never changes them: a refine changes the refined text
-  only, and another device's segments go back as they came.
+  none otherwise. A note of 0 ms, such as a typed note, or one whose
+  segments all last 0 ms, shows none either. The phone never changes a
+  synced note's segments: a refine changes the refined text only, and
+  another device's segments go back as they came.
 
 - **Off unless the build sets a server**: `EXPO_PUBLIC_SONOLECT_SYNC_URL`
   (`src/features.ts`, checked by `config/release.cjs`). It must be https;
@@ -110,8 +113,8 @@ in `src/features.ts`, and it is `false`.
 - **Works**: on-device dictation, the library on the phone, local clean-up,
   Summary, Tasks, the Reader, export (Markdown, plain text or JSON),
   subtitles of a dictated note (SRT or WebVTT, timed by the recognizer where
-  it reports word times and by the app's clock otherwise, as the WebVTT file
-  says), Copy with the note's paragraphs and lists kept, and automatic
+  it reports word times and by the app's clock otherwise; the WebVTT file
+  says when the times are approximate), Copy with the note's paragraphs and lists kept, and automatic
   deletion of old notes (Settings, _Keep notes for_).
 - **Hidden**: the API's plaintext sync, _Rewrite_ and _Reply_ through the
   API, audio upload, and

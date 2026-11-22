@@ -411,6 +411,29 @@ describe("note mapping: segments", () => {
     assert.equal("segments" in none.back, false);
   });
 
+  it("shows no times for a typed note the desktop's studio saved, and sends them back", () => {
+    // The studio spreads a typed note's sentences over its 0 ms.
+    const typed = turnToNote(
+      phoneTurn({
+        rawText: "Buy milk. Call Ana.",
+        refinedText: "Buy milk. Call Ana.",
+        durationMs: 0,
+        source: "typed",
+      }),
+      null,
+    );
+    const note: SyncNote = {
+      ...typed,
+      segments: [
+        { startMs: 0, endMs: 0, text: "Buy milk.", approx: true },
+        { startMs: 0, endMs: 0, text: "Call Ana.", approx: true },
+      ],
+    };
+    const { turn, back } = roundTrip(note);
+    assert.equal(turn.segments, undefined, "no Subtitles");
+    assert.deepEqual(back, note);
+  });
+
   it("shows a phone dictation that came from another phone, and keeps the approx mark", () => {
     const fromPhone = turnToNote(phoneTurn({ segments: SEGMENTS }), null);
     const { turn, companion } = noteToTurn("other", fromPhone, HLC, NOW);

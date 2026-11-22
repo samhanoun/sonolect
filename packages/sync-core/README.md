@@ -254,7 +254,8 @@ back unchanged.
 - Recordings do not sync in v1, so an app must handle notes that have no
   audio.
 - A phone dictation's segments say the note's words. The phone marks a
-  segment its own clock timed with `approx: true`; a reader keeps it like
+  segment its own clock timed with `approx: true`, and the desktop's studio
+  marks the parts it timed by estimate the same way. A reader keeps it like
   any field of a segment it does not know.
 - `isPastRetention(note, days, now)` is the shared retention rule. It keeps
   pinned notes and notes whose date cannot be read.
