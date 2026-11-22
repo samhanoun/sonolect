@@ -9,7 +9,9 @@
 import {
   type Hlc,
   type HttpRequester,
+  base64urlDecode,
   compareHlc,
+  deriveVaultKeys,
   hlcEquals,
   isHlc,
 } from "@sonolect/sync-core";
@@ -35,8 +37,29 @@ interface Expected {
   hlc?: Hlc;
 }
 
+/** One delete in deletes.json (sync.rs `DeleteEntry`). */
+export interface FakeDelete {
+  /** The note's version when it was deleted. */
+  hlc?: Hlc;
+  /** When the user deleted it, stamped as the engine would. */
+  deletedAt?: Hlc;
+  /** The version the engine last synced, kept with a delete not uploaded. */
+  synced?: { hlc: Hlc; fp?: string };
+  /** Kept when sync was turned off: only an engine for this vault takes it. */
+  vault?: string;
+}
+
+const VAULT_ID = /^[A-Za-z0-9_-]{22}$/;
+
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 const ROOT_KEY = /^[A-Za-z0-9_-]{43}$/;
+
+/** Two entries of deletes.json are the same delete (sync.rs compares them whole). */
+const sameDelete = (a: FakeDelete, b: FakeDelete) =>
+  hlcEquals(a.hlc, b.hlc) &&
+  hlcEquals(a.deletedAt, b.deletedAt) &&
+  JSON.stringify(a.synced ?? null) === JSON.stringify(b.synced ?? null) &&
+  (a.vault ?? null) === (b.vault ?? null);
 
 /** What crosses the IPC boundary: JSON, as serde sees it. */
 const copy = <T>(value: T): T =>
@@ -47,7 +70,7 @@ export class FakeNative {
   /** The engine's state files, by key ("meta", "r.<c>"). */
   readonly state = new Map<string, string>();
   /** deletes.json: deletes made here that the engine has not recorded yet. */
-  readonly deletes = new Map<string, Hlc | null>();
+  readonly deletes = new Map<string, FakeDelete>();
   /** The sync key in the keychain. */
   key: string | null = null;
   /**
@@ -55,6 +78,8 @@ export class FakeNative {
    * Without it a key still in the keychain is a leftover that is never read.
    */
   keyInUse = false;
+  /** The vault the marker names (null: an earlier version's empty marker). */
+  markedVault: string | null = null;
   /** The next keychain call fails with this message (a locked keychain, say). */
   failNextKeychain: string | undefined;
   /** Every command called, in order (never with its arguments' secrets checked). */
@@ -115,10 +140,16 @@ export class FakeNative {
     this.saveLocal(capture);
   }
 
-  /** A delete the user asked for (`delete_local_capture`). */
+  /** A delete the user asked for (`delete_local_capture`), stamped now. */
   deleteByUser(id: string) {
     const capture = this.captures.get(id);
-    if (this.isOn()) this.deletes.set(id, capture?.hlc ?? null);
+    if (this.isOn()) {
+      const deletedAt = this.stamp(capture?.hlc);
+      this.deletes.set(id, {
+        ...(capture?.hlc ? { hlc: capture.hlc } : {}),
+        ...(deletedAt ? { deletedAt } : {}),
+      });
+    }
     this.captures.delete(id);
     if (this.isOn()) this.onLocalChange?.();
   }
@@ -177,6 +208,27 @@ export class FakeNative {
     return copy(await this.answer(command, copy(args))) as T;
   };
 
+  /** sync.rs `mark_key_saved`: sync is on with this key, for its vault. */
+  private mark(key: string) {
+    this.keyInUse = true;
+    this.markedVault = deriveVaultKeys(base64urlDecode(key)).vaultId;
+  }
+
+  private requestAllowed(path: string, body: string | null): boolean {
+    if (!this.keyInUse) return false;
+    if (this.markedVault === null) return true;
+    let vault: unknown;
+    if (path === "/v1/vaults") {
+      try {
+        vault = (JSON.parse(body ?? "null") as { vaultId?: unknown } | null)
+          ?.vaultId;
+      } catch {
+        vault = undefined;
+      }
+    } else vault = path.slice("/v1/vaults/".length).split(/[/?]/)[0];
+    return vault === this.markedVault;
+  }
+
   /** A keychain call: fails once after `failNextKeychain`. */
   private keychain() {
     const failure = this.failNextKeychain;
@@ -216,13 +268,16 @@ export class FakeNative {
         if (!ROOT_KEY.test(key)) throw "This is not a valid sync key.";
         if (this.keyInUse) {
           this.keychain();
-          if (this.key === key) return null;
+          if (this.key === key) {
+            this.mark(key);
+            return null;
+          }
           if (this.key !== null)
             throw "Sync is already on with another key. Turn it off first.";
         }
         this.keychain();
         this.key = key;
-        this.keyInUse = true;
+        this.mark(key);
         return null;
       }
       case "sync_key_import": {
@@ -230,16 +285,18 @@ export class FakeNative {
         if (!ROOT_KEY.test(key)) throw "This is not a valid sync key.";
         this.keychain();
         this.key = key;
-        this.keyInUse = true;
+        this.mark(key);
         return null;
       }
       case "sync_key_load":
         if (!this.keyInUse) return null;
         this.keychain();
+        if (this.key && this.markedVault === null) this.mark(this.key);
         return this.key;
       case "sync_key_forget":
         // Off first, whatever the keychain then says.
         this.keyInUse = false;
+        this.markedVault = null;
         this.keychain();
         this.key = null;
         return null;
@@ -258,21 +315,45 @@ export class FakeNative {
         if (set.meta !== undefined) this.state.set("meta", set.meta);
         return null;
       }
-      case "sync_state_clear":
+      case "sync_state_clear": {
+        // sync.rs `clear_state`: without `keep` the deletes go too; with it
+        // they stay, with those the engine had not uploaded, tagged with
+        // their vault.
+        const keep = args.keep as
+          | { vault?: string | null; deletes?: ({ id: string } & FakeDelete)[] }
+          | null
+          | undefined;
         this.state.clear();
-        this.deletes.clear();
+        if (!keep) {
+          this.deletes.clear();
+          return null;
+        }
+        const vault =
+          typeof keep.vault === "string" && VAULT_ID.test(keep.vault)
+            ? keep.vault
+            : undefined;
+        for (const entry of this.deletes.values())
+          if (entry.vault === undefined && vault) entry.vault = vault;
+        for (const { id, ...entry } of keep.deletes ?? []) {
+          if (!ID.test(id)) continue;
+          const tagged =
+            entry.vault && VAULT_ID.test(entry.vault) ? entry.vault : vault;
+          this.deletes.set(id, {
+            ...(entry.hlc ? { hlc: entry.hlc } : {}),
+            ...(entry.deletedAt ? { deletedAt: entry.deletedAt } : {}),
+            ...(entry.synced ? { synced: entry.synced } : {}),
+            ...(tagged ? { vault: tagged } : {}),
+          });
+        }
         return null;
+      }
       case "sync_pending_deletes":
-        return [...this.deletes].map(([id, hlc]) => ({
-          id,
-          ...(hlc ? { hlc } : {}),
-        }));
+        return [...this.deletes].map(([id, entry]) => ({ id, ...entry }));
       case "sync_pending_deletes_done":
-        for (const { id, hlc } of args.deletes as { id: string; hlc?: Hlc }[])
-          if (
-            this.deletes.has(id) &&
-            hlcEquals(this.deletes.get(id) ?? undefined, hlc)
-          )
+        for (const { id, ...entry } of args.deletes as ({
+          id: string;
+        } & FakeDelete)[])
+          if (this.deletes.has(id) && sameDelete(this.deletes.get(id)!, entry))
             this.deletes.delete(id);
         return null;
       case "list_sync_notes":
@@ -322,9 +403,12 @@ export class FakeNative {
             kind: "unavailable",
             message: "Sync is not available in this version of Sonolect.",
           };
-        if (this.requestFailures.length > 0) throw this.requestFailures.shift();
         const bearer = args.bearer as string | null;
         const body = args.body as string | null;
+        // sync.rs `request_allowed`: only while sync is on, for its vault.
+        if (!this.requestAllowed(String(args.path), body))
+          throw { kind: "invalid", message: "Invalid sync request." };
+        if (this.requestFailures.length > 0) throw this.requestFailures.shift();
         let response: Awaited<ReturnType<HttpRequester>>;
         try {
           response = await this.options.request({

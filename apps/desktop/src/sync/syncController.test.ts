@@ -6,6 +6,7 @@ import {
   PairingError,
   READER_VERSION,
   type SyncEngineOptions,
+  SyncError,
   base64urlDecode,
   deriveVaultKeys,
   openSyncEngine,
@@ -568,6 +569,218 @@ describe("the sync controller", () => {
     assert.equal(desk.view().phase, "off");
     assert.equal(desk.native.key, null);
     assert.equal(desk.native.state.size, 0);
+  });
+
+  it("turning off with the server copy kept still sends the deletes made here", async () => {
+    const w = world();
+    const first = await syncedDesktop(w);
+    const gone = first.native.record("Deleted just before turning off");
+    first.native.record("Kept");
+    await w.clock.advance(LOCAL_CHANGE_DELAY_MS);
+    const second = await joinedDesktop(w, first);
+    // Deleted, and sync turned off before the next sync would have run.
+    first.native.deleteByUser(gone);
+    await first.controller.turnOff({ deleteServerCopy: false });
+    assert.equal(first.view().phase, "off");
+    assert.equal(first.native.deletes.size, 0);
+    second.controller.syncNow();
+    await w.clock.advance(0);
+    assert.deepEqual(second.native.transcripts(), ["Kept"]);
+  });
+
+  it("“Delete all local data” with the server copy kept still sends the deletes made here", async () => {
+    const w = world();
+    const first = await syncedDesktop(w);
+    const gone = first.native.record("Deleted just before erasing");
+    first.native.record("Kept elsewhere");
+    await w.clock.advance(LOCAL_CHANGE_DELAY_MS);
+    const second = await joinedDesktop(w, first);
+    first.native.deleteByUser(gone);
+    await first.controller.forgetLocal();
+    assert.equal(first.view().phase, "off");
+    assert.equal(first.native.key, null);
+    assert.equal(first.native.state.size, 0);
+    second.controller.syncNow();
+    await w.clock.advance(0);
+    assert.deepEqual(second.native.transcripts(), ["Kept elsewhere"]);
+  });
+
+  it("keeps the deletes it could not send when turned off, and sends them on a rejoin of the vault", async () => {
+    const w = world();
+    const first = await syncedDesktop(w);
+    const gone = first.native.record("Deleted while offline");
+    first.native.record("Kept");
+    await w.clock.advance(LOCAL_CHANGE_DELAY_MS);
+    const second = await joinedDesktop(w, first);
+    const code = (await second.controller.pairing())!.code;
+    const vault = first.vaultId();
+    first.native.deleteByUser(gone);
+    // Offline: the last try fails, and sync turns off all the same.
+    for (let i = 0; i < 3; i++)
+      first.native.requestFailures.push({
+        kind: "network",
+        message: "The sync server could not be reached.",
+      });
+    await first.controller.turnOff({ deleteServerCopy: false });
+    assert.equal(first.view().phase, "off");
+    assert.equal(first.native.state.size, 0);
+    assert.deepEqual([...first.native.deletes.keys()], [gone]);
+    assert.equal(first.native.deletes.get(gone)?.vault, vault);
+    first.native.requestFailures.length = 0;
+
+    // Another vault does not take it.
+    await first.controller.turnOn();
+    await w.clock.advance(0);
+    assert.deepEqual([...first.native.deletes.keys()], [gone]);
+    await first.controller.turnOff({ deleteServerCopy: false });
+
+    // Rejoining the vault sends it: the note goes from the other desktop
+    // and does not come back here.
+    await first.controller.join(code);
+    await w.clock.advance(0);
+    assert.equal(first.native.deletes.size, 0);
+    assert.deepEqual(first.native.transcripts(), ["Kept"]);
+    second.controller.syncNow();
+    await w.clock.advance(0);
+    assert.deepEqual(second.native.transcripts(), ["Kept"]);
+  });
+
+  it("stays on when the keychain cannot be read at launch, and keeps the deletes made here", async () => {
+    const w = world();
+    const first = await syncedDesktop(w);
+    const gone = first.native.record("Deleted before quitting");
+    first.native.record("Kept");
+    await w.clock.advance(LOCAL_CHANGE_DELAY_MS);
+    const second = await joinedDesktop(w, first);
+    first.native.deleteByUser(gone);
+    await first.controller.close();
+
+    // The keychain is still locked when the app starts again.
+    first.native.failNextKeychain =
+      "The sync key could not be read or saved in the keychain.";
+    const again = new SyncController({
+      platform: fakePlatform(first.native.invoke, w.clock),
+      retentionDays: () => 0,
+    });
+    await again.start();
+    assert.equal(again.getView().phase, "on");
+    assert.equal(again.getView().problem?.kind, "device");
+    // Turning on or joining would put another key over this one: not offered.
+    await again.turnOn();
+    await again.join((await second.controller.pairing())!.code);
+    assert.equal(first.native.key, second.native.key);
+    assert.deepEqual([...first.native.deletes.keys()], [gone]);
+
+    // Once the keychain answers, the retry sends the delete.
+    await w.clock.advance(5 * 60_000);
+    assert.equal(again.getView().problem, undefined);
+    assert.equal(first.native.deletes.size, 0);
+    second.controller.syncNow();
+    await w.clock.advance(0);
+    assert.deepEqual(second.native.transcripts(), ["Kept"]);
+  });
+
+  it("can be turned off while the keychain cannot be read, keeping the deletes for the vault", async () => {
+    const w = world();
+    const first = await syncedDesktop(w);
+    const gone = first.native.record("Deleted before quitting");
+    await w.clock.advance(LOCAL_CHANGE_DELAY_MS);
+    first.native.deleteByUser(gone);
+    await first.controller.close();
+    const vault = first.vaultId();
+    first.native.failNextKeychain = "locked";
+    const again = new SyncController({
+      platform: fakePlatform(first.native.invoke, w.clock),
+      retentionDays: () => 0,
+    });
+    await again.start();
+    first.native.failNextKeychain = "locked";
+    await again.turnOff({ deleteServerCopy: false });
+    assert.equal(again.getView().phase, "off");
+    assert.equal(first.native.keyInUse, false);
+    assert.deepEqual(first.native.deletes.get(gone)?.vault, vault);
+  });
+
+  it("refreshes the library after a run that wrote notes and then failed", async () => {
+    const w = world();
+    let failUploads = 0;
+    const openEngine = (options: SyncEngineOptions) =>
+      openSyncEngine({
+        ...options,
+        transport: {
+          ...options.transport,
+          createVault: () => options.transport.createVault(),
+          changes: (since, limit) => options.transport.changes(since, limit),
+          deleteVault: () => options.transport.deleteVault(),
+          putRecords: (writes) => {
+            if (failUploads > 0) {
+              failUploads -= 1;
+              return Promise.reject(new SyncError("network", "offline"));
+            }
+            return options.transport.putRecords(writes);
+          },
+        },
+      });
+    const first = await syncedDesktop(w);
+    const second = await joinedDesktop(w, first, { openEngine });
+    first.native.record("Made on the first desktop");
+    await w.clock.advance(LOCAL_CHANGE_DELAY_MS);
+    // The second desktop has a note to upload too: the run pulls the first
+    // desktop's note, then its upload fails.
+    second.native.record("Made on the second desktop");
+    failUploads = 1;
+    const before = second.notesChanged();
+    await w.clock.advance(LOCAL_CHANGE_DELAY_MS);
+    assert.equal(second.view().problem?.kind, "offline");
+    assert.deepEqual(second.native.transcripts(), [
+      "Made on the first desktop",
+      "Made on the second desktop",
+    ]);
+    assert.equal(second.notesChanged(), before + 1);
+  });
+
+  it("dates a delete when the user made it, so a later edit elsewhere still wins", async () => {
+    const w = world();
+    const first = await syncedDesktop(w);
+    const id = first.native.record("Shared note");
+    await w.clock.advance(LOCAL_CHANGE_DELAY_MS);
+    const second = await joinedDesktop(w, first);
+    // Deleted here, and the app quits before the next sync.
+    first.native.deleteByUser(id);
+    await first.controller.close();
+    // An hour later the other desktop edits the note.
+    await w.clock.advance(60 * 60_000);
+    second.native.edit(id, "Edited after the delete");
+    await w.clock.advance(LOCAL_CHANGE_DELAY_MS);
+    // A day later this desktop starts again: the edit is newer and wins.
+    await w.clock.advance(DAY);
+    const again = new SyncController({
+      platform: fakePlatform(first.native.invoke, w.clock),
+      retentionDays: () => 0,
+    });
+    await again.start();
+    await w.clock.advance(0);
+    second.controller.syncNow();
+    await w.clock.advance(0);
+    assert.equal(second.native.note(id)?.transcript, "Edited after the delete");
+    assert.equal(first.native.note(id)?.transcript, "Edited after the delete");
+  });
+
+  it("sends no request while sync is off, nor for another vault", async () => {
+    const w = world();
+    const desk = await syncedDesktop(w);
+    const ours = desk.vaultId();
+    const other = deriveVaultKeys(new Uint8Array(32).fill(7)).vaultId;
+    const request = (vault: string) =>
+      desk.native.invoke("sync_request", {
+        method: "GET",
+        path: `/v1/vaults/${vault}/changes?since=0&limit=200`,
+        body: null,
+        bearer: "a".repeat(43),
+      });
+    await assert.rejects(request(other), { kind: "invalid" });
+    await desk.controller.turnOff({ deleteServerCopy: false });
+    await assert.rejects(request(ours), { kind: "invalid" });
   });
 
   it("shows the vault's lasting notices, and remembers a newer version", async () => {

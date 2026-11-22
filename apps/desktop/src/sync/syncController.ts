@@ -17,6 +17,8 @@
  */
 import {
   type Hlc,
+  type LocalDelete,
+  type NoteStore,
   type QrMatrix,
   READER_VERSION,
   SYNC_ERROR_CODES,
@@ -35,6 +37,7 @@ import {
   pairingCodeGroups,
   pairingLink,
   parsePairing,
+  pendingDeletesOf,
   qrMatrix,
 } from "@sonolect/sync-core";
 
@@ -150,10 +153,16 @@ const isConfig = (value: unknown): value is SyncConfig =>
   value !== null &&
   (value as SyncConfig).available === true;
 
-/** A delete made here that the engine has not recorded yet. */
+/** A delete made here that the engine has not recorded yet (sync.rs `PendingDelete`). */
 interface PendingDelete {
   id: string;
   hlc?: Hlc;
+  /** When the user deleted the note. */
+  deletedAt?: Hlc;
+  /** The version the engine last synced, for a delete kept while sync was off. */
+  synced?: { hlc: Hlc; fp?: string };
+  /** Kept when sync was turned off: only an engine for this vault takes it. */
+  vault?: string;
 }
 
 export class SyncController {
@@ -182,6 +191,8 @@ export class SyncController {
   private lastRunAt: number | undefined;
   private started: Promise<void> | null = null;
   private actions: Promise<unknown> = Promise.resolve();
+  /** The engine wrote, deleted or copied a local note in the run in flight. */
+  private notesTouched = false;
 
   constructor(private readonly options: SyncControllerOptions) {
     this.platform = options.platform;
@@ -215,8 +226,8 @@ export class SyncController {
     return this.exclusive(async () => {
       if (!this.view.available || this.view.phase === "on") return;
       const key = base64urlEncode(generateRootKey(this.platform.randomBytes));
-      await this.call("sync_state_clear");
       await this.call("sync_key_create", { key });
+      await this.leaveEarlierState();
       this.switchedOn();
     });
   }
@@ -230,10 +241,30 @@ export class SyncController {
     return this.exclusive(async () => {
       if (!this.view.available || this.view.phase === "on") return;
       const key = base64urlEncode(parsePairing(text));
-      await this.call("sync_state_clear");
       await this.call("sync_key_import", { key });
+      await this.leaveEarlierState();
       this.switchedOn();
     });
+  }
+
+  /**
+   * Once the new key is saved: forgets the state of an earlier vault, if
+   * any, keeping the deletes it had not uploaded for that vault. The key is
+   * saved first, so a keychain that fails leaves the earlier state (and its
+   * deletes) as it was. Should the state not be forgotten, the new key is,
+   * and sync stays off.
+   */
+  private async leaveEarlierState() {
+    try {
+      await this.forgetStateKeepingDeletes();
+    } catch (error) {
+      try {
+        await this.call("sync_key_forget");
+      } catch {
+        // The error below says what failed first.
+      }
+      throw error;
+    }
   }
 
   /** The code and QR code for another device, read from the keychain on demand. */
@@ -270,7 +301,9 @@ export class SyncController {
           // flight can no longer change a note or the state.
           if (engine) await engine.deleteVault();
         } else {
-          await this.forgetState();
+          // The server copy stays: deletes made here must still reach it.
+          await this.pushDeletes();
+          await this.forgetStateKeepingDeletes();
         }
       } catch (error) {
         this.stopping = false;
@@ -301,6 +334,8 @@ export class SyncController {
       this.stopping = true;
       this.cancelTimer();
       let failure: Error | undefined;
+      // The notes here go, but deletes made here still reach the others.
+      if (this.view.phase === "on") await this.pushDeletes();
       try {
         await this.forgetState();
       } catch (error) {
@@ -389,10 +424,17 @@ export class SyncController {
     try {
       key = await this.call<string | null>("sync_key_load");
     } catch (error) {
+      // Sync is on here (the keychain is asked only then), but the key
+      // cannot be read yet: a locked keychain, say. It stays on and tries
+      // again, and "Turn off" stays offered; turning on or joining would
+      // put another key over this one.
       this.update({
-        phase: "off",
+        phase: "on",
         problem: { kind: "device", detail: nativeError(error).message },
       });
+      const delay = this.backoff();
+      this.retryAt = this.platform.now() + delay;
+      this.schedule(delay);
       return;
     }
     if (!key) {
@@ -450,7 +492,7 @@ export class SyncController {
     const engine = await this.openEngine({
       keys,
       transport: createDesktopTransport(invoke, keys, now),
-      notes: createDesktopNoteStore(invoke),
+      notes: this.watchNotes(createDesktopNoteStore(invoke)),
       state: createDesktopStateStore(invoke),
       randomBytes,
       now,
@@ -477,6 +519,63 @@ export class SyncController {
     if (engine) await engine.forget();
     else await this.settled();
     await this.call("sync_state_clear");
+  }
+
+  /**
+   * Closes the engine and forgets its state, keeping the deletes it had not
+   * uploaded (and those it had not been handed yet) for a later rejoin of
+   * the same vault. They are read from the saved state, so this works even
+   * when the key cannot be read.
+   */
+  private async forgetStateKeepingDeletes() {
+    const engine = this.engine;
+    this.engine = null;
+    if (engine) await engine.close();
+    await this.settled();
+    const kept = await pendingDeletesOf(
+      createDesktopStateStore(this.platform.invoke),
+    );
+    await this.call("sync_state_clear", {
+      keep: { vault: kept?.vaultId ?? null, deletes: kept?.deletes ?? [] },
+    });
+  }
+
+  /**
+   * Before sync is turned off with the server copy kept: one last try to
+   * upload the deletes made here. What fails stays for later.
+   */
+  private async pushDeletes() {
+    try {
+      if (!this.engine) await this.settled();
+      const engine = this.engine ?? (await this.ensureEngine(true));
+      if (!engine) return;
+      await this.recordLocalDeletes(engine);
+      if (engine.status().pendingDeletes > 0) await engine.sync();
+    } catch {
+      // Kept: the deletes not uploaded stay for a later rejoin.
+    } finally {
+      if (this.notesTouched) {
+        this.notesTouched = false;
+        this.options.onNotesChanged?.();
+      }
+    }
+  }
+
+  /** The engine's note store, noting when a run changes a local note. */
+  private watchNotes(notes: NoteStore): NoteStore {
+    return {
+      list: () => notes.list(),
+      read: (id) => notes.read(id),
+      applyRemote: async (change) => {
+        const written = await notes.applyRemote(change);
+        if (written) this.notesTouched = true;
+        return written;
+      },
+      saveConflictCopy: async (id, note, hlc) => {
+        this.notesTouched = true;
+        await notes.saveConflictCopy(id, note, hlc);
+      },
+    };
   }
 
   /** Resolves once no run is in flight. */
@@ -547,6 +646,12 @@ export class SyncController {
     } finally {
       this.lastRunAt = this.platform.now();
       this.update({ syncing: false });
+      // Whether the run ended well or not: a page applied before a later
+      // one failed has already changed the library.
+      if (this.notesTouched) {
+        this.notesTouched = false;
+        this.options.onNotesChanged?.();
+      }
     }
     if (this.again) {
       this.again = false;
@@ -558,10 +663,19 @@ export class SyncController {
 
   /** Hands the deletes the user made here to the engine, which keeps them until they are uploaded. */
   private async recordLocalDeletes(engine: SyncEngine) {
-    const deletes = await this.call<PendingDelete[]>("sync_pending_deletes");
-    if (!deletes || deletes.length === 0) return;
+    const pending = await this.call<PendingDelete[]>("sync_pending_deletes");
+    // Those kept for another vault wait for a rejoin of that vault.
+    const deletes = (pending ?? []).filter(
+      ({ vault }) => vault === undefined || vault === engine.vaultId,
+    );
+    if (deletes.length === 0) return;
     await engine.recordDeletes(
-      deletes.map(({ id, hlc }) => ({ id, ...(hlc ? { hlc } : {}) })),
+      deletes.map(({ id, hlc, deletedAt, synced }): LocalDelete => ({
+        id,
+        ...(hlc ? { hlc } : {}),
+        ...(deletedAt ? { deletedAt } : {}),
+        ...(synced ? { synced } : {}),
+      })),
     );
     await this.call("sync_pending_deletes_done", { deletes });
   }
@@ -580,7 +694,7 @@ export class SyncController {
       },
     });
     if (report.pulled > 0 || report.conflictCopies.length > 0)
-      this.options.onNotesChanged?.();
+      this.notesTouched = true;
   }
 
   /** Decides what a failed run means; returns when to try again (null: not by itself). */

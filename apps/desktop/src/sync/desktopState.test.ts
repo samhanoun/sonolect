@@ -77,7 +77,7 @@ describe("the desktop sync state", () => {
     const store = createDesktopStateStore(device.invoke);
     await store.load();
     await store.save({ meta: meta(5), records: new Map([[RID, record]]) });
-    device.deletes.set("gone-note", null);
+    device.deletes.set("gone-note", {});
     await store.clear();
     assert.equal(device.state.size, 0);
     assert.equal(device.deletes.size, 0);
