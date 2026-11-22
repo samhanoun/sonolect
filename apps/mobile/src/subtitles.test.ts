@@ -2,6 +2,7 @@ import * as assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { MAX_CUE_CHARS } from "./noteSegments";
+import { cleanParts } from "./refine";
 import {
   MAX_LINE_CHARS,
   MIN_CUE_MS,
@@ -91,15 +92,54 @@ describe("cue lines", () => {
 });
 
 describe("subtitleCues", () => {
-  it("cleans each segment and drops what is left empty", () => {
+  it("cleans the segments as one transcript and drops what is left empty", () => {
     const cues = subtitleCues(
       [
         { startMs: 0, endMs: 1_000, text: "um hello   there" },
         { startMs: 1_200, endMs: 2_000, text: "um" },
       ],
-      (text) => text.replace(/\bum\b/g, ""),
+      (texts) => cleanParts(texts),
     );
-    assert.deepEqual(cues, [{ startMs: 0, endMs: 1_000, text: "hello there" }]);
+    assert.deepEqual(cues, [
+      { startMs: 0, endMs: 1_000, text: "Hello there." },
+    ]);
+  });
+
+  it("keeps a sentence going into the next segment, with its own time", () => {
+    const cues = subtitleCues(
+      [
+        { startMs: 0, endMs: 2_000, text: "i went to the store and" },
+        { startMs: 2_200, endMs: 4_000, text: "bought some milk" },
+      ],
+      (texts) => cleanParts(texts),
+    );
+    assert.deepEqual(cues, [
+      { startMs: 0, endMs: 2_000, text: "I went to the store and" },
+      { startMs: 2_200, endMs: 4_000, text: "bought some milk." },
+    ]);
+  });
+
+  it("replaces a phrase said across segments, over their time", () => {
+    const context = {
+      dictionary: [{ id: "d1", spoken: "new york", replacement: "New York" }],
+      snippets: [
+        { id: "s1", trigger: "insert my address", body: "1 Main Street" },
+      ],
+    };
+    const cues = subtitleCues(
+      [
+        // Out of order on purpose: the clean-up reads them in time order.
+        { startMs: 3_000, endMs: 3_400, text: "address" },
+        { startMs: 0, endMs: 1_000, text: "we moved to new" },
+        { startMs: 2_600, endMs: 2_900, text: "insert my" },
+        { startMs: 1_100, endMs: 2_500, text: "york. please" },
+      ],
+      (texts) => cleanParts(texts, context),
+    );
+    assert.deepEqual(cues, [
+      { startMs: 0, endMs: 2_500, text: "We moved to New York. Please" },
+      { startMs: 2_600, endMs: 3_400, text: "1 Main Street." },
+    ]);
   });
 
   it("splits a long segment, sharing its time by length", () => {

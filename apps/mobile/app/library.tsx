@@ -22,7 +22,7 @@ import { noticeText, storageBanner } from "../src/notices";
 import { useCompanionStore } from "../src/store";
 import { ttsController, useTts } from "../src/tts";
 import { exportSubtitles } from "../src/exportNotes";
-import { cleanTranscript } from "../src/refine";
+import { cleanParts } from "../src/refine";
 import {
   SUBTITLE_FORMATS,
   hasSubtitles,
@@ -138,8 +138,8 @@ export default function LibraryScreen() {
     exporting.current = true;
     setSubtitlesFor(null);
     try {
-      await exportSubtitles(item, format, t, (text) =>
-        cleanTranscript(text, {
+      await exportSubtitles(item, format, t, (texts) =>
+        cleanParts(texts, {
           language: item.language,
           dictionary,
           snippets,

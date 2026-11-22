@@ -114,7 +114,9 @@ in `src/features.ts`, and it is `false`.
   Summary, Tasks, the Reader, export (Markdown, plain text or JSON),
   subtitles of a dictated note (SRT or WebVTT, timed by the recognizer where
   it reports word times and by the app's clock otherwise; the WebVTT file
-  says when the times are approximate), Copy with the note's paragraphs and lists kept, and automatic
+  says when the times are approximate; the clean-up runs over the whole
+  dictation, so a sentence or a dictionary phrase that goes on into the next
+  cue reads as it does in the note), Copy with the note's paragraphs and lists kept, and automatic
   deletion of old notes (Settings, _Keep notes for_).
 - **Hidden**: the API's plaintext sync, _Rewrite_ and _Reply_ through the
   API, audio upload, and

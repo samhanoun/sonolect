@@ -1,5 +1,6 @@
 import type { NoteSegment } from "./domain";
 import { MAX_CUE_CHARS } from "./noteSegments";
+import type { CleanedRun } from "./refine";
 
 /**
  * A dictated note as SubRip (.srt) or WebVTT (.vtt) subtitles, from the
@@ -103,18 +104,39 @@ export function wrapCueText(text: string, max = MAX_LINE_CHARS): string {
   return packLines(text.split(" ").filter(Boolean), max).join("\n");
 }
 
+/** Each segment as it was said, only trimmed. */
+function asSaid(texts: readonly string[]): CleanedRun[] {
+  return texts.map((text, index) => ({
+    first: index,
+    last: index,
+    text: text.trim(),
+  }));
+}
+
 /**
- * The cues of a note: each segment cleaned with `clean` (the note's own
- * clean-up), long ones split with their time shared by length, in order and
- * never overlapping.
+ * The cues of a note, in order and never overlapping. `clean` is the
+ * note's clean-up over the segments in time order (cleanParts in
+ * refine.ts), so a sentence or a dictionary phrase that goes on into the
+ * next segment reads as it does in the note. Segments it cleans as one run
+ * share their time; long runs are split with their time shared by length.
  */
 export function subtitleCues(
   segments: readonly NoteSegment[],
-  clean: (text: string) => string = (text) => text.trim(),
+  clean: (texts: readonly string[]) => readonly CleanedRun[] = asSaid,
 ): Cue[] {
+  const ordered = [...segments].sort(
+    (left, right) => left.startMs - right.startMs,
+  );
   const cues: Cue[] = [];
-  for (const segment of segments) {
-    const text = clean(segment.text).replace(/\s+/g, " ").trim();
+  for (const run of clean(ordered.map((segment) => segment.text))) {
+    const covered = ordered.slice(run.first, run.last + 1);
+    const first = covered[0];
+    if (!first) continue;
+    const segment = {
+      startMs: first.startMs,
+      endMs: Math.max(...covered.map((item) => item.endMs)),
+    };
+    const text = run.text.replace(/\s+/g, " ").trim();
     if (!text) continue;
     const parts = splitText(text);
     const span = Math.max(0, segment.endMs - segment.startMs);

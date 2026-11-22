@@ -4,6 +4,7 @@ import { Platform, Share } from "react-native";
 
 import type { TranscriptTurn } from "./domain";
 import type { Strings } from "./i18n";
+import type { CleanedRun } from "./refine";
 import {
   EXPORT_FILE_TYPES,
   exportFileName,
@@ -53,15 +54,15 @@ export function exportNotes(
 
 /**
  * Saves one dictated note as subtitles (SRT or WebVTT), named after the
- * note's date and time. `clean` is the note's clean-up, so the subtitles
- * read like the note. WebVTT says so when the phone, not the recognizer,
- * timed the words.
+ * note's date and time. `clean` is the note's clean-up over its segments
+ * (cleanParts), so the subtitles read like the note. WebVTT says so when
+ * the phone, not the recognizer, timed the words.
  */
 export function exportSubtitles(
   turn: Pick<TranscriptTurn, "createdAt" | "segments">,
   format: SubtitleFormat,
   t: Strings,
-  clean: (text: string) => string,
+  clean: (texts: readonly string[]) => readonly CleanedRun[],
 ): Promise<boolean> {
   const cues = subtitleCues(turn.segments ?? [], clean);
   const approx = turn.segments?.some((segment) => segment.approx) ?? false;

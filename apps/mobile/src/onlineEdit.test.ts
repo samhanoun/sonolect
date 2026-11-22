@@ -14,7 +14,7 @@ import {
 import type { OnlineEditing } from "./onlineRefine";
 import type { SecureItemStore } from "./providerKeys";
 import { createProviderKeyStore } from "./providerKeys";
-import { cleanTranscript, refineLocally } from "./refine";
+import { cleanParts, cleanTranscript, refineLocally } from "./refine";
 import { subtitleCues } from "./subtitles";
 import { turnToNote } from "./sync/noteMapping";
 
@@ -322,13 +322,20 @@ describe("a dictation's segments after Rewrite or Reply", () => {
       assert.equal(segmentsSayText(SEGMENTS, note.rawText), true, mode);
       assert.equal(segmentsSayText(SEGMENTS, MODEL_TEXT), false, mode);
 
-      // The subtitles say what was said, cleaned up, not the model's text.
-      const cues = subtitleCues(outcome.turn.segments ?? [], (text) =>
-        cleanTranscript(text, { language: "en-US", dictionary: DICTIONARY }),
+      // The subtitles say what was said, cleaned up as the original is,
+      // not the model's text.
+      const context = { language: "en-US", dictionary: DICTIONARY };
+      const cues = subtitleCues(outcome.turn.segments ?? [], (texts) =>
+        cleanParts(texts, context),
       );
       assert.deepEqual(
         cues.map((cue) => cue.text),
-        ["So tell Sonolect.", "Thursday works."],
+        ["So tell Sonolect", "thursday works."],
+        mode,
+      );
+      assert.equal(
+        cues.map((cue) => cue.text).join(" "),
+        cleanTranscript(TURN.rawText, context),
         mode,
       );
     }
