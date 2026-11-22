@@ -141,6 +141,40 @@ describe("a studio save", () => {
       [{ startMs: 10, endMs: 10, text: "Hi", speaker: "Ana" }],
     );
   });
+
+  it("keeps the estimate mark on parts that speaker detection named", () => {
+    // A recording opened without segments: the studio spreads its text over
+    // its 10 s, then detection names who speaks when.
+    const estimated = segmentsFromCapture({
+      id: "22-1",
+      durationMs: 10_000,
+      transcript: "Hello there.\n\nHi, how are you?",
+    });
+    const named = applySpeakerTurns(
+      estimated,
+      [
+        { startMs: 0, endMs: 4_000, speaker: 1 },
+        { startMs: 4_000, endMs: 10_000, speaker: 2 },
+      ],
+      (speaker) => `Speaker ${speaker}`,
+    );
+    assert.deepEqual(segmentsToSave(named), [
+      {
+        startMs: 0,
+        endMs: 4286,
+        text: "Hello there.",
+        speaker: "Speaker 1",
+        approx: true,
+      },
+      {
+        startMs: 4286,
+        endMs: 10_000,
+        text: "Hi, how are you?",
+        speaker: "Speaker 2",
+        approx: true,
+      },
+    ]);
+  });
 });
 
 describe("editing a recorded transcript as text", () => {
