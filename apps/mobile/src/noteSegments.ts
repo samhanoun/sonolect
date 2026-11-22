@@ -42,6 +42,13 @@ export const ENGINE_TOLERANCE_MS = 1_500;
  * start earlier are counted from another origin, such as the utterance.
  */
 export const ENGINE_EARLY_MS = 3_000;
+/**
+ * How far the native 'audiostart' time may be from the loop's clock when
+ * the session started. In a browser it comes from the page's own clock
+ * (performance.timeOrigin + timeStamp), which stops while the computer
+ * sleeps, so it can drift far from Date.now().
+ */
+export const AUDIO_START_TOLERANCE_MS = 10_000;
 /** The last word of an Android result has no length: give it this much. */
 const LAST_WORD_MS = 300;
 /**
@@ -143,6 +150,8 @@ export class SegmentRecorder {
   private sessions = 0;
   /** Epoch ms the current session's audio started. */
   private sessionAt: number | null = null;
+  /** The loop's clock when the current session started. */
+  private startedAt: number | null = null;
   /** When the current utterance was first heard. */
   private heardAt: number | null = null;
   /** The native 'speechstart' since the last final result. */
@@ -154,6 +163,7 @@ export class SegmentRecorder {
     this.sessions += 1;
     this.origin ??= now;
     this.sessionAt = now;
+    this.startedAt = now;
     this.heardAt = null;
     this.speechAt = null;
     this.interim = "";
@@ -161,10 +171,17 @@ export class SegmentRecorder {
 
   /**
    * Native 'audiostart': its epoch timestamp marks the session's audio, the
-   * time its segment timestamps count from.
+   * time its segment timestamps count from. A timestamp far from the loop's
+   * clock is not on the same clock, and the session keeps the loop's time.
    */
   audioStarted(timestamp: unknown): void {
-    if (!finite(timestamp) || this.sessions === 0) return;
+    if (
+      !finite(timestamp) ||
+      this.startedAt === null ||
+      Math.abs(timestamp - this.startedAt) > AUDIO_START_TOLERANCE_MS
+    ) {
+      return;
+    }
     if (this.sessions === 1 && this.segments.length === 0) {
       this.origin = timestamp;
     }

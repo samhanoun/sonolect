@@ -108,6 +108,26 @@ describe("SegmentRecorder", () => {
     ]);
   });
 
+  it("keeps the loop's clock when 'audiostart' is far from it", () => {
+    // A browser tab left open while the computer slept: the page's clock
+    // is an hour behind Date.now().
+    const r = new SegmentRecorder();
+    r.sessionStarted(T0);
+    r.audioStarted(T0 - 3_600_000);
+    r.result("hello", false, T0 + 850);
+    r.result("hello world", true, T0 + 1_750);
+    // A later session's 'audiostart' far ahead: its words count from when
+    // the loop started it.
+    r.sessionStarted(T0 + 2_300);
+    r.audioStarted(T0 + 2_300 + 20_000);
+    r.result("two", false, T0 + 3_000);
+    r.result("two", true, T0 + 3_400, [word(500, 900, "two")]);
+    assert.deepEqual(r.list(), [
+      { startMs: 850, endMs: 1_750, text: "hello world", approx: true },
+      { startMs: 2_800, endMs: 3_200, text: "two" },
+    ]);
+  });
+
   it("splits a long result into cues at pauses and sentence ends", () => {
     // iOS 17 and earlier: one final result for the whole dictation.
     const r = new SegmentRecorder();
