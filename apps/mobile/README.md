@@ -74,8 +74,9 @@ server stores only ciphertext. Recordings don't sync (the phone keeps none).
   (`WHEN_UNLOCKED_THIS_DEVICE_ONLY`); `noteStore.ts` and `noteMapping.ts`
   map notes to note/1, keeping other devices' fields whole in
   `sonolect.mobile.sync.note.<id>` (split over `<key>~1`… past 1.5 MB);
-  `transport.ts` is `fetch` with a 30 s timeout and size caps (an answer up
-  to a full page of changes, sync-core's `MAX_RESPONSE_BYTES`);
+  `transport.ts` is `fetch` with a 30 s timeout (plus a second per 32 KiB
+  sent) and size caps (an answer up to a full page of changes, sync-core's
+  `MAX_RESPONSE_BYTES`);
   `keptDeletes.ts` keeps the deletes not uploaded yet when the sync state
   is forgotten (sync turned off with the server copy kept, history turned
   off, notes cleared on this phone), and the next engine of that vault

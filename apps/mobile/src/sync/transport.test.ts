@@ -14,6 +14,7 @@ import {
   type FetchLike,
   MAX_RESPONSE_BYTES,
   REQUEST_TIMEOUT_MS,
+  UPLOAD_BYTES_PER_SECOND,
   createFetchRequester,
 } from "./transport";
 
@@ -113,6 +114,41 @@ describe("fetch requester", () => {
     );
     assert.deepEqual(timers.pending(), [REQUEST_TIMEOUT_MS]);
     await timers.advance(REQUEST_TIMEOUT_MS);
+    await outcome;
+  });
+
+  it("gives an upload time to send its body on a slow uplink", async () => {
+    const timers = clock();
+    const fetch: FetchLike = (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () =>
+          reject(new Error("aborted")),
+        );
+      });
+    const request = createFetchRequester({
+      baseUrl: BASE,
+      fetch,
+      timers: timers.timersApi,
+    });
+    // A full batch: about 4.75 MiB, 152 s at 256 kbit/s.
+    const body = "x".repeat(SYNC_LIMITS.maxRequestBytes - 256 * 1024);
+    const outcome = assert.rejects(
+      request({
+        method: "POST",
+        path: "/v1/vaults/x/records",
+        headers: {},
+        body,
+      }),
+      /aborted/,
+    );
+    const deadline =
+      REQUEST_TIMEOUT_MS +
+      Math.ceil(body.length / UPLOAD_BYTES_PER_SECOND) * 1000;
+    assert.deepEqual(timers.pending(), [deadline]);
+    assert.ok(deadline > 180_000);
+    await timers.advance(deadline - 1);
+    assert.deepEqual(timers.pending(), [1]);
+    await timers.advance(1);
     await outcome;
   });
 

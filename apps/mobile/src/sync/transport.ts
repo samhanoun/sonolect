@@ -16,6 +16,16 @@ import type { Timers } from "./timers";
 /** No answer within this time counts as no answer (SyncError "network"). */
 export const REQUEST_TIMEOUT_MS = 30_000;
 /**
+ * A request with a body gets one more second per this many bytes (about
+ * 256 kbit/s), as on the desktop: the deadline covers sending the body, so
+ * a full batch on a slow uplink would otherwise fail on every retry.
+ */
+export const UPLOAD_BYTES_PER_SECOND = 32 * 1024;
+
+/** The deadline of a request with a body of `bytes` (ms). */
+export const requestTimeoutMs = (bytes: number, base = REQUEST_TIMEOUT_MS) =>
+  base + Math.ceil(bytes / UPLOAD_BYTES_PER_SECOND) * 1000;
+/**
  * The largest answer read: a full page of changes. The server counts a
  * page's 4 MiB of ciphertext in decoded bytes; as base64url in JSON it is
  * about 5.4 MiB (sync-core's MAX_RESPONSE_BYTES).
@@ -72,7 +82,10 @@ export function createFetchRequester({
     // refused here, as the server would (the engine then splits it).
     if (body !== undefined && body.length > maxRequestBytes) throw tooLarge();
     const controller = new AbortController();
-    const timer = timers.setTimeout(() => controller.abort(), timeoutMs);
+    const timer = timers.setTimeout(
+      () => controller.abort(),
+      requestTimeoutMs(body?.length ?? 0, timeoutMs),
+    );
     try {
       const url = `${base}${path}`;
       const response = await fetch(url, {
