@@ -1,5 +1,5 @@
 import { useLocales } from "expo-localization";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -8,7 +8,9 @@ import {
   Text,
   TextInput,
   View,
+  type ScrollViewInstance,
 } from "react-native";
+import { useLocalSearchParams } from "expo-router";
 
 import { openPrivacyPolicy, privacyPolicyUrl } from "../src/appInfo";
 import {
@@ -49,6 +51,7 @@ import { confirm } from "../src/ui/confirm";
 import { askEraseAll } from "../src/ui/eraseAll";
 import { FadeIn, GlassScreen } from "../src/ui/glass";
 import { useTabBarClearance } from "../src/ui/GlassTabBar";
+import { OnlineEditingSection } from "../src/ui/OnlineEditingSection";
 import { SyncSection } from "../src/ui/SyncSection";
 import { colors, fonts, glass, radius, space } from "../src/ui/theme";
 import { VoiceKeyboardCard } from "../src/ui/VoiceKeyboardCard";
@@ -96,6 +99,27 @@ export default function SettingsScreen() {
   const [written, setWritten] = useState("");
   const [trigger, setTrigger] = useState("");
   const [body, setBody] = useState("");
+  /** Bumped by Erase all data, so the online editing fields start empty. */
+  const [erased, setErased] = useState(0);
+
+  // A Capture notice's "Online editing settings" lands on that section.
+  const params = useLocalSearchParams<{ section?: string; at?: string }>();
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const onlineY = useRef<number | null>(null);
+  const scrollToOnline = useRef(false);
+  const showOnline = () => {
+    const y = onlineY.current;
+    if (y === null) return false;
+    scrollRef.current?.scrollTo({
+      y: Math.max(0, y - space.md),
+      animated: true,
+    });
+    return true;
+  };
+  useEffect(() => {
+    if (params.section !== "online") return;
+    scrollToOnline.current = !showOnline();
+  }, [params.section, params.at]);
 
   const urlValid = !url.trim() || isAllowedApiUrl(url.trim());
 
@@ -191,6 +215,7 @@ export default function SettingsScreen() {
     }
     setUrl("");
     setToken("");
+    setErased((count) => count + 1);
   };
 
   const saveApi = async () => {
@@ -231,6 +256,7 @@ export default function SettingsScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={[
             styles.container,
             { paddingBottom: clearance + space.xl },
@@ -369,6 +395,17 @@ export default function SettingsScreen() {
               onChange={(uiLanguage) => void updateSettings({ uiLanguage })}
             />
           </FadeIn>
+
+          {/* Independent of the API: the phone calls the provider itself. */}
+          <View
+            onLayout={(event) => {
+              onlineY.current = event.nativeEvent.layout.y;
+              if (scrollToOnline.current)
+                scrollToOnline.current = !showOnline();
+            }}
+          >
+            <OnlineEditingSection key={erased} />
+          </View>
 
           {API_FEATURES_ENABLED ? (
             <View style={styles.section}>
