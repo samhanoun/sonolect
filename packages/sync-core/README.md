@@ -178,6 +178,12 @@ const report = await engine.sync();
   in 64 buckets plus a meta key. `kv` is AsyncStorage or any store with
   `getItem`, `setItem`, `removeItem` and an optional `multiGet`.
 - A damaged bucket triggers a full resync ("repair") instead of an error.
+- `load()` returns null when the meta is missing or damaged. The first save
+  after that removes the buckets left from the old state, so they never load
+  as records of the new one.
+- A record that a full pass listed before it stopped carries a tenth
+  element. Versions before it read such a record as damaged, and run a
+  repair pass.
 
 ### `SyncTransport`
 
@@ -195,13 +201,35 @@ const report = await engine.sync();
   | Trigger                                                            | Missing remote records                                                              |
   | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
   | No sync for more than 60 days (`stale`)                            | Treated as deleted only after more than 90 days                                     |
-  | 410 `cursor_expired` (`expired`)                                   | Deleted locally (their tombstones were purged), unless edited here since; see below |
+  | 410 `cursor_expired`, or `purgedSeq` above the cursor (`expired`)  | Deleted locally (their tombstones were purged), unless edited here since; see below |
   | 410 `cursor_reset`, a head below our seq, or a new epoch (`reset`) | Uploaded again                                                                      |
   | 401 (`reset`)                                                      | The engine recreates the vault, then uploads again; the vault id comes from the key |
   | `sync({full: true})` (`requested`)                                 | Uploaded again                                                                      |
 
+- **A full pass in parts.** A large vault takes more pages than the
+  service's per-vault rate limit allows in a minute. A pass that stops (a
+  429, the network, a deferred note) saves the seq it got to and marks the
+  records it listed. The next run goes on from there, and compares the
+  records with the local notes only once it reaches the head.
+  - A pass that began more than 89 days ago starts from seq 0 again: a note
+    it listed may since have been deleted, and that tombstone purged.
+  - A device more than 90 days away whose pass is still not done treats
+    missing records as deleted, as for `stale` (but not for `reset`).
+
 - **Tombstones** live 90 days on the server. After that the service purges
-  them, and any cursor older than the purge gets 410 `cursor_expired`.
+  them, and every page says how far it purged (`purgedSeq`).
+  - A pull from a saved cursor below `purgedSeq` may have missed deletes: the
+    engine handles that as 410 `cursor_expired`, which older servers send.
+  - A pass from seq 0, and the later pages of a pull, go on past it. A note
+    deleted there was deleted before this device listed it, or the pass
+    compares it at the end.
+  - A pull or pass that reaches the end of the feed moves its cursor up to
+    `purgedSeq` when the newest seqs are purged tombstones, so the next pull
+    does not take them for missed deletes and start a full pass again.
+  - A pending pass that stopped part way starts from seq 0 again when the
+    saved state was damaged ("repair"), or when an app update can read
+    records the old version could not ("upgrade"), so it reads those
+    records too.
   - An honest server can send `cursor_expired` only to a device that last
     pulled more than 90 days ago. The engine deletes absent notes on it only
     then (with a day of slack for clocks); a device that pulled more
@@ -349,10 +377,10 @@ describes the routes. Every byte string is unpadded base64url.
 - known-answer vectors for the keys, the record ids and the envelope;
 - the pairing formats and the QR matrix;
 - the HLC, the state store and the transport error mapping;
-- 33 engine scenarios against the in-memory server: two devices, conflicts,
+- 38 engine scenarios against the in-memory server: two devices, conflicts,
   deletes beating and losing to edits, deletes dated when they were made,
   retention, paging, batching, rollback refusal, a server restored from a
   backup, a wiped server, purged tombstones, a server that answers
   `cursor_expired` and leaves records out, vault deletion, lost answers,
-  restarts, interrupted runs, and deletes handed to a fresh state, from the
-  saved state or kept by the app.
+  restarts, interrupted runs, full passes the rate limit cuts short, and
+  deletes handed to a fresh state, from the saved state or kept by the app.

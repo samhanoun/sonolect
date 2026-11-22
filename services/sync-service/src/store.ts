@@ -20,8 +20,9 @@ import type { QuotaReason } from "@sonolect/sync-core/wire";
  *   vault by more than a tombstone can be (`Quotas.maxTombstoneBytes`): a
  *   write flagged as a delete cannot carry data past the quota.
  * - Tombstones older than the tombstone TTL are purged by `purge`, which
- *   records the highest purged seq so a client whose cursor is older is told
- *   to resync (410 cursor_expired).
+ *   records the highest purged seq. Every page of changes reports it
+ *   (`purgedSeq`), so a client whose cursor from a finished pull is older
+ *   resyncs, while a pass from 0 can page past it.
  * - A deleted vault keeps only its id, verifier, epoch and deletion time, so
  *   devices that still hold its key learn that it was deleted (410) instead
  *   of creating it again.
@@ -201,7 +202,8 @@ export function decideWrite(
     };
   counters.head += 1;
   counters.records += added;
-  counters.tombstones += tombstoneGrowth;
+  // Never below 0, even on a vault whose count was missing (read as 0).
+  counters.tombstones = Math.max(0, counters.tombstones + tombstoneGrowth);
   counters.bytes += growth;
   const record: StoredRecord = {
     rid: write.rid,

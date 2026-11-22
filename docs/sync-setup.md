@@ -63,7 +63,9 @@ for your region. This is what drives the bill.
   - Each changed note costs a write on upload and a read on every other
     device that pulls it.
   - A device that joins, or one that has not synced for 60 days, reads every
-    note once (a full resync).
+    note once (a full resync). A large vault takes more pages than the
+    per-vault rate limit allows in a minute: the device then goes on where it
+    stopped after the limit resets, so no note is read twice.
   - Storage is the sealed notes: text only, compressed, padded to 256 bytes,
     at most 200 MiB per vault. Recordings never sync.
 - **Network egress**: the sealed notes sent to devices.
@@ -183,6 +185,8 @@ own, apart from the full platform in `infra/terraform` (which also creates
 Cloud SQL and needs a private network). It creates:
 
 - the Firestore database (native mode) with delete protection;
+- an index exemption for the `ct` field of the `records` collection group:
+  it holds the encrypted note, and no query reads it;
 - the service account `sonolect-sync-run`, with `roles/datastore.user` on
   that database only (an IAM condition), and nothing else;
 - the secret `sonolect-sync-service-tokens`: a generated
@@ -195,8 +199,8 @@ Cloud SQL and needs a private network). It creates:
   bearer token);
 - optionally, the domain mapping (step 7).
 
-It creates no TTL policy and no index: the service purges deleted notes'
-tombstones itself, 90 days after the delete, and Firestore's automatic
+It creates no TTL policy and no composite index: the service purges deleted
+notes' tombstones itself, 90 days after the delete, and Firestore's automatic
 indexes serve its queries.
 
 ```bash
@@ -217,8 +221,9 @@ terraform output -raw service_url
 in [variables.tf](../infra/terraform/sync/variables.tf): `domain`,
 `firestore_database` (when the project already has a default database),
 `cpu`, `memory`, `max_concurrency`, `max_instances` (1 or 2: the rate limits
-are kept per instance) and `deletion_protection` (on by default; while it is
-on, `terraform destroy` stops before deleting the database or the service).
+are kept per instance), `trust_proxy_hops` (step 7) and `deletion_protection`
+(on by default; while it is on, `terraform destroy` stops before deleting the
+database or the service).
 
 - **If the apply stops on the `allUsers` binding** with an organization
   policy error (domain restricted sharing, on by default in newer Google
@@ -265,6 +270,8 @@ gcloud services enable run.googleapis.com firestore.googleapis.com \
 
 gcloud firestore databases create --location="$FIRESTORE_LOCATION" \
   --type=firestore-native --delete-protection
+gcloud firestore indexes fields update ct --collection-group=records \
+  --disable-indexes
 
 gcloud iam service-accounts create sonolect-sync-run \
   --display-name="Sonolect sync service runtime"
@@ -307,6 +314,14 @@ such as `sync.example.com`, only changes the URL the apps are built with.
   traffic because of added latency. For a region without them, or for
   production-grade serving, put Firebase Hosting or a global external
   Application Load Balancer in front instead (not set up here).
+- A proxy in front adds a hop to `X-Forwarded-For`. The service trusts one
+  hop on Cloud Run, so behind a load balancer every caller would share the
+  balancer's address and one rate limit. Set the number of hops (2 behind an
+  external Application Load Balancer): `trust_proxy_hops = 2` in
+  `terraform.tfvars`, or `SONOLECT_SYNC_TRUST_PROXY=2` in
+  `--set-env-vars` (step 6b). Then check that `remoteAddress` in the request
+  log shows your own address, not the proxy's. Do not set more hops than
+  there are proxies: a caller could then pick its own address.
 - The account that runs Terraform (or gcloud) must be a verified owner of the
   domain. Unless you bought it through Google, verify the base domain in
   Search Console: `gcloud domains verify example.com`, and check with

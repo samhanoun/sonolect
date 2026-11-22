@@ -247,6 +247,16 @@ interface Prepared extends Candidate {
 type Applied = "applied" | "skipped" | "unreadable" | "deferred";
 type LocalIndex = Map<string, LocalNoteSummary>;
 
+/** How far the full pass of this run got. */
+interface PassProgress {
+  /** Every record up to this seq is applied. */
+  since: number;
+  /** The records the pass listed, earlier runs of it included. */
+  seen: Set<string>;
+  /** When the pass began (ms). */
+  startedAt: number;
+}
+
 const PUSH_ROUNDS = 3;
 /** Clock differences between this device and the server, for `expiredMayDelete`. */
 const EXPIRED_SLACK_MS = 24 * 60 * 60_000;
@@ -273,6 +283,11 @@ const emptyReport = (): SyncReport => ({
 });
 
 const unique = (values: string[]) => [...new Set(values)];
+
+const unlisted = (record: RecordState): RecordState => {
+  const { listed: _listed, ...rest } = record;
+  return rest;
+};
 
 /** A record the server does not hold (any more): revision 0, no tag. */
 const unsent = (record: RecordState): RecordState => {
@@ -453,6 +468,17 @@ class Engine implements SyncEngine {
         reason: "stale",
         deleteAbsent: now - lastPull > SYNC_LIMITS.tombstoneTtlMs,
       };
+    const pending = this.meta.fullResync;
+    if (
+      pending &&
+      !pending.deleteAbsent &&
+      pending.reason !== "reset" &&
+      lastPull !== undefined &&
+      now - lastPull > SYNC_LIMITS.tombstoneTtlMs
+    )
+      // A pass still not done after more than 90 days away: the same holds
+      // as for "stale".
+      pending.deleteAbsent = true;
     if (!this.meta.vaultCreated) {
       const { created, epoch } = await this.options.transport.createVault();
       report.vaultCreated = created;
@@ -476,15 +502,25 @@ class Engine implements SyncEngine {
   private async pull(report: SyncReport): Promise<boolean> {
     let recreated = false;
     for (let attempt = 0; ; attempt += 1) {
+      const progress: { pass: PassProgress | null } = { pass: null };
       try {
-        return await this.pullPass(report);
+        return await this.pullPass(report, progress);
       } catch (error) {
         let next: PendingFullResync | undefined;
+        const current = this.meta.fullResync;
         if (error instanceof SyncError && error.kind === "gone") {
           // The server purged tombstones this device has not seen, or it is
           // behind this device (restored from a backup, or the vault was
           // created again): start from seq 0.
-          if (error.code === SYNC_ERROR_CODES.cursorExpired)
+          if (error.code === SYNC_ERROR_CODES.cursorExpired && current)
+            // A full pass past tombstones purged since it began (a later
+            // page, or a run that resumes it): it starts over, for the
+            // same reason.
+            next = {
+              reason: current.reason,
+              deleteAbsent: current.deleteAbsent,
+            };
+          else if (error.code === SYNC_ERROR_CODES.cursorExpired)
             next = this.expiredMayDelete()
               ? { reason: "expired", deleteAbsent: true }
               : { reason: "reset", deleteAbsent: false };
@@ -505,10 +541,18 @@ class Engine implements SyncEngine {
           this.meta.epoch = epoch;
           next = { reason: "reset", deleteAbsent: false };
         }
-        if (!next || attempt >= 3) throw error;
-        const current = this.meta.fullResync;
+        if (!next) {
+          // The run fails (a 429, the network, the device): a full pass
+          // resumes where it got on the next run.
+          if (current && progress.pass)
+            await this.keepProgress(current, progress.pass).catch(
+              () => undefined,
+            );
+          throw error;
+        }
         // A server that lost data may also be missing tombstones: when in
-        // doubt, upload again rather than delete.
+        // doubt, upload again rather than delete. The new pass starts from
+        // seq 0, even when this run gives up.
         this.meta.fullResync = current
           ? {
               reason: next.reason,
@@ -516,8 +560,72 @@ class Engine implements SyncEngine {
             }
           : next;
         await this.persist();
+        if (attempt >= 3) throw error;
       }
     }
+  }
+
+  /**
+   * Saves how far a full pass got before it stopped: the seq it applied
+   * up to, and a mark on each record it listed, so the next run resumes
+   * there and still knows, at the end, every record the server holds.
+   */
+  private async keepProgress(
+    pending: PendingFullResync,
+    progress: PassProgress,
+  ): Promise<void> {
+    if (this.meta.fullResync !== pending) return;
+    for (const rid of progress.seen) {
+      const known = this.records.get(rid);
+      if (known && !known.listed)
+        this.setRecord(rid, { ...known, listed: true });
+    }
+    pending.since = progress.since;
+    pending.startedAt = progress.startedAt;
+    await this.persist();
+  }
+
+  /**
+   * Whether a full pass that stopped part way can go on where it got. A
+   * note it listed may have been deleted elsewhere since, and that delete
+   * purged before the pass got to it, only once the pass began longer ago
+   * than the tombstone TTL; such a pass starts over.
+   */
+  private resumable(pending: PendingFullResync): boolean {
+    if (pending.since === undefined || pending.startedAt === undefined)
+      return false;
+    const age = this.now() - pending.startedAt;
+    return age >= 0 && age < SYNC_LIMITS.tombstoneTtlMs - EXPIRED_SLACK_MS;
+  }
+
+  /**
+   * Whether the server's `purgedSeq` above this cursor means deletes this
+   * device never saw (the first page of a pull that does not start at 0).
+   * Within a run, and in a full pass, a page boundary below it is fine:
+   * what was purged there was deleted before this device listed it, or is
+   * reconciled when the pass ends. A device that never finished a pull
+   * knows only notes it listed since its state began, so a purge can hide
+   * a delete from it only once that is longer ago than the tombstone TTL.
+   */
+  private cursorMayMissPurge(): boolean {
+    if (this.meta.cursor === 0) return false;
+    if (this.meta.lastPullAt !== undefined) return true;
+    const age = this.now() - this.meta.startedAt;
+    return !(age >= 0 && age < SYNC_LIMITS.tombstoneTtlMs - EXPIRED_SLACK_MS);
+  }
+
+  /**
+   * The records a full pass listed in earlier runs. A pass that starts from
+   * seq 0 drops the marks a pass it replaced left behind.
+   */
+  private listedBefore(pending: PendingFullResync): Set<string> {
+    const seen = new Set<string>();
+    for (const [rid, known] of this.records) {
+      if (!known.listed) continue;
+      if (pending.since !== undefined) seen.add(rid);
+      else this.setRecord(rid, unlisted(known));
+    }
+    return seen;
   }
 
   /**
@@ -537,12 +645,28 @@ class Engine implements SyncEngine {
     );
   }
 
-  private async pullPass(report: SyncReport): Promise<boolean> {
+  private async pullPass(
+    report: SyncReport,
+    progress: { pass: PassProgress | null },
+  ): Promise<boolean> {
     const pending = this.meta.fullResync;
-    if (pending) report.full = pending.reason;
-    const seen = pending ? new Set<string>() : null;
+    if (pending) {
+      report.full = pending.reason;
+      if (!this.resumable(pending)) {
+        delete pending.since;
+        delete pending.startedAt;
+      }
+    }
+    const seen = pending ? this.listedBefore(pending) : null;
     const local: { index: LocalIndex | null } = { index: null };
-    let since = pending ? 0 : this.meta.cursor;
+    let since = pending ? (pending.since ?? 0) : this.meta.cursor;
+    if (pending && seen)
+      progress.pass = {
+        since,
+        seen,
+        startedAt: pending.startedAt ?? this.now(),
+      };
+    let checkPurge = !pending && this.cursorMayMissPurge();
     let head = 0;
     for (;;) {
       const page = await this.options.transport.changes(
@@ -562,6 +686,14 @@ class Engine implements SyncEngine {
         );
       }
       this.meta.epoch = page.epoch;
+      if (checkPurge && (page.purgedSeq ?? 0) > since)
+        // As a server that answers 410 cursor_expired would.
+        throw new SyncError(
+          "gone",
+          "the sync server purged deletes after this cursor",
+          { code: SYNC_ERROR_CODES.cursorExpired },
+        );
+      checkPurge = false;
       if (page.head < this.meta.highSeq) {
         // The server is behind this device: it lost changes.
         if (!pending)
@@ -587,12 +719,21 @@ class Engine implements SyncEngine {
         if (outcome === "deferred") {
           report.deferred = true;
           if (!pending) this.meta.cursor = last;
+          else if (progress.pass)
+            await this.keepProgress(pending, progress.pass);
           await this.persist();
           return false;
         }
         last = record.seq;
+        if (progress.pass) progress.pass.since = last;
       }
       since = last;
+      if (!page.hasMore && page.purgedSeq !== undefined)
+        // The end of the feed: nothing the server holds lies between the
+        // last record and purgedSeq, so the cursor moves past the purged
+        // deletes. Left below them, every later pull would read purgedSeq
+        // above its cursor and start a full pass again.
+        since = Math.max(since, Math.min(page.head, page.purgedSeq));
       if (!pending) this.meta.cursor = since;
       await this.persist();
       if (!page.hasMore) break;
@@ -601,6 +742,8 @@ class Engine implements SyncEngine {
     }
     if (pending && seen) {
       await this.reconcileAbsent(seen, pending, report, local);
+      for (const [rid, known] of this.records)
+        if (known.listed) this.setRecord(rid, unlisted(known));
       this.meta.cursor = since;
       // A fresh baseline: the server's head may legitimately be lower now.
       this.meta.highSeq = Math.max(head, since);
@@ -1305,11 +1448,20 @@ export async function openSyncEngine(
   if (snapshot && snapshot.meta.vaultId === keys.vaultId) {
     meta = cloneMeta(snapshot.meta);
     records = snapshot.records;
-    if (snapshot.damaged && !meta.fullResync)
-      meta.fullResync = { reason: "repair", deleteAbsent: false };
+    // A pass that must read every record again. One already pending that
+    // stopped part way would resume where it got, past records this device
+    // lost or could not read, so it starts over from seq 0 instead.
+    const readAll = (reason: FullResyncReason) => {
+      if (!meta.fullResync) {
+        meta.fullResync = { reason, deleteAbsent: false };
+        return;
+      }
+      delete meta.fullResync.since;
+      delete meta.fullResync.startedAt;
+    };
+    if (snapshot.damaged) readAll("repair");
     if (meta.reader < READER_VERSION) {
-      if (meta.unreadable > 0 && !meta.fullResync)
-        meta.fullResync = { reason: "upgrade", deleteAbsent: false };
+      if (meta.unreadable > 0) readAll("upgrade");
       meta.unreadable = 0;
       meta.reader = READER_VERSION;
     }

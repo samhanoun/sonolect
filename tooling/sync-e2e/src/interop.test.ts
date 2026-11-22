@@ -49,9 +49,9 @@ afterEach(async () => {
   cleanups = [];
 });
 
-async function world() {
+async function world(limits?: Parameters<typeof startServer>[1]) {
   const clock = new SharedClock(START);
-  const server = await startServer(clock);
+  const server = await startServer(clock, limits);
   cleanups.push(() => server.close());
   const desktop = () => {
     const desk = startDesktop(clock, server);
@@ -299,6 +299,69 @@ describe("desktop and phone sync through the sync service", () => {
       base64urlEncode(desk.root()),
       base64urlEncode(parsePairing((await phone.controller.pairing())!.link)),
       "one vault, one key",
+    );
+  });
+
+  it("a phone back after two months finishes its full pass under the rate limit", async () => {
+    // Two records a page and four requests a minute per vault: a full pass
+    // over nine notes needs five pages, so the limit stops it part way.
+    const w = await world({ maxPageRecords: 2, vaultRequestsPerMinute: 4 });
+    const { desk, phone } = await paired(w);
+    const deskTexts = Array.from(
+      { length: 9 },
+      (_, index) => `Desktop note number ${index + 1}.`,
+    );
+    for (const text of deskTexts) desk.native.record(text);
+    await desk.sync();
+    await phone.sync();
+    // Each device reads the notes in pages, a minute at a time.
+    await w.clock.advance(5 * 60_000);
+    assert.deepEqual(
+      phone.notes.history.map((turn) => turn.rawText).sort(),
+      [...deskTexts].sort(),
+      "the phone has the desktop's notes",
+    );
+
+    // The desktop is closed, and the phone is offline for two months.
+    await desk.close();
+    phone.network.offline = true;
+    await phone.dictate("Phone note written while away.");
+    await w.clock.advance(60_000);
+    w.clock.time += 61 * DAY;
+    phone.network.offline = false;
+
+    const back = w.server.exchanges.length;
+    await phone.sync();
+    const first = w.server.exchanges.slice(back);
+    assert.ok(
+      first.some((exchange) => /\/changes\?since=0&/.test(exchange.path)),
+      "the phone starts a full pass",
+    );
+    const limited = first.findIndex((exchange) => exchange.status === 429);
+    assert.ok(limited >= 0, "the rate limit stops it part way");
+
+    // It tries again after Retry-After, where it stopped, then uploads.
+    await w.clock.advance(61_000);
+    const after = w.server.exchanges.slice(back + limited + 1);
+    assert.deepEqual(
+      after.filter((exchange) => /\/changes\?since=0&/.test(exchange.path)),
+      [],
+      "the pass does not start over",
+    );
+    assert.ok(
+      after.some(
+        (exchange) =>
+          exchange.method === "POST" &&
+          exchange.path.endsWith("/records") &&
+          exchange.status === 200,
+      ),
+      "the phone uploaded its note",
+    );
+    assert.equal(phone.view().problem, null);
+    assert.deepEqual(
+      phone.notes.history.map((turn) => turn.rawText).sort(),
+      [...deskTexts, "Phone note written while away."].sort(),
+      "the phone kept every note",
     );
   });
 

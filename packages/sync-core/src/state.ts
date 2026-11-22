@@ -25,6 +25,19 @@ export interface PendingFullResync {
    * False: the server lost it, so the local copy is uploaded again.
    */
   deleteAbsent: boolean;
+  /**
+   * Set when the pass stopped part way (a 429, a network error, a note that
+   * changed meanwhile): it applied every record up to this seq and marked
+   * the records it listed (`RecordState.listed`). The next run resumes
+   * after it, so a long pass finishes even when every run is cut short.
+   */
+  since?: number;
+  /**
+   * When the pass began (ms), saved with `since`. A pass that began longer
+   * ago than the tombstone TTL starts over: a delete made after it listed a
+   * note may have been purged before it got there.
+   */
+  startedAt?: number;
 }
 
 /** Device-wide sync state. */
@@ -55,7 +68,7 @@ export interface SyncMeta {
   lastSyncAt?: number;
   /** Last completed full resync (ms). */
   lastFullSyncAt?: number;
-  /** A full resync that has not completed yet; it restarts from seq 0. */
+  /** A full resync that has not completed yet; it resumes where it stopped. */
   fullResync?: PendingFullResync;
   /** Explicit deletes the server has not confirmed: note id -> HLC of the delete. */
   pendingDeletes: Record<string, Hlc>;
@@ -83,6 +96,8 @@ export interface RecordState {
   ahead?: boolean;
   /** sealedTag of the record at `rev`: its echo is skipped without decrypting. */
   tag?: string;
+  /** Listed by the full pass that stopped part way (`PendingFullResync.since`). */
+  listed?: boolean;
 }
 
 export interface SyncStateSnapshot {
@@ -178,7 +193,14 @@ export function parseMeta(value: unknown): SyncMeta | null {
       )
     )
       return null;
-    fullResync = { reason: full.reason!, deleteAbsent: full.deleteAbsent };
+    fullResync = {
+      reason: full.reason!,
+      deleteAbsent: full.deleteAbsent,
+      // A malformed position is dropped: the pass starts over from seq 0.
+      ...(isCount(full.since) && isCount(full.startedAt)
+        ? { since: full.since, startedAt: full.startedAt }
+        : {}),
+    };
   }
   return {
     v: 1,
@@ -207,7 +229,11 @@ export function parseMeta(value: unknown): SyncMeta | null {
   };
 }
 
-/** A record as a compact array: [id, rev, t, c, d, deleted, fp, ahead, tag]. */
+/**
+ * A record as a compact array: [id, rev, t, c, d, deleted, fp, ahead, tag],
+ * and a 10th element 1 only while it is `listed`, so a record packs as it
+ * always did outside an interrupted full pass.
+ */
 type PackedRecord = [
   string,
   number,
@@ -218,23 +244,30 @@ type PackedRecord = [
   string,
   0 | 1,
   string,
+  1?,
 ];
 
-const packRecord = (record: RecordState): PackedRecord => [
-  record.id,
-  record.rev,
-  record.hlc.t,
-  record.hlc.c,
-  record.hlc.d,
-  record.deleted ? 1 : 0,
-  record.fp ?? "",
-  record.ahead ? 1 : 0,
-  record.tag ?? "",
-];
+const packRecord = (record: RecordState): PackedRecord => {
+  const packed: PackedRecord = [
+    record.id,
+    record.rev,
+    record.hlc.t,
+    record.hlc.c,
+    record.hlc.d,
+    record.deleted ? 1 : 0,
+    record.fp ?? "",
+    record.ahead ? 1 : 0,
+    record.tag ?? "",
+  ];
+  if (record.listed) packed.push(1);
+  return packed;
+};
 
 function unpackRecord(value: unknown): RecordState | null {
-  if (!Array.isArray(value) || value.length !== 9) return null;
-  const [id, rev, t, c, d, deleted, fp, ahead, tag] = value as unknown[];
+  if (!Array.isArray(value) || (value.length !== 9 && value.length !== 10))
+    return null;
+  const [id, rev, t, c, d, deleted, fp, ahead, tag, listed] =
+    value as unknown[];
   const hlc = { t, c, d };
   if (
     typeof id !== "string" ||
@@ -244,7 +277,8 @@ function unpackRecord(value: unknown): RecordState | null {
     (deleted !== 0 && deleted !== 1) ||
     typeof fp !== "string" ||
     (ahead !== 0 && ahead !== 1) ||
-    typeof tag !== "string"
+    typeof tag !== "string" ||
+    (value.length === 10 && listed !== 1)
   )
     return null;
   return {
@@ -255,6 +289,7 @@ function unpackRecord(value: unknown): RecordState | null {
     ...(fp ? { fp } : {}),
     ...(ahead === 1 ? { ahead: true } : {}),
     ...(tag ? { tag } : {}),
+    ...(listed === 1 ? { listed: true } : {}),
   };
 }
 
@@ -318,6 +353,12 @@ export function createKeyValueStateStore(
   const bucketKey = (char: string) => `${prefix}r.${char}`;
   const bucketKeys = [...BUCKET_CHARS].map(bucketKey);
   let buckets: Map<string, Map<string, RecordState>> | null = null;
+  /**
+   * Buckets found without a valid meta (a clear that stopped part way, or a
+   * meta that could not be read). They belong to no state, so they go with
+   * the next save of a meta instead of loading later as its records.
+   */
+  let orphans: string[] = [];
   let queue: Promise<unknown> = Promise.resolve();
 
   const serialized = <T>(run: () => Promise<T>): Promise<T> => {
@@ -341,14 +382,21 @@ export function createKeyValueStateStore(
   const load = async (): Promise<SyncStateSnapshot | null> => {
     const [rawMeta, ...rawBuckets] = await readAll();
     buckets = new Map();
-    if (rawMeta === null || rawMeta === undefined) return null;
+    orphans = [];
     let meta: SyncMeta | null = null;
-    try {
-      meta = parseMeta(JSON.parse(rawMeta));
-    } catch {
-      meta = null;
+    if (rawMeta !== null && rawMeta !== undefined)
+      try {
+        meta = parseMeta(JSON.parse(rawMeta));
+      } catch {
+        meta = null;
+      }
+    if (!meta) {
+      rawBuckets.forEach((raw, index) => {
+        if (raw !== null && raw !== undefined)
+          orphans.push(BUCKET_CHARS[index]!);
+      });
+      return null;
     }
-    if (!meta) return null;
     const records = new Map<string, RecordState>();
     let damaged = false;
     rawBuckets.forEach((raw, index) => {
@@ -386,6 +434,10 @@ export function createKeyValueStateStore(
 
   const save = async (change: SyncStateChange) => {
     if (!buckets) await load();
+    if (change.meta && orphans.length > 0) {
+      for (const char of orphans) await kv.removeItem(bucketKey(char));
+      orphans = [];
+    }
     if (change.records) {
       const touched = new Set<string>();
       for (const [rid, record] of change.records) {
@@ -414,8 +466,11 @@ export function createKeyValueStateStore(
   };
 
   const clear = async () => {
+    // Read again before the next save if this stops part way.
+    buckets = null;
     for (const key of [metaKey, ...bucketKeys]) await kv.removeItem(key);
     buckets = new Map();
+    orphans = [];
   };
 
   return {

@@ -388,7 +388,7 @@ export function defineRouteTests(factory: StoreFactory): void {
       }
     });
 
-    it("answers 410 past the head and after a purge of deletes the cursor missed", async () => {
+    it("answers 410 past the head, and pages past purged deletes, saying how far they went", async () => {
       const { put, changes, vault, clock } = await setup();
       const keys = await vault();
       const [a, b, c] = [newRid(), newRid(), newRid()];
@@ -401,16 +401,27 @@ export function defineRouteTests(factory: StoreFactory): void {
       clock.advance(91 * DAY);
       await put(keys, [write(c)]);
       // The write above ran the purge: the tombstone at seq 3 is gone.
-      const expired = await changes(keys, "since=2");
-      assert.equal(expired.statusCode, 410);
-      assert.equal(expired.json().error, "cursor_expired");
-      assert.equal((await changes(keys, "since=3")).statusCode, 200);
       const fresh = (await changes(keys, "since=0")).json<ChangesResponse>();
       assert.deepEqual(
         fresh.records.map((r) => r.rid),
         [b, c],
       );
       assert.equal(fresh.head, 4);
+      assert.equal(fresh.purgedSeq, 3);
+      // A pass from 0 pages on below purgedSeq: a device whose cursor ends
+      // a finished pull tells from purgedSeq that it missed deletes.
+      const first = await changes(keys, "since=0&limit=1");
+      assert.deepEqual(
+        first.json<ChangesResponse>().records.map((r) => r.rid),
+        [b],
+      );
+      const below = await changes(keys, "since=2&limit=1");
+      assert.equal(below.statusCode, 200);
+      assert.deepEqual(
+        below.json<ChangesResponse>().records.map((r) => r.rid),
+        [c],
+      );
+      assert.equal(below.json<ChangesResponse>().purgedSeq, 3);
     });
 
     it("validates every write", async () => {

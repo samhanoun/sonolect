@@ -35,7 +35,8 @@ import {
  * Times are numbers (ms). `changes` is `where seq > since orderBy seq` and
  * `purge` is `where tombstoneAt < cutoff` (set on tombstones only), both
  * served by Firestore's automatic single-field indexes, so the store needs
- * no composite index and no TTL policy: `purge` removes old tombstones in
+ * no composite index (infra/terraform/sync exempts `ct`, never queried, from
+ * indexing) and no TTL policy: `purge` removes old tombstones in
  * transactions that also update the vault's counters and purgedSeq, which a
  * TTL policy could not. The service uses the Admin SDK, which security rules
  * do not apply to; the rules deny client SDKs this collection by default.
@@ -86,7 +87,9 @@ const toMeta = (data: DocumentData): VaultMeta => ({
   epoch: String(data.epoch),
   head: num(data.head),
   records: num(data.records),
-  // Absent on a vault written before tombstones were counted: none known.
+  // Every vault this store creates has the count. A document without it
+  // (written by hand, or by a build before the count) reads as none, and
+  // writes never take it below 0.
   tombstones: data.tombstones === undefined ? 0 : num(data.tombstones),
   bytes: num(data.bytes),
   purgedSeq: num(data.purgedSeq),

@@ -4,8 +4,11 @@
 // uses already fail to type-check; this catches the rest.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = new URL("../src/", import.meta.url).pathname;
+// A file path, not the URL's pathname: that is percent-encoded (a space is
+// %20) and starts with /C:/ on Windows.
+const root = fileURLToPath(new URL("../src/", import.meta.url));
 const allowedImports = new Set([
   "@noble/ciphers/chacha.js",
   "@noble/hashes/hkdf.js",

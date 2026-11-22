@@ -29,6 +29,7 @@ import { checkSyncServerUrl } from "./server-url";
 import {
   createKeyValueStateStore,
   createMemoryStateStore,
+  parseMeta,
   type SyncMeta,
 } from "./state";
 import {
@@ -525,6 +526,119 @@ describe("state stores", () => {
     await reopened.clear();
     assert.equal(kv.size, 0);
   });
+
+  it("keeps where a full pass stopped, and the records it listed", async () => {
+    const kv = new Map<string, string>();
+    const storage = {
+      getItem: async (key: string) => kv.get(key) ?? null,
+      setItem: async (key: string, value: string) => {
+        kv.set(key, value);
+      },
+      removeItem: async (key: string) => {
+        kv.delete(key);
+      },
+    };
+    const hlc = { t: 1, c: 0, d: "d" };
+    const records = new Map([
+      [rid("A", 1), { id: "n1", rev: 1, hlc, deleted: false, listed: true }],
+      [rid("A", 2), { id: "n2", rev: 2, hlc, deleted: true }],
+    ]);
+    const stopped: SyncMeta = {
+      ...meta("v"),
+      fullResync: {
+        reason: "stale",
+        deleteAbsent: true,
+        since: 40,
+        startedAt: 1000,
+      },
+    };
+    await createKeyValueStateStore(storage, "t.").save({
+      meta: stopped,
+      records,
+    });
+    // A record that is not listed packs as before: nine elements.
+    const packed = JSON.parse(kv.get("t.r.A")!) as Record<string, unknown[]>;
+    assert.equal(packed[rid("A", 1)]!.length, 10);
+    assert.equal(packed[rid("A", 2)]!.length, 9);
+    const loaded = await createKeyValueStateStore(storage, "t.").load();
+    assert.deepEqual(loaded?.meta, stopped);
+    assert.deepEqual(loaded?.records, records);
+    assert.equal(loaded?.damaged, undefined);
+    // Saved by an earlier version: no position, so the pass starts over.
+    const {
+      since: _since,
+      startedAt: _startedAt,
+      ...old
+    } = stopped.fullResync!;
+    assert.deepEqual(parseMeta({ ...stopped, fullResync: old })?.fullResync, {
+      reason: "stale",
+      deleteAbsent: true,
+    });
+    // A malformed position is dropped, and the rest of the meta is kept.
+    assert.deepEqual(
+      parseMeta({ ...stopped, fullResync: { ...old, since: -1 } })?.fullResync,
+      old,
+    );
+    // Any other 10th element is damage.
+    kv.set(
+      "t.r.A",
+      JSON.stringify({
+        [rid("A", 1)]: [...packed[rid("A", 1)]!.slice(0, 9), 2],
+      }),
+    );
+    assert.equal(
+      (await createKeyValueStateStore(storage, "t.").load())?.damaged,
+      true,
+    );
+  });
+
+  it("drops buckets left without a meta, so they never load as records of a new state", async () => {
+    const kv = new Map<string, string>();
+    let failRemoves = 0;
+    const storage = {
+      getItem: async (key: string) => kv.get(key) ?? null,
+      setItem: async (key: string, value: string) => {
+        kv.set(key, value);
+      },
+      removeItem: async (key: string) => {
+        if (failRemoves > 0 && key !== "t.meta") {
+          failRemoves -= 1;
+          throw new Error("storage is busy");
+        }
+        kv.delete(key);
+      },
+    };
+    const old = createKeyValueStateStore(storage, "t.");
+    await old.save({
+      meta: meta("old vault"),
+      records: new Map(
+        ["A", "B", "C"].map((char, n) => [
+          rid(char, n),
+          { id: `n${n}`, rev: 5, hlc: { t: 1, c: 0, d: "d" }, deleted: false },
+        ]),
+      ),
+    });
+    // The clear removes the meta, then fails on the buckets.
+    failRemoves = 1;
+    await assert.rejects(old.clear(), /busy/);
+    assert.equal(kv.has("t.meta"), false);
+    assert.equal(kv.has("t.r.A"), true);
+    const fresh = createKeyValueStateStore(storage, "t.");
+    assert.equal(await fresh.load(), null);
+    await fresh.save({
+      meta: meta("new vault"),
+      records: new Map([
+        [
+          rid("B", 9),
+          { id: "mine", rev: 1, hlc: { t: 2, c: 0, d: "d" }, deleted: false },
+        ],
+      ]),
+    });
+    const loaded = await createKeyValueStateStore(storage, "t.").load();
+    assert.equal(loaded?.meta.vaultId, "new vault");
+    assert.deepEqual([...loaded!.records.keys()], [rid("B", 9)]);
+    assert.deepEqual([...kv.keys()].sort(), ["t.meta", "t.r.B"]);
+  });
 });
 
 describe("http transport", () => {
@@ -622,6 +736,14 @@ describe("http transport", () => {
         head: 0,
         epoch: "short",
       }),
+      JSON.stringify({
+        records: [],
+        next: 0,
+        hasMore: false,
+        head: 0,
+        epoch,
+        purgedSeq: "3",
+      }),
     ]) {
       const odd = createHttpTransport({
         request: async () => ({ status: 200, body }),
@@ -646,6 +768,26 @@ describe("http transport", () => {
       ]),
       (e: unknown) => e instanceof SyncError && e.kind === "server",
     );
+  });
+
+  it("reads purgedSeq when the server sends it", async () => {
+    const page = (extra: Record<string, unknown>) =>
+      createHttpTransport({
+        request: async () => ({
+          status: 200,
+          body: JSON.stringify({
+            records: [],
+            next: 4,
+            hasMore: false,
+            head: 4,
+            epoch: "e0000000001",
+            ...extra,
+          }),
+        }),
+        vault: keys,
+      }).changes(4, 10);
+    assert.equal((await page({ purgedSeq: 9 })).purgedSeq, 9);
+    assert.equal("purgedSeq" in (await page({})), false);
   });
 
   it("treats deleting an already deleted vault as done", async () => {

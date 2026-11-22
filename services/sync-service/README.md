@@ -16,7 +16,7 @@ the client crypto.
 | --------------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------- |
 | `GET /health`                                 | none          | 200 `{status: "ok", service: "sonolect-sync-service"}`                                         |
 | `POST /v1/vaults`                             | none          | 201 created, 200 already there with the same verifier, 409 `vault_exists`, 410 `vault_deleted` |
-| `GET /v1/vaults/:vaultId/changes?since&limit` | vault token   | 200 a page of the change feed, 410 `cursor_reset`, `cursor_expired` or `vault_deleted`         |
+| `GET /v1/vaults/:vaultId/changes?since&limit` | vault token   | 200 a page of the change feed, 410 `cursor_reset` or `vault_deleted`                           |
 | `POST /v1/vaults/:vaultId/records`            | vault token   | 200 one result per write, 410 `vault_deleted`                                                  |
 | `DELETE /v1/vaults/:vaultId`                  | vault token   | 204, also when the vault is already deleted                                                    |
 | `GET /v1/admin/status`                        | service token | 200 `{service, store, limits}`                                                                 |
@@ -29,12 +29,17 @@ the client crypto.
   and `limit` is 1 to 200 (default 200). A page holds at most 200 records
   and 4 MiB of ciphertext, except that a page always takes its first
   record, however large. The answer is
-  `{records: [{rid, rev, seq, deleted, ct}], next, hasMore, head, epoch}`.
+  `{records: [{rid, rev, seq, deleted, ct}], next, hasMore, head, epoch, purgedSeq}`.
   - `since` above the vault's head answers 410 `cursor_reset`: the server
     lost data, so the device starts again from 0.
-  - `since` above 0 but below the seq of a purged tombstone answers 410
-    `cursor_expired`: the device starts again from 0 and treats records
-    it no longer finds as deleted.
+  - `purgedSeq` is the highest seq of a purged tombstone (0 when none). A
+    device whose cursor from a finished pull is below it missed deletes:
+    it starts again from 0 and treats records it no longer finds as
+    deleted. A cursor below it is still answered, because a device that
+    pages from 0 must get past it; only the device knows which kind of
+    cursor it sent. Earlier versions answered 410 `cursor_expired`
+    instead, which left every page after the first out of reach, and the
+    engine still understands that answer.
 - **Writes.** The body is `{writes: [{rid, baseRev, deleted, ct}]}` with 1
   to 100 writes and distinct rids. Each write is a compare-and-swap:
   `baseRev` must be the record's current revision, or 0 for a record the
@@ -59,16 +64,16 @@ the client crypto.
 
 Every error is `{error, message}`, with a code from `SYNC_ERROR_CODES`:
 
-| Status | Code                                              | When                                                                                      |
-| ------ | ------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| 400    | `bad_request`                                     | Malformed body, query or path (the message never quotes the request)                      |
-| 401    | `unauthorized`                                    | Unknown vault, wrong token or no token: one answer for all three, with `WWW-Authenticate` |
-| 404    | `not_found`                                       | A malformed vault id, or no such route                                                    |
-| 409    | `vault_exists`                                    | `POST /v1/vaults` for an id that another verifier holds                                   |
-| 410    | `vault_deleted`, `cursor_reset`, `cursor_expired` | See above                                                                                 |
-| 413    | `record_too_large`                                | A record over 768 KiB, or a body over 5 MiB                                               |
-| 429    | `rate_limited`                                    | With `Retry-After` in seconds                                                             |
-| 500    | `internal_error`                                  | Logged with the error, never with the request body                                        |
+| Status | Code                            | When                                                                                      |
+| ------ | ------------------------------- | ----------------------------------------------------------------------------------------- |
+| 400    | `bad_request`                   | Malformed body, query or path (the message never quotes the request)                      |
+| 401    | `unauthorized`                  | Unknown vault, wrong token or no token: one answer for all three, with `WWW-Authenticate` |
+| 404    | `not_found`                     | A malformed vault id, or no such route                                                    |
+| 409    | `vault_exists`                  | `POST /v1/vaults` for an id that another verifier holds                                   |
+| 410    | `vault_deleted`, `cursor_reset` | See above                                                                                 |
+| 413    | `record_too_large`              | A record over 768 KiB, or a body over 5 MiB                                               |
+| 429    | `rate_limited`                  | With `Retry-After` in seconds                                                             |
+| 500    | `internal_error`                | Logged with the error, never with the request body                                        |
 
 ## Authentication and limits
 
@@ -81,7 +86,9 @@ Every error is `{error, message}`, with a code from `SYNC_ERROR_CODES`:
   Production refuses to start without one.
 - **Rate limits**, in fixed windows per instance:
   - 600 requests per minute per IP address, on every route but `/health`;
-  - 120 requests per minute per vault, counted after authentication;
+  - 120 requests per minute per vault, counted after authentication. A
+    full resync of a large vault needs more pages than that (up to 200 at
+    the quotas): the engine resumes it after the 429 where it stopped;
   - 10 new vaults per hour per IP address. Confirming an existing vault does
     not count. A creation takes its slot before the store is asked, so
     concurrent requests cannot pass the limit together.
@@ -92,6 +99,12 @@ Every error is `{error, message}`, with a code from `SYNC_ERROR_CODES`:
   trusted proxy: one hop on Cloud Run (`K_SERVICE` is set there), otherwise
   none unless `SONOLECT_SYNC_TRUST_PROXY` says how many. A direct caller
   therefore cannot pick its own address.
+  - Each proxy in front adds a hop. An external Application Load Balancer
+    in front of Cloud Run appends the caller's address and its own, so set
+    `SONOLECT_SYNC_TRUST_PROXY=2` there. With too few hops every caller
+    counts as the proxy, and all of them share one IP limit; with too
+    many, a caller can pick its own address. The request log's
+    `remoteAddress` shows which one the service uses.
 - **CORS** is off unless `SONOLECT_SYNC_ALLOWED_ORIGINS` lists origins. The
   apps do not need it when they call through a native HTTP client.
 - **Logs** are Fastify's JSON request lines: method, URL (vault id, `since`
@@ -123,7 +136,9 @@ only when that store is chosen.
 
 - **`memory`**: process memory, for tests and local development.
 - **`sqlite:<path>`**: one file through `node:sqlite`, in WAL mode, with
-  `STRICT` tables `vaults` and `records`. A unique index on `(vault, seq)`
+  `STRICT` tables `vaults` and `records`. With `synchronous = FULL` each
+  commit is on disk before the answer, so a power cut cannot undo a write
+  that a device was told succeeded. A unique index on `(vault, seq)`
   serves the feed, and a partial index on tombstones serves the purge.
   Writes run in `BEGIN IMMEDIATE` transactions. The file's `user_version`
   is the schema version; a newer file is refused. The parent directory is
@@ -141,6 +156,9 @@ only when that store is chosen.
   - Each write batch is one transaction. The feed queries `seq` and the
     purge queries `tombstoneAt`, both through Firestore's automatic
     single-field indexes, so there is no composite index to deploy.
+    `ct` is never queried: `infra/terraform/sync` exempts it from indexing
+    (on the `records` collection group), so a write does not index the
+    ciphertext.
   - There is no TTL policy. The service purges tombstones itself, because
     the purge must also update the vault's counters and `purgedSeq`.
   - `infra/firebase/firestore.rules` denies this collection to client SDKs
@@ -153,7 +171,9 @@ from then on. The service never removes a vault on its own, so the markers
 and abandoned vaults stay until an operator removes them.
 
 **Backups.** A device notices that the store went back in time only while
-the vault's head is still below the highest seq it has seen. After
+the vault's head is still below the highest seq it has seen. That includes
+a SQLite file that lost its last commits, which `synchronous = FULL`
+prevents unless the disk itself lies about what it wrote. After
 restoring a backup, give every vault a new `epoch` (11 random base64url
 characters) before serving traffic again. Every device then runs a full
 resync and uploads what the backup lost.

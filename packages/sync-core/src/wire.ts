@@ -124,6 +124,16 @@ export interface ChangesResponse {
   head: number;
   /** The vault's epoch (see CreateVaultResponse). */
   epoch: string;
+  /**
+   * The highest seq of a tombstone the server purged (0: none). A device
+   * whose cursor from a finished pull is below it missed deletes and
+   * resyncs from 0. A pass that pages from 0 may go on below it: what it
+   * cannot list any more is reconciled when the pass ends. On the last
+   * page (no `hasMore`) a device moves its cursor up to it, since nothing
+   * is left between. Absent from servers that answer 410 cursor_expired
+   * instead.
+   */
+  purgedSeq?: number;
 }
 
 /** One write in POST /v1/vaults/:vaultId/records. */
@@ -169,7 +179,11 @@ export const SYNC_ERROR_CODES = {
   vaultExists: "vault_exists",
   /** 410: the vault was deleted (by DELETE /v1/vaults/:vaultId). */
   vaultDeleted: "vault_deleted",
-  /** 410: `since` is older than tombstones the server has purged: resync from 0. */
+  /**
+   * 410: `since` is older than tombstones the server has purged: resync
+   * from 0. The service reports `purgedSeq` on the page instead, so a pass
+   * from 0 can page past it; the engine still handles this answer.
+   */
   cursorExpired: "cursor_expired",
   /** 410: `since` is past the vault's head (the server lost data): resync from 0. */
   cursorReset: "cursor_reset",
