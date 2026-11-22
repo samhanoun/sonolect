@@ -419,7 +419,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.library.emptyTitle": "Tout commence ici.",
   "studio.library.tryOther": "Essayez un autre mot.",
   "studio.library.emptyBody":
-    "Vos enregistrements apparaîtront ici après une dictée ou un import audio dans l'application Windows.",
+    "Vos enregistrements apparaîtront ici après une dictée ou un import audio dans l'application de bureau.",
   "studio.library.createFirst": "Créer votre premier enregistrement",
   "studio.library.retryNeeded": "À relancer",
   "studio.library.savedOnDevice": "Enregistré sur l'appareil",
@@ -497,7 +497,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.settings.storageHint":
     "Les enregistrements peuvent durer jusqu'à quatre heures et sont conservés sur cet appareil pendant la durée choisie ci-dessus. Les clés API utilisent le Gestionnaire d'identification Windows.",
   "studio.settings.previewNotice":
-    "Ceci est l'aperçu dans le navigateur. L'installation des modèles et la reconnaissance locale fonctionnent dans l'application Windows.",
+    "Ceci est l'aperçu dans le navigateur. L'installation des modèles et la reconnaissance locale fonctionnent dans l'application de bureau Sonolect.",
   "studio.privacy.title": "Confidentialité et conservation",
   "studio.privacy.subtitle":
     "En mode Local uniquement, les enregistrements et les transcriptions ne quittent jamais cet appareil.",
@@ -513,7 +513,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.privacy.keptForever":
     "Les enregistrements sont conservés jusqu'à ce que vous les supprimiez.",
   "studio.privacy.savedPreview":
-    "Enregistré. Le réglage s'applique dans l'application Windows.",
+    "Enregistré. Le réglage s'applique dans l'application de bureau.",
   "studio.privacy.savedDeleted.one":
     "Enregistré. {count} enregistrement de plus de {period} a été supprimé.",
   "studio.privacy.savedDeleted.other":
@@ -631,7 +631,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.models.browse": "Parcourir les modèles",
   "studio.models.removeKey": "Supprimer la clé enregistrée",
   "studio.models.previewNotice":
-    "Aperçu dans le navigateur. Ouvrez l'application Windows pour enregistrer des clés et utiliser la reconnaissance native.",
+    "Aperçu dans le navigateur. La reconnaissance locale fonctionne dans l'application de bureau Sonolect. L'enregistrement des clés API pour les modèles en ligne ne fonctionne pour l'instant que dans l'application Windows.",
   "studio.models.localTitle": "Vous préférez rester en local\u202f?",
   "studio.models.localBody":
     "Whisper fonctionne sur votre ordinateur. Sans clé API. Sans compte. Sans envoi d'audio.",
@@ -650,7 +650,7 @@ export const fr: Record<LocaleKeys, string> = {
     "OpenCode Zen est disponible pour la réécriture de texte. Son API publique ne propose pas actuellement de modèles vocaux dédiés.",
   "provider.name.local": "Whisper local",
   "provider.previewOnly":
-    "Ouvrez l'application Windows pour utiliser les clés sécurisées et la reconnaissance native. Cette fenêtre est un aperçu dans le navigateur.",
+    "Cette fenêtre est un aperçu dans le navigateur. La reconnaissance locale fonctionne dans l'application de bureau Sonolect. Les clés API enregistrées ne fonctionnent pour l'instant que dans l'application Windows.",
   "provider.cloudRequired":
     "Activez le traitement cloud avant d'envoyer de l'audio ou du texte en ligne.",
   "provider.cloudCancelled": "Le traitement cloud a été annulé.",
