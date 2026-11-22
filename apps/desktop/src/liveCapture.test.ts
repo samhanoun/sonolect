@@ -115,6 +115,24 @@ describe("live capture session", () => {
     await assert.rejects(session.finish(), /already ended/);
   });
 
+  it("names no recording when the note was deleted before it was saved", async () => {
+    const transport = fakeTransport();
+    const finish = transport.finish;
+    // The native side leaves the id out for a note deleted meanwhile.
+    transport.finish = async (captureId) => {
+      const { captureId: _kept, ...rest } = await finish(captureId);
+      return rest;
+    };
+    const session = await LiveCaptureSession.start(transport, {
+      language: "en",
+      modelPath: "ggml-base.bin",
+    });
+    session.push(new Float32Array(16000).fill(0.25), 16000);
+    const result = await session.finish();
+    assert.equal(result.text, "Hello there.");
+    assert.equal("captureId" in result, false);
+  });
+
   it("reports live text for this recording only, until it ends", async () => {
     const transport = fakeTransport();
     const seen: string[][] = [];

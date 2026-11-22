@@ -130,12 +130,12 @@ fn check_accessibility() -> PermissionResult {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn check_accessibility_permission() -> PermissionResult {
     check_accessibility()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn open_accessibility_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -152,7 +152,8 @@ fn open_accessibility_settings() -> Result<(), String> {
 
 /// Edge voices are a Microsoft online service, so this honours Local only like
 /// every other online request, and returns the MP3 as a raw binary response.
-#[tauri::command]
+/// It runs off the main thread: the voice service can take seconds.
+#[tauri::command(async)]
 fn edge_tts_synthesize(
     app: tauri::AppHandle,
     text: String,

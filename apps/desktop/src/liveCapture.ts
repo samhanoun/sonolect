@@ -247,7 +247,9 @@ export class LiveCaptureSession {
         text: result.text.trim(),
         segments: normalizeWhisperSegments(result.segments ?? []),
         ...(result.language ? { language: result.language } : {}),
-        captureId: result.captureId ?? this.captureId,
+        // The native side leaves the id out when the user deleted the note
+        // while its last words were transcribed: there is nothing to open.
+        ...(result.captureId ? { captureId: result.captureId } : {}),
       };
     } finally {
       this.ended = true;

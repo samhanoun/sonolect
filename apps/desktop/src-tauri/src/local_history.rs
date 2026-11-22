@@ -678,6 +678,9 @@ pub fn purge_local_captures(
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_millis() as u64;
+    // Under the records lock, so a save that checks the note still exists
+    // (save_if_kept) cannot bring one back between the check and the write.
+    let _records = lock();
     purge_directory(&directory(&app)?, older_than_days, now_ms)
 }
 
