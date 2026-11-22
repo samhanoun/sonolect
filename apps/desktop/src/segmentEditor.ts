@@ -363,6 +363,34 @@ export function segmentsFromCapture(capture: {
   });
 }
 
+/** A segment as a studio save sends it to update_local_capture. */
+export type SegmentToSave = {
+  startMs: number;
+  endMs: number;
+  text: string;
+  speaker?: string;
+  approx?: true;
+};
+
+/**
+ * The segments a studio save sends: those with words, in whole
+ * milliseconds. A part whose times the studio estimated keeps its approx
+ * mark, so the note says so on every device it syncs to.
+ */
+export function segmentsToSave(
+  segments: readonly TranscriptSegment[],
+): SegmentToSave[] {
+  return segments
+    .filter((segment) => segment.text.trim())
+    .map((segment) => ({
+      startMs: Math.round(segment.startMs),
+      endMs: Math.round(Math.max(segment.startMs, segment.endMs)),
+      text: segment.text.trim(),
+      ...(segment.speaker ? { speaker: segment.speaker } : {}),
+      ...(segment.approx ? { approx: true as const } : {}),
+    }));
+}
+
 /** Moves a segment one place up or down. */
 export function moveTranscriptSegment(
   segments: TranscriptSegment[],
