@@ -156,9 +156,13 @@ export function formatCueTime(ms: number, separator: "," | "."): string {
   return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}${separator}${pad(safe % 1000, 3)}`;
 }
 
-/** "-->" would end the timing line of a cue. */
+/**
+ * "-->" is the arrow of a cue's timing line, so it cannot appear in a cue
+ * or a NOTE. A plain string split, not a pattern: this is subtitle syntax,
+ * and no HTML is filtered here (WebVTT text is escaped by escapeVtt).
+ */
 function cueSafe(text: string): string {
-  return text.replace(/-->/g, "→");
+  return text.split("-->").join("→");
 }
 
 export function toSrt(cues: readonly Cue[]): string {
@@ -180,9 +184,7 @@ function escapeVtt(text: string): string {
 
 /** WebVTT; `note` becomes a NOTE block, such as "timings are approximate". */
 export function toVtt(cues: readonly Cue[], note?: string): string {
-  const header = note
-    ? `WEBVTT\n\nNOTE ${note.replace(/-->/g, "→")}\n`
-    : "WEBVTT\n";
+  const header = note ? `WEBVTT\n\nNOTE ${cueSafe(note)}\n` : "WEBVTT\n";
   if (cues.length === 0) return header;
   return `${header}\n${cues
     .map(
