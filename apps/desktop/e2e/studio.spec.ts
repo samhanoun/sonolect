@@ -323,6 +323,38 @@ test.describe("Sonolect dictation in the browser preview", () => {
     ).toBe(0);
     expect(outside).toEqual([]);
   });
+
+  test("leaves the microphone test free after it refuses", async ({ page }) => {
+    await page.goto("/");
+    const dock = page.locator(".studio-recording-dock");
+    await page.getByRole("button", { name: /Start dictating/ }).click();
+    await expect(dock).toContainText(
+      "The browser preview cannot transcribe speech.",
+    );
+
+    // The refusal stays on the dock, and the test still checks a microphone.
+    await nav(page, "Settings").click();
+    const card = page.locator("section", {
+      has: page.getByRole("heading", { name: "Microphone", exact: true }),
+    });
+    await expect(
+      card.getByRole("button", { name: "Test microphone" }),
+    ).toBeEnabled();
+    await card.getByRole("button", { name: "Test microphone" }).click();
+    await expect(card.getByText("Nothing is recorded.")).toBeVisible();
+    const meter = card.getByRole("meter", { name: "Microphone level" });
+    // Chromium's synthetic microphone beeps: the meter has to move.
+    await expect
+      .poll(async () => Number(await meter.getAttribute("aria-valuenow")), {
+        timeout: 10_000,
+        intervals: [50],
+      })
+      .toBeGreaterThan(5);
+    await card.getByRole("button", { name: "Stop test" }).click();
+    await expect(dock).toContainText(
+      "The browser preview cannot transcribe speech.",
+    );
+  });
 });
 
 test.describe("Sonolect dictation in the browser preview, in French", () => {

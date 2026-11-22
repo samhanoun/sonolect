@@ -4,6 +4,8 @@
  * chosen one is unplugged).
  */
 
+import type { RecordingState } from "./store/appStore";
+
 /** The saved microphone; absent or empty means the system default. */
 export const MIC_DEVICE_KEY = "sonolect.micDeviceId";
 
@@ -135,4 +137,18 @@ export function meterPosition(level: number): number {
   if (!(level > 0)) return 0;
   const decibels = 20 * Math.log10(Math.min(1, level));
   return Math.max(0, Math.min(1, (decibels + 60) / 60));
+}
+
+/**
+ * Whether a dictation keeps the microphone test from starting. One that is
+ * under way always does. In the app, one that failed also does until its
+ * message is dismissed. The browser preview refuses before the microphone
+ * opens, so its refusal leaves the test free.
+ */
+export function micTestBlocked(
+  recordingState: RecordingState,
+  native: boolean,
+): boolean {
+  if (recordingState === "idle" || recordingState === "completed") return false;
+  return recordingState !== "error" || native;
 }

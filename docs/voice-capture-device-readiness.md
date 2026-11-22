@@ -41,7 +41,7 @@ One developer setup does transcribe, through a Sonolect API:
 
 With an online speech model, or in `Local only`, the preview refuses before it records, as above. If Processing mode changes to `Local only` while a recording runs, the preview drops that recording and says so.
 
-To check a microphone in the preview, use Settings › Microphone › `Test microphone`. It shows the level and records nothing.
+To check a microphone in the preview, use Settings › Microphone › `Test microphone`. It shows the level and records nothing. It works even while the dock still shows the refusal.
 
 ## Mobile device pass
 
