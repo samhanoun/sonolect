@@ -386,6 +386,30 @@ describe("desktop and phone sync through the sync service", () => {
     ]);
   });
 
+  it("a desktop edit of a cleaned-up phone dictation is what the phone shows", async () => {
+    const w = await world();
+    const { desk, phone } = await paired(w);
+    const { id } = await phone.dictate("um so buy milk", {
+      refinedText: "Buy milk.",
+    });
+    await phone.sync();
+    await desk.sync();
+    assert.equal(desk.capture(id)?.transcript, "um so buy milk");
+    assert.equal(desk.capture(id)?.refinedText, "Buy milk.");
+
+    await w.clock.advance(10_000);
+    desk.native.edit(id, "Buy oat milk and eggs.");
+    await desk.sync();
+    await phone.sync();
+    const turn = phone.turn(id);
+    assert.equal(
+      turn?.refinedText,
+      "Buy oat milk and eggs.",
+      "the phone shows it",
+    );
+    assert.equal(turn?.rawText, "Buy oat milk and eggs.");
+  });
+
   it("deletes go both ways and stay deleted", async () => {
     const w = await world();
     const { desk, phone } = await paired(w);

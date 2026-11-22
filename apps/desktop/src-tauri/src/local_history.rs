@@ -495,6 +495,13 @@ fn update_record(
         _ => None,
     };
     keep_segment_extras(&record.segments, &mut segments);
+    // The studio edits the transcript, and the phone shows a note's refined
+    // text when it has one. Once the text is edited here, that refined text
+    // no longer says what the note says: it is dropped, so the phone shows
+    // the edit too.
+    if record.transcript.as_deref() != Some(transcript.as_str()) {
+        record.refined_text = None;
+    }
     record.transcript = Some(transcript);
     record.segments = segments;
     record.updated_at_ms = Some(now);
@@ -1506,6 +1513,35 @@ mod tests {
         // Without a base (an editor that opened no saved version), as before.
         let saved = update_record(&notes, "3-1", "plain".into(), vec![], None).unwrap();
         assert_eq!(saved.conflict_copy, None);
+    }
+
+    #[test]
+    fn a_text_edit_drops_the_refined_text_the_phone_would_show_instead() {
+        let folder = tempfile::tempdir().unwrap();
+        let notes = synced_library(folder.path());
+        sync_on(notes.sync.as_ref().unwrap(), "desk");
+        record(&notes.captures, "3-1", 5);
+        let mut dictated = read_record(&notes.captures, "3-1").unwrap();
+        dictated.transcript = Some("um buy milk".into());
+        dictated.refined_text = Some("Buy milk.".into());
+        dictated.segments = vec![segment(0, 900, "um buy milk", None)];
+        store(&notes.captures, &dictated).unwrap();
+        // Saving the same text (a speaker or a timing changed) keeps it.
+        update_record(
+            &notes,
+            "3-1",
+            "um buy milk".into(),
+            vec![segment(0, 900, "um buy milk", Some("Ana"))],
+            None,
+        )
+        .unwrap();
+        let kept = read_record(&notes.captures, "3-1").unwrap();
+        assert_eq!(kept.refined_text.as_deref(), Some("Buy milk."));
+        // Editing the text: both apps now show the edit.
+        update_record(&notes, "3-1", "Buy oat milk and eggs.".into(), vec![], None).unwrap();
+        let edited = read_record(&notes.captures, "3-1").unwrap();
+        assert_eq!(edited.transcript.as_deref(), Some("Buy oat milk and eggs."));
+        assert_eq!(edited.refined_text, None);
     }
 
     #[test]

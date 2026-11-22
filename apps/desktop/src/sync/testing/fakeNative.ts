@@ -134,6 +134,8 @@ export class FakeNative {
     const capture = this.captures.get(id);
     if (!capture)
       throw new Error("This recording is no longer in your library.");
+    // As local_history.rs: a text edit drops the refined text.
+    if (capture.transcript !== transcript) delete capture.refinedText;
     capture.transcript = transcript;
     if (segments) capture.segments = segments;
     capture.updatedAtMs = this.options.now();
