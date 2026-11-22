@@ -60,12 +60,32 @@ export type OnlineEditOutcome =
    */
   | { kind: "stale" };
 
+/** A provider and a model, as the consent dialog named them. */
+export type OnlineChoice = Pick<OnlineEditing, "provider" | "model">;
+
+/**
+ * Whether the consent given in the dialog covers the current choice. A
+ * consent names a provider and a model; it never carries over to others.
+ */
+export function consentCovers(
+  consentedTo: OnlineChoice | undefined,
+  settings: { onlineEditing?: unknown },
+): boolean {
+  const editing = normalizeOnlineEditing(settings.onlineEditing);
+  return (
+    consentedTo !== undefined &&
+    editing !== undefined &&
+    consentedTo.provider === editing.provider &&
+    consentedTo.model === editing.model
+  );
+}
+
 export interface OnlineEditInput {
   /** The note when the user tapped. */
   turn: TranscriptTurn;
   mode: RefinementMode;
-  /** The user agreed to send this note, in the dialog. */
-  consentedNow: boolean;
+  /** What the user agreed to send this note to, in the dialog. */
+  consentedTo?: OnlineChoice | undefined;
   web: boolean;
   settings: PlanSettings;
   keySaved: Readonly<ProviderKeyStatus>;
@@ -91,7 +111,10 @@ export interface OnlineEditInput {
 export async function runOnlineEdit(
   input: OnlineEditInput,
 ): Promise<OnlineEditOutcome> {
-  const plan = planOnlineEdit(input);
+  const plan = planOnlineEdit({
+    ...input,
+    consentedNow: consentCovers(input.consentedTo, input.settings),
+  });
   if (plan.kind === "ask") return { kind: "ask", editing: plan.editing };
   if (plan.kind !== "send" || !isOnlineMode(input.mode)) {
     return { kind: "local" };

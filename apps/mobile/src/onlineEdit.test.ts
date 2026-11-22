@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import type { CompanionSettings, TranscriptTurn } from "./domain";
 import { DEFAULT_SETTINGS } from "./domain";
 import type { OnlineEditInput } from "./onlineEdit";
-import { planOnlineEdit, runOnlineEdit } from "./onlineEdit";
+import { consentCovers, planOnlineEdit, runOnlineEdit } from "./onlineEdit";
 import type { OnlineEditing } from "./onlineRefine";
 import type { SecureItemStore } from "./providerKeys";
 import { createProviderKeyStore } from "./providerKeys";
@@ -70,7 +70,7 @@ function setup(
   const input: OnlineEditInput = {
     turn: TURN,
     mode: "rewrite",
-    consentedNow: true,
+    consentedTo: EDITING,
     web: false,
     settings: { ...DEFAULT_SETTINGS, onlineEditing: EDITING, ...settings },
     keySaved: { openrouter: true, opencode: false },
@@ -98,7 +98,7 @@ function setup(
 
 describe("asking first", () => {
   it("reads no key and sends nothing until the user agrees", async () => {
-    const { input, calls, keyReads, sends } = setup({ consentedNow: false });
+    const { input, calls, keyReads, sends } = setup({ consentedTo: undefined });
     for (const mode of ["rewrite", "reply"] as const) {
       assert.deepEqual(await runOnlineEdit({ ...input, mode }), {
         kind: "ask",
@@ -113,21 +113,21 @@ describe("asking first", () => {
   it("sends without asking only with Always allow, never in Ephemeral", async () => {
     const always = { ...EDITING, alwaysAllow: true };
     const standard = setup({
-      consentedNow: false,
+      consentedTo: undefined,
       settings: { privacyLevel: "standard", onlineEditing: always },
     });
     assert.equal((await runOnlineEdit(standard.input)).kind, "applied");
     assert.equal(standard.calls.length, 1);
 
     const ephemeral = setup({
-      consentedNow: false,
+      consentedTo: undefined,
       settings: { privacyLevel: "ephemeral", onlineEditing: always },
     });
     assert.equal((await runOnlineEdit(ephemeral.input)).kind, "ask");
     assert.equal(ephemeral.calls.length, 0);
     // The dialog's Send still works in Ephemeral.
     assert.equal(
-      (await runOnlineEdit({ ...ephemeral.input, consentedNow: true })).kind,
+      (await runOnlineEdit({ ...ephemeral.input, consentedTo: always })).kind,
       "applied",
     );
   });
@@ -142,6 +142,21 @@ describe("asking first", () => {
     assert.deepEqual(await runOnlineEdit(web.input), { kind: "local" });
     assert.equal(web.calls.length, 0);
     assert.equal(web.keyReads.length, 0);
+  });
+
+  it("takes a consent only for the provider and model it named", async () => {
+    for (const consentedTo of [
+      { provider: "openrouter", model: "anthropic/claude-sonnet-5-5" },
+      { provider: "opencode", model: EDITING.model },
+    ] as const) {
+      const { input, calls, keyReads } = setup({ consentedTo });
+      assert.equal((await runOnlineEdit(input)).kind, "ask");
+      assert.equal(calls.length, 0);
+      assert.equal(keyReads.length, 0);
+    }
+    assert.equal(consentCovers(EDITING, { onlineEditing: EDITING }), true);
+    assert.equal(consentCovers(EDITING, {}), false);
+    assert.equal(consentCovers(undefined, { onlineEditing: EDITING }), false);
   });
 
   it("plans with the key of the chosen provider only", () => {
@@ -174,14 +189,14 @@ describe("after consent", () => {
     assert.equal(headers.authorization, `Bearer ${KEY}`);
     assert.ok(!String(calls[0]?.init.body).includes(KEY));
 
+    const zen: OnlineEditing = {
+      ...EDITING,
+      provider: "opencode",
+      model: "claude-sonnet-5-5",
+    };
     const opencode = setup({
-      settings: {
-        onlineEditing: {
-          ...EDITING,
-          provider: "opencode",
-          model: "claude-sonnet-5-5",
-        },
-      },
+      settings: { onlineEditing: zen },
+      consentedTo: zen,
       keySaved: { openrouter: false, opencode: true },
       respond: () =>
         new Response(JSON.stringify({ content: [{ text: "Fine." }] }), {

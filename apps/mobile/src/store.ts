@@ -34,6 +34,7 @@ import {
   refineNoticeChange,
   replaceNotice,
 } from "./notices";
+import type { OnlineChoice } from "./onlineEdit";
 import { planOnlineEdit, runOnlineEdit } from "./onlineEdit";
 import type { OnlineEditing, OnlinePlan, OnlineProvider } from "./onlineRefine";
 import {
@@ -138,14 +139,15 @@ interface CompanionState {
   saveTyped: (text: string) => Promise<boolean>;
   /**
    * Applies a refinement mode. Rewrite and Reply with online editing send
-   * the note only after consent: consentedNow (the dialog's Send), or
-   * "Always allow" outside Ephemeral. Without it nothing happens, so the
-   * Capture screen asks first (see onlinePlan).
+   * the note only after consent: consentedTo, the provider and model the
+   * dialog named when the user tapped Send, or "Always allow" outside
+   * Ephemeral. Without it nothing happens, so the Capture screen asks first
+   * (see onlinePlan).
    */
   refine: (
     turnId: string,
     mode: RefinementMode,
-    options?: { consentedNow?: boolean },
+    options?: { consentedTo?: OnlineChoice },
   ) => Promise<void>;
   /** What a tap on this mode's chip does: refine here, ask, or send. */
   onlinePlan: (mode: RefinementMode) => OnlinePlan;
@@ -914,7 +916,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       const online = await runOnlineEdit({
         turn: first,
         mode,
-        consentedNow: options?.consentedNow === true,
+        consentedTo: options?.consentedTo,
         web,
         settings: state.settings,
         keySaved: state.onlineKeySaved,
