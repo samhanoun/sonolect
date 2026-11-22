@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   Animated,
   BackHandler,
   KeyboardAvoidingView,
@@ -20,7 +21,7 @@ import { strings } from "../src/i18n";
 import { formatDuration } from "../src/library";
 import { actionLabel, noticeText, type NoticeAction } from "../src/notices";
 import type { RefinementMode } from "../src/domain";
-import { refiningFor } from "../src/onlineEdit";
+import { refiningFor, type OnlineChoice } from "../src/onlineEdit";
 import {
   PROVIDER_NAMES,
   isOnlineEditingReady,
@@ -322,26 +323,48 @@ export default function CaptureScreen() {
   const onRefine = async (turnId: string, mode: RefinementMode) => {
     if (consenting.current) return;
     const plan = onlinePlan(turnId, mode);
-    if (plan.kind !== "ask") {
-      await refine(turnId, mode);
-      return;
-    }
-    const { provider, model } = plan.editing;
-    const name = PROVIDER_NAMES[provider];
     const o = t.settings.onlineEditing;
-    consenting.current = true;
-    let send = false;
-    try {
-      send = await confirm({
-        title: o.consentTitle(name),
-        message: o.consentMessage(t.modes[mode], name, model),
-        confirmLabel: o.send,
-        cancelLabel: t.common.cancel,
-      });
-    } finally {
-      consenting.current = false;
+    let consentedTo: OnlineChoice | undefined;
+    if (plan.kind === "ask") {
+      const { provider, model } = plan.editing;
+      const name = PROVIDER_NAMES[provider];
+      consenting.current = true;
+      let send = false;
+      try {
+        send = await confirm({
+          title: o.consentTitle(name),
+          message: o.consentMessage(t.modes[mode], name, model),
+          confirmLabel: o.send,
+          cancelLabel: t.common.cancel,
+        });
+      } finally {
+        consenting.current = false;
+      }
+      if (!send) return;
+      consentedTo = { provider, model };
     }
-    if (send) await refine(turnId, mode, { consentedTo: { provider, model } });
+    // An online edit can take up to a minute: screen readers hear it start
+    // and end. A failure is a notice, which is read out as well.
+    const sendingTo =
+      plan.kind === "ask" || plan.kind === "send"
+        ? plan.editing.provider
+        : undefined;
+    if (sendingTo) {
+      AccessibilityInfo.announceForAccessibility(
+        o.sending(PROVIDER_NAMES[sendingTo]),
+      );
+    }
+    const edited = await refine(
+      turnId,
+      mode,
+      consentedTo ? { consentedTo } : undefined,
+    );
+    const note = useCompanionStore.getState().latest;
+    if (edited && note?.id === turnId) {
+      AccessibilityInfo.announceForAccessibility(
+        `${o.a11yEdited} ${note.refinedText.slice(0, 300)}`,
+      );
+    }
   };
 
   // partialTranscript goes stale after a refine, a delete or a clear.

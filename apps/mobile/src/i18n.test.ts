@@ -179,6 +179,17 @@ describe("online editing copy", () => {
     }
   });
 
+  it("tells screen readers when an edited note is ready", () => {
+    assert.equal(
+      STRINGS.en.settings.onlineEditing.a11yEdited,
+      "The edited note is ready.",
+    );
+    assert.equal(
+      STRINGS.fr.settings.onlineEditing.a11yEdited,
+      "La note modifiée est prête.",
+    );
+  });
+
   it("says Ephemeral always asks", () => {
     assert.match(
       STRINGS.en.settings.onlineEditing.alwaysAllowHelp,

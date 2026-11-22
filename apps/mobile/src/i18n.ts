@@ -351,6 +351,8 @@ const en = {
         `${mode} sends the text of this note to ${provider} (${model}) with your API key. ${provider}'s terms apply. Nothing else leaves this phone.`,
       send: "Send",
       sending: (provider: string) => `Sending to ${provider}…`,
+      /** Read out by screen readers, followed by the start of the note. */
+      a11yEdited: "The edited note is ready.",
       chipHint: (provider: string) => `Sends this note to ${provider}.`,
     },
     /** The "Dictate in any app" card. */
@@ -818,6 +820,7 @@ const fr: Strings = {
         `${mode} envoie le texte de cette note à ${provider} (${model}) avec votre clé d'API. Les conditions de ${provider} s'appliquent. Rien d'autre ne quitte ce téléphone.`,
       send: "Envoyer",
       sending: (provider: string) => `Envoi à ${provider}…`,
+      a11yEdited: "La note modifiée est prête.",
       chipHint: (provider: string) => `Envoie cette note à ${provider}.`,
     },
     voiceKeyboard: {

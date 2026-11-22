@@ -149,13 +149,14 @@ interface CompanionState {
    * the note only after consent: consentedTo, the provider and model the
    * dialog named when the user tapped Send, or "Always allow" outside
    * Ephemeral. Without it nothing happens, so the Capture screen asks first
-   * (see onlinePlan).
+   * (see onlinePlan). Resolves true when an online edit put the model's
+   * text on the note.
    */
   refine: (
     turnId: string,
     mode: RefinementMode,
     options?: { consentedTo?: OnlineChoice },
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   /**
    * What a tap on a note's chip does: refine here, ask, or send. A note
    * that could never be sent is not asked for: refine shows why.
@@ -697,7 +698,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     turnId: string,
     mode: RefinementMode,
     options: { consentedTo?: OnlineChoice } | undefined,
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     const web = Platform.OS === "web";
     const state = get();
     // Rewrite and Reply need a model: online editing with the user's own
@@ -707,9 +708,9 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       state.onlineKeySaved,
       web,
     );
-    if (!availableRefinementModes(onlineReady).includes(mode)) return;
+    if (!availableRefinementModes(onlineReady).includes(mode)) return false;
     const first = findTurn(turnId);
-    if (!first) return;
+    if (!first) return false;
 
     // A refinement clears only its own notices: a dictation's error stays
     // with its ATTENTION status.
@@ -749,10 +750,10 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     switch (online.kind) {
       case "ask":
         // Nothing was sent: the Capture screen asks first.
-        return;
+        return false;
       case "stale":
         set(finishRefining(turnId));
-        return;
+        return false;
       case "failed":
         set({
           ...finishRefining(turnId),
@@ -778,7 +779,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
             }),
           ),
         });
-        return;
+        return false;
       case "applied": {
         set(finishRefining(turnId));
         const turn = online.turn;
@@ -786,7 +787,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         if (get().history.some((item) => item.id === turnId)) {
           await replaceTurn(turn);
         }
-        return;
+        return true;
       }
       case "local":
         break;
@@ -794,7 +795,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
 
     const { history, settings, apiToken, dictionary, snippets } = get();
     const source = findTurn(turnId);
-    if (!source) return;
+    if (!source) return false;
     set({
       refining: true,
       refiningId: turnId,
@@ -849,11 +850,12 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         refineNoticeChange(get().notice, get().capture.status, notice),
       ),
     });
-    if (!refined) return;
+    if (!refined) return false;
     if (get().latest?.id === turnId) set({ latest: refined });
     if (history.some((turn) => turn.id === turnId)) {
       await replaceTurn(refined);
     }
+    return false;
   };
 
   return {
@@ -1087,10 +1089,10 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       // One refinement at a time for each note: its chips are disabled
       // meanwhile. Another note, such as one dictated while an online edit
       // waits for the provider, can still be refined.
-      if (refiningNotes.has(turnId)) return;
+      if (refiningNotes.has(turnId)) return false;
       refiningNotes.add(turnId);
       try {
-        await refineNote(turnId, mode, options);
+        return await refineNote(turnId, mode, options);
       } finally {
         refiningNotes.delete(turnId);
       }
