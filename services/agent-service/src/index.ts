@@ -22,10 +22,13 @@ import {
 import {
   BoundedMap,
   ServiceHttpError,
+  disableEndpoints,
   getServiceUserId,
+  isProduction,
   registerServiceSecurity,
   resolveListenOptions,
   type ServiceEnv,
+  type UnavailableEndpoint,
 } from "@sonolect/service-kit";
 
 const serviceName = "sonolect-agent-service";
@@ -57,6 +60,51 @@ export interface CreateAppOptions {
   logger?: boolean;
   env?: ServiceEnv;
 }
+
+/**
+ * Production endpoints that cannot give a real answer. Commands only get a
+ * placeholder plan, since no executor is connected, and custom agents and
+ * command results live in memory and vanish on restart.
+ */
+const PRODUCTION_UNAVAILABLE: readonly UnavailableEndpoint[] = [
+  {
+    route: "POST /agents",
+    statusCode: 501,
+    error: "not_implemented",
+    message:
+      "Custom agents are kept only in memory, so production does not accept them.",
+  },
+  {
+    route: "POST /commands/execute",
+    statusCode: 501,
+    error: "not_implemented",
+    message:
+      "No command executor is connected, so production runs no commands.",
+  },
+  {
+    route: "GET /commands/:id",
+    statusCode: 501,
+    error: "not_implemented",
+    message:
+      "No command executor is connected, so production runs no commands.",
+  },
+];
+
+/**
+ * Without a provider key the language model routes would answer with a local
+ * text clean-up that only looks like a rewrite or a summary.
+ */
+const NO_PROVIDER_MESSAGE =
+  "No language model provider is configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY.";
+const PRODUCTION_UNAVAILABLE_WITHOUT_KEY: readonly UnavailableEndpoint[] = [
+  "POST /llm/rewrite",
+  "POST /llm/summarize",
+].map((route) => ({
+  route,
+  statusCode: 503,
+  error: "not_configured",
+  message: NO_PROVIDER_MESSAGE,
+}));
 
 const createStores = (): InMemoryStores => ({
   rateLimits: new BoundedMap<string, RateLimitEntry>(MAX_RATE_LIMIT_ENTRIES),
@@ -198,10 +246,18 @@ export async function createApp(
   const stores = options.stores ?? createStores();
   const env = options.env ?? process.env;
   const app = Fastify({ logger: options.logger ?? true });
+  const production = isProduction(env);
 
   await app.register(helmet);
   await app.register(cors, { origin: false });
   registerServiceSecurity(app, { serviceName, env });
+  if (production)
+    disableEndpoints(app, [
+      ...PRODUCTION_UNAVAILABLE,
+      ...(env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY
+        ? []
+        : PRODUCTION_UNAVAILABLE_WITHOUT_KEY),
+    ]);
 
   app.get("/health", async () => ({
     status: "ok",
@@ -460,6 +516,18 @@ export async function createApp(
     return { provider: preferred ?? "openai", hasKey: false };
   };
 
+  /** Production refuses the local fallback for a provider without a key. */
+  const providerNotConfigured = (
+    reply: FastifyReply,
+    provider: "openai" | "anthropic",
+  ): FastifyReply =>
+    reply.status(503).send({
+      error: "not_configured",
+      message: `The ${provider} provider is not configured. Set ${
+        provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"
+      }.`,
+    });
+
   /* ------------------------------------------------------------------ */
   /*  POST /llm/rewrite                                                 */
   /* ------------------------------------------------------------------ */
@@ -490,6 +558,8 @@ export async function createApp(
           request,
         );
         const { provider, hasKey } = resolveProvider(input.provider);
+        if (!hasKey && production)
+          return providerNotConfigured(reply, provider);
         let rewritten: string;
         if (hasKey) {
           rewritten = await callLLM(
@@ -541,6 +611,8 @@ export async function createApp(
           request,
         );
         const { provider, hasKey } = resolveProvider(input.provider);
+        if (!hasKey && production)
+          return providerNotConfigured(reply, provider);
         let summary: string;
         if (hasKey) {
           summary = await callLLM(

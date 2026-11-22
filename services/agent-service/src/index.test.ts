@@ -208,9 +208,11 @@ describe("service security", () => {
   });
 
   it("requires the service token and keeps users apart", async () => {
+    // Outside production a configured token is enforced the same way.
+    // Production refuses commands outright (see "production" below).
     app = await createApp({
       logger: false,
-      env: { NODE_ENV: "production", SONOLECT_SERVICE_TOKENS: token },
+      env: { SONOLECT_SERVICE_TOKENS: token },
     });
     const anonymous = await app.inject({
       method: "POST",
@@ -304,5 +306,118 @@ describe("service security", () => {
     assert.equal(res.statusCode, 502, res.body);
     assert.equal(res.json<{ error: string }>().error, "upstream_error");
     assert.ok(!res.body.includes("sk-secret-detail"));
+  });
+});
+
+describe("production", () => {
+  const token = "p".repeat(40);
+  const headers = { authorization: `Bearer ${token}`, "x-user-id": "alice" };
+  const originalFetch = globalThis.fetch;
+  const productionApp = (env: Record<string, string> = {}) =>
+    createApp({
+      logger: false,
+      env: { NODE_ENV: "production", SONOLECT_SERVICE_TOKENS: token, ...env },
+    });
+
+  afterEach(async () => {
+    globalThis.fetch = originalFetch;
+    await app.close();
+  });
+
+  it("answers 503 not_configured instead of a local rewrite or summary without a key", async () => {
+    let called = false;
+    globalThis.fetch = (async () => {
+      called = true;
+      return new Response("{}");
+    }) as typeof fetch;
+    app = await productionApp();
+    for (const [url, style] of [
+      ["/llm/rewrite", "formal"],
+      ["/llm/summarize", "brief"],
+    ] as const) {
+      const res = await app.inject({
+        method: "POST",
+        url,
+        headers,
+        payload: { text: "hello world.  this is  a test.", style },
+      });
+      assert.equal(res.statusCode, 503, res.body);
+      const body = res.json<{ error: string; message: string }>();
+      assert.equal(body.error, "not_configured");
+      assert.match(body.message, /OPENAI_API_KEY or ANTHROPIC_API_KEY/);
+      assert.ok(!res.body.includes("this is a test"));
+
+      const anonymous = await app.inject({
+        method: "POST",
+        url,
+        payload: { text: "hello", style },
+      });
+      assert.equal(anonymous.statusCode, 401);
+    }
+    assert.equal(called, false);
+  });
+
+  it("refuses a provider without a key when another one has a key", async () => {
+    app = await productionApp({ OPENAI_API_KEY: "test-key" });
+    const res = await app.inject({
+      method: "POST",
+      url: "/llm/rewrite",
+      headers,
+      payload: { text: "hello", style: "formal", provider: "anthropic" },
+    });
+    assert.equal(res.statusCode, 503, res.body);
+    assert.equal(res.json<{ error: string }>().error, "not_configured");
+    assert.match(res.json<{ message: string }>().message, /ANTHROPIC_API_KEY/);
+  });
+
+  it("still calls the provider when its key is set", async () => {
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({ content: [{ type: "text", text: "Summary." }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+    app = await productionApp({ ANTHROPIC_API_KEY: "test-key" });
+    const res = await app.inject({
+      method: "POST",
+      url: "/llm/summarize",
+      headers,
+      payload: { text: "One. Two. Three.", style: "brief" },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(res.json<{ summary: string }>().summary, "Summary.");
+    assert.equal(res.json<{ provider: string }>().provider, "anthropic");
+  });
+
+  it("answers 501 for commands and custom agents, and keeps the built-in agents", async () => {
+    app = await productionApp({ OPENAI_API_KEY: "test-key" });
+    for (const request of [
+      {
+        method: "POST",
+        url: "/commands/execute",
+        payload: { command: "copy this note", dryRun: true },
+      },
+      {
+        method: "POST",
+        url: "/commands/execute",
+        payload: { command: "copy this note", dryRun: false },
+      },
+      { method: "GET", url: "/commands/any-id" },
+      {
+        method: "POST",
+        url: "/agents",
+        payload: { name: "Helper", type: "custom", systemPrompt: "Help." },
+      },
+    ] as const) {
+      const res = await app.inject({ ...request, headers });
+      assert.equal(res.statusCode, 501, `${request.url}: ${res.body}`);
+      assert.equal(res.json<{ error: string }>().error, "not_implemented");
+    }
+
+    const agents = await app.inject({ method: "GET", url: "/agents", headers });
+    assert.equal(agents.statusCode, 200, agents.body);
+    assert.deepEqual(
+      agents.json<{ items: { id: string }[] }>().items.map((agent) => agent.id),
+      ["dictation", "command"],
+    );
   });
 });

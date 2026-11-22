@@ -4,7 +4,9 @@ import Fastify, { type FastifyInstance } from "fastify";
 import {
   BoundedMap,
   ServiceHttpError,
+  disableEndpoints,
   getServiceUserId,
+  isProduction,
   parseServiceTokens,
   registerServiceSecurity,
   resolveListenOptions,
@@ -248,5 +250,147 @@ describe("helpers", () => {
     assert.equal(map.size, 2);
     map.set("c", 3);
     assert.deepEqual([...map.keys()], ["b", "c"]);
+  });
+});
+
+describe("disableEndpoints", () => {
+  const buildDisabledApp = (
+    lines: { msg: string; unavailable?: string[]; notes?: string[] }[] = [],
+  ) => {
+    const app = Fastify({
+      logger: {
+        level: "info",
+        stream: { write: (line: string) => lines.push(JSON.parse(line)) },
+      },
+    });
+    registerServiceSecurity(app, {
+      serviceName: "test-service",
+      env: { NODE_ENV: "production", SONOLECT_SERVICE_TOKENS: token },
+    });
+    disableEndpoints(
+      app,
+      [
+        {
+          route: "POST /jobs",
+          statusCode: 501,
+          error: "not_implemented",
+          message: "Jobs are not available.",
+        },
+        {
+          route: "GET /jobs/:id",
+          statusCode: 503,
+          error: "not_configured",
+          message: "No job store is set.",
+        },
+      ],
+      ["POST /other: one mode answers 501"],
+    );
+    let ran = false;
+    app.get("/health", async () => ({ status: "ok" }));
+    app.post("/jobs", async () => {
+      ran = true;
+      return { id: "fake" };
+    });
+    app.get("/jobs/:id", async () => {
+      ran = true;
+      return { id: "fake" };
+    });
+    app.get("/kept", async () => ({ kept: true }));
+    return { app, lines, ran: () => ran };
+  };
+  const headers = { authorization: `Bearer ${token}`, "x-user-id": "user-1" };
+
+  it("answers the listed error instead of running the handler", async () => {
+    const { app, ran } = buildDisabledApp();
+    const created = await app.inject({
+      method: "POST",
+      url: "/jobs",
+      headers,
+      payload: { any: "body" },
+    });
+    assert.equal(created.statusCode, 501, created.body);
+    assert.deepEqual(created.json(), {
+      error: "not_implemented",
+      message: "Jobs are not available.",
+    });
+    const fetched = await app.inject({
+      method: "GET",
+      url: "/jobs/1",
+      headers,
+    });
+    assert.equal(fetched.statusCode, 503);
+    assert.equal(fetched.json<{ error: string }>().error, "not_configured");
+    const head = await app.inject({ method: "HEAD", url: "/jobs/1", headers });
+    assert.equal(head.statusCode, 503);
+    assert.equal(ran(), false);
+
+    const kept = await app.inject({ method: "GET", url: "/kept", headers });
+    assert.equal(kept.statusCode, 200);
+    assert.equal(
+      (await app.inject({ method: "GET", url: "/health" })).statusCode,
+      200,
+    );
+    await app.close();
+  });
+
+  it("checks the service token first", async () => {
+    const { app } = buildDisabledApp();
+    const anonymous = await app.inject({ method: "POST", url: "/jobs" });
+    assert.equal(anonymous.statusCode, 401);
+    await app.close();
+  });
+
+  it("logs the endpoints once, when the app is built", async () => {
+    const { app, lines } = buildDisabledApp();
+    await app.ready();
+    await app.inject({ method: "POST", url: "/jobs", headers });
+    const logged = lines.filter((line) => line.unavailable);
+    assert.equal(logged.length, 1);
+    assert.deepEqual(logged[0]?.unavailable, [
+      "POST /jobs -> 501 not_implemented",
+      "GET /jobs/:id -> 503 not_configured",
+    ]);
+    assert.deepEqual(logged[0]?.notes, ["POST /other: one mode answers 501"]);
+    await app.close();
+  });
+
+  it("refuses to start when a listed route does not exist", async () => {
+    const app = Fastify({ logger: false });
+    disableEndpoints(app, [
+      {
+        route: "POST /typo",
+        statusCode: 501,
+        error: "not_implemented",
+        message: "Nothing.",
+      },
+    ]);
+    app.post("/real", async () => ({}));
+    await assert.rejects(async () => {
+      await app.ready();
+    }, /no such route: POST \/typo/);
+  });
+
+  it("does nothing with an empty list", async () => {
+    const lines: { unavailable?: string[] }[] = [];
+    const app = Fastify({
+      logger: {
+        level: "info",
+        stream: { write: (line: string) => lines.push(JSON.parse(line)) },
+      },
+    });
+    disableEndpoints(app, []);
+    app.get("/kept", async () => ({ kept: true }));
+    assert.equal(
+      (await app.inject({ method: "GET", url: "/kept" })).statusCode,
+      200,
+    );
+    assert.equal(lines.filter((line) => line.unavailable).length, 0);
+    await app.close();
+  });
+
+  it("reads production from NODE_ENV only", () => {
+    assert.equal(isProduction({ NODE_ENV: "production" }), true);
+    assert.equal(isProduction({}), false);
+    assert.equal(isProduction({ NODE_ENV: "development" }), false);
   });
 });

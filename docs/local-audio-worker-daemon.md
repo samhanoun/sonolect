@@ -2,6 +2,8 @@
 
 The non-cloud local audio worker can run continuously as a local daemon. It polls the JSON store used by the API/desktop local flow, processes all currently queued local-file audio jobs on each tick, then sleeps until the next poll.
 
+The API only creates these jobs outside production (`NODE_ENV=development`) or with `SONOLECT_API_PREVIEW_ROUTES=1`. In production mode it has no audio job routes; see [api.md](api.md#what-production-serves).
+
 ## Run manually
 
 From the repository root:

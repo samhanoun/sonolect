@@ -28,7 +28,15 @@
 
 ## API cost controls
 
-The paid `/v1/transcribe` and `/v1/polish` routes are limited per verified account (30 requests per minute by default, `aiRouteLimits` in `createApp`), polish input is capped at 20,000 characters and 200 dictionary entries, and provider errors are logged rather than returned. The limit is held in memory per instance, so with several Cloud Run instances the effective budget is per instance; move it to a shared store (Firestore or Redis) before relying on it for billing.
+The paid `/v1/transcribe` and `/v1/polish` routes are limited per verified account (30 requests per minute by default, `aiRouteLimits` in `createApp`), polish input is capped at 20,000 characters, 200 dictionary entries and a one-line style preset of 256 characters (a longer preset, or one with a line break, gets 422, never a silent drop), and provider errors are logged rather than returned. The limit is held in memory per instance, so with several Cloud Run instances the effective budget is per instance; move it to a shared store (Firestore or Redis) before relying on it for billing.
+
+## Production mode
+
+In production the API and the agent, audio, billing and worker services never answer with made-up results and never take data they would lose. The full list of routes is in [api.md](api.md#what-production-serves). The sync service follows it too: in production it refuses the in-memory store and keeps vaults in SQLite or Firestore (see [Note sync](#note-sync)).
+
+- The API does not register its preview routes in production: the profile, audio job, transcript, command, quota and sync manifest routes. They keep data only in the process, so a restart or a second instance loses it, and some answer with fixed values. `SONOLECT_API_PREVIEW_ROUTES=1` turns them on; leave it unset on Cloud Run.
+- The agent, audio, billing and worker services answer 501 `not_implemented` or 503 `not_configured` where they would otherwise return a placeholder or keep data only in memory: a local "rewrite" without a provider key, a mock transcript, a template summary, a command or task that never runs, usage events and plan changes. The Stripe webhook answers 501 too, so Stripe retries the event instead of dropping it.
+- The API treats every `NODE_ENV` except `development` and `test` as production, unset and empty included. The internal services treat an unset `NODE_ENV` as development, so their images set `NODE_ENV=production`.
 
 ## Internal services
 

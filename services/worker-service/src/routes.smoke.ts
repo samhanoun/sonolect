@@ -48,8 +48,39 @@ try {
   await app.close();
 }
 
-// Production: the task queue is only reachable with the service token.
+const queueRequests = [
+  { method: "GET", url: "/tasks" },
+  { method: "POST", url: "/tasks" },
+  { method: "POST", url: "/events/audio" },
+  { method: "POST", url: "/events/agent" },
+  { method: "POST", url: "/events/billing" },
+  { method: "POST", url: "/tasks/any-id/dispatch" },
+] as const;
+
+// With a token configured, the task queue is only reachable with the token.
 const serviceToken = "w".repeat(40);
+const guarded = await createApp({
+  logger: false,
+  env: { SONOLECT_SERVICE_TOKENS: serviceToken },
+});
+try {
+  for (const request of queueRequests) {
+    const anonymous = await guarded.inject(request);
+    assert.equal(anonymous.statusCode, 401, `${request.method} ${request.url}`);
+  }
+
+  const authorised = await guarded.inject({
+    method: "GET",
+    url: "/tasks",
+    headers: { authorization: `Bearer ${serviceToken}` },
+  });
+  assert.equal(authorised.statusCode, 200, authorised.body);
+} finally {
+  await guarded.close();
+}
+
+// Production: the handlers are placeholders, so the queue answers 501 and
+// stores nothing. The service token is still checked first.
 const production = await createApp({
   logger: false,
   env: { NODE_ENV: "production", SONOLECT_SERVICE_TOKENS: serviceToken },
@@ -58,24 +89,31 @@ try {
   const health = await production.inject({ method: "GET", url: "/health" });
   assert.equal(health.statusCode, 200);
 
-  for (const request of [
-    { method: "GET", url: "/tasks" },
-    { method: "POST", url: "/tasks" },
-    { method: "POST", url: "/events/audio" },
-    { method: "POST", url: "/events/agent" },
-    { method: "POST", url: "/events/billing" },
-    { method: "POST", url: "/tasks/any-id/dispatch" },
-  ] as const) {
+  for (const request of queueRequests) {
+    const label = `${request.method} ${request.url}`;
     const anonymous = await production.inject(request);
-    assert.equal(anonymous.statusCode, 401, `${request.method} ${request.url}`);
-  }
+    assert.equal(anonymous.statusCode, 401, label);
 
-  const authorised = await production.inject({
-    method: "GET",
-    url: "/tasks",
-    headers: { authorization: `Bearer ${serviceToken}` },
-  });
-  assert.equal(authorised.statusCode, 200, authorised.body);
+    const authorised = await production.inject({
+      ...request,
+      headers: { authorization: `Bearer ${serviceToken}` },
+      ...(request.method === "POST"
+        ? {
+            payload: {
+              kind: "audio",
+              type: "audio.transcribe",
+              payload: { transcriptId: "tr-1" },
+            },
+          }
+        : {}),
+    });
+    assert.equal(authorised.statusCode, 501, `${label}: ${authorised.body}`);
+    assert.equal(
+      authorised.json<{ error: string }>().error,
+      "not_implemented",
+      label,
+    );
+  }
 } finally {
   await production.close();
 }
