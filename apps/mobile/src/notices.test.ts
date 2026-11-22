@@ -102,6 +102,8 @@ describe("notices", () => {
       modelFailed: ["useServiceOnce", "dismiss"],
       onlineSetup: ["openOnlineSettings", "dismiss"],
       onlineKeyRejected: ["openOnlineSettings", "dismiss"],
+      // Its text says to try another model in Settings.
+      onlineModelUnavailable: ["openOnlineSettings", "dismiss"],
     };
     for (const kind of NOTICE_KINDS) {
       assert.deepEqual(

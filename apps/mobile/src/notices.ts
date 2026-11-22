@@ -132,7 +132,7 @@ const DEFAULT_ACTIONS: Record<NoticeKind, readonly NoticeAction[]> = {
   onlineKeyRejected: ["openOnlineSettings", "dismiss"],
   onlineNeedsCredits: ["dismiss"],
   onlineRateLimited: ["dismiss"],
-  onlineModelUnavailable: ["dismiss"],
+  onlineModelUnavailable: ["openOnlineSettings", "dismiss"],
   onlineTimeout: ["dismiss"],
   onlineNetwork: ["dismiss"],
   onlineEmpty: ["dismiss"],
