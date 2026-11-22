@@ -23,9 +23,10 @@ import {
 /**
  * Vaults in Firestore, for Cloud Run:
  *
- *   syncVaults/{vaultId}               { verifier, epoch, head, records, bytes,
- *                                        purgedSeq, purgedAt, createdAt,
- *                                        touchedAt, deletedAt? }
+ *   syncVaults/{vaultId}               { verifier, epoch, head, records,
+ *                                        tombstones, bytes, purgedSeq,
+ *                                        purgedAt, createdAt, touchedAt,
+ *                                        deletedAt? }
  *   syncVaults/{vaultId}/records/{rid} { rev, seq, deleted, ct (bytes), size,
  *                                        updatedAt, tombstoneAt? }
  *
@@ -72,6 +73,8 @@ const toMeta = (data: DocumentData): VaultMeta => ({
   epoch: String(data.epoch),
   head: num(data.head),
   records: num(data.records),
+  // Absent on a vault written before tombstones were counted: none known.
+  tombstones: data.tombstones === undefined ? 0 : num(data.tombstones),
   bytes: num(data.bytes),
   purgedSeq: num(data.purgedSeq),
   purgedAt: num(data.purgedAt),
@@ -153,6 +156,7 @@ export class FirestoreStore implements VaultStore {
         epoch,
         head: 0,
         records: 0,
+        tombstones: 0,
         bytes: 0,
         purgedSeq: 0,
         purgedAt: now,
@@ -222,6 +226,7 @@ export class FirestoreStore implements VaultStore {
       const counters = {
         head: meta.head,
         records: meta.records,
+        tombstones: meta.tombstones,
         bytes: meta.bytes,
       };
       const results: StoreWriteResult[] = [];
@@ -244,6 +249,7 @@ export class FirestoreStore implements VaultStore {
         tx.update(vaultRef, {
           head: counters.head,
           records: counters.records,
+          tombstones: counters.tombstones,
           bytes: counters.bytes,
           touchedAt: now,
         });
@@ -259,6 +265,7 @@ export class FirestoreStore implements VaultStore {
       // Marked first, so no write lands while the records are erased.
       tx.update(vaultRef, {
         records: 0,
+        tombstones: 0,
         bytes: 0,
         deletedAt: toMeta(snap.data()!).deletedAt ?? now,
       });
@@ -301,6 +308,7 @@ export class FirestoreStore implements VaultStore {
         }
         tx.update(vaultRef, {
           records: meta.records - count,
+          tombstones: Math.max(0, meta.tombstones - count),
           bytes: meta.bytes - bytes,
           purgedSeq,
           purgedAt: now,

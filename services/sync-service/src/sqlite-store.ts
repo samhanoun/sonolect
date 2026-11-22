@@ -17,7 +17,7 @@ import {
 } from "./store.js";
 
 /** Bumped when the tables change; a newer file is refused rather than misread. */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS vaults (
@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS vaults (
   epoch TEXT NOT NULL,
   head INTEGER NOT NULL DEFAULT 0,
   records INTEGER NOT NULL DEFAULT 0,
+  tombstones INTEGER NOT NULL DEFAULT 0,
   bytes INTEGER NOT NULL DEFAULT 0,
   purged_seq INTEGER NOT NULL DEFAULT 0,
   purged_at INTEGER NOT NULL,
@@ -48,6 +49,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS records_feed ON records (vault, seq);
 CREATE INDEX IF NOT EXISTS records_tombstones ON records (vault, updated_at) WHERE deleted = 1;
 `;
 
+/**
+ * Brings a file of an earlier schema up to this one. Schema 2 counts each
+ * vault's tombstones (the record quota counts notes only).
+ */
+function migrate(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(vaults)").all() as Row[];
+  if (columns.some((column) => column.name === "tombstones")) return;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.exec(
+      "ALTER TABLE vaults ADD COLUMN tombstones INTEGER NOT NULL DEFAULT 0",
+    );
+    db.exec(
+      `UPDATE vaults SET tombstones =
+         (SELECT count(*) FROM records WHERE vault = vaults.id AND deleted = 1)`,
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 /** Rows read ahead of a page, so a page of small records takes one query. */
 const CHUNK_ROWS = 64;
 
@@ -68,6 +92,7 @@ const toMeta = (row: Row): VaultMeta => ({
   epoch: String(row.epoch),
   head: Number(row.head),
   records: Number(row.records),
+  tombstones: Number(row.tombstones),
   bytes: Number(row.bytes),
   purgedSeq: Number(row.purged_seq),
   purgedAt: Number(row.purged_at),
@@ -106,6 +131,7 @@ export class SqliteStore implements VaultStore {
           `the sync database was written by a newer service (schema ${version})`,
         );
       db.exec(SCHEMA);
+      migrate(db);
       db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     } catch (error) {
       db.close();
@@ -196,6 +222,7 @@ export class SqliteStore implements VaultStore {
       const counters = {
         head: meta.head,
         records: meta.records,
+        tombstones: meta.tombstones,
         bytes: meta.bytes,
       };
       const read = this.db.prepare(
@@ -234,9 +261,17 @@ export class SqliteStore implements VaultStore {
       if (counters.head !== meta.head)
         this.db
           .prepare(
-            "UPDATE vaults SET head = ?, records = ?, bytes = ?, touched_at = ? WHERE id = ?",
+            `UPDATE vaults SET head = ?, records = ?, tombstones = ?, bytes = ?, touched_at = ?
+             WHERE id = ?`,
           )
-          .run(counters.head, counters.records, counters.bytes, now, vaultId);
+          .run(
+            counters.head,
+            counters.records,
+            counters.tombstones,
+            counters.bytes,
+            now,
+            vaultId,
+          );
       return results;
     });
   }
@@ -246,7 +281,8 @@ export class SqliteStore implements VaultStore {
       this.db.prepare("DELETE FROM records WHERE vault = ?").run(vaultId);
       this.db
         .prepare(
-          `UPDATE vaults SET records = 0, bytes = 0, deleted_at = coalesce(deleted_at, ?)
+          `UPDATE vaults SET records = 0, tombstones = 0, bytes = 0,
+             deleted_at = coalesce(deleted_at, ?)
            WHERE id = ?`,
         )
         .run(now, vaultId);
@@ -279,10 +315,18 @@ export class SqliteStore implements VaultStore {
           .run(vaultId, cutoff);
       this.db
         .prepare(
-          `UPDATE vaults SET records = records - ?, bytes = bytes - ?,
-             purged_seq = max(purged_seq, ?), purged_at = ? WHERE id = ?`,
+          `UPDATE vaults SET records = records - ?, tombstones = tombstones - ?,
+             bytes = bytes - ?, purged_seq = max(purged_seq, ?), purged_at = ?
+           WHERE id = ?`,
         )
-        .run(purged, Number(found.bytes), Number(found.seq), now, vaultId);
+        .run(
+          purged,
+          purged,
+          Number(found.bytes),
+          Number(found.seq),
+          now,
+          vaultId,
+        );
       return purged;
     });
   }

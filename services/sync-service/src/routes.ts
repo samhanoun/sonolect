@@ -156,6 +156,7 @@ export async function vaultRoutes(
   const { store, limits, now, randomBytes } = options;
   const quotas = {
     maxVaultRecords: limits.maxVaultRecords,
+    maxVaultTombstones: limits.maxVaultTombstones,
     maxVaultBytes: limits.maxVaultBytes,
     maxTombstoneBytes: limits.maxTombstoneBytes,
   };

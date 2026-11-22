@@ -666,6 +666,28 @@ describe("sync engine", () => {
     assert.equal(server.records(keys.vaultId).length, 3);
   });
 
+  it("uploads new notes once notes are deleted from a vault full of notes", async () => {
+    const { device, server, keys } = setup({ maxVaultRecords: 3 });
+    const a = await device();
+    for (const id of ["n1", "n2", "n3"]) a.edit(id, id);
+    assert.equal((await a.engine.sync()).pushed, 3);
+    a.edit("n4", "one too many");
+    assert.equal((await a.engine.sync()).quotaExceeded, true);
+    // "Sync storage is full. Delete notes to sync new ones."
+    await a.remove("n1");
+    await a.remove("n2");
+    const report = await a.engine.sync();
+    assert.equal(report.quotaExceeded, false);
+    assert.equal(report.pushed, 3);
+    const b = await device();
+    await b.engine.sync();
+    assert.deepEqual(b.ids(), ["n3", "n4"]);
+    assert.equal(
+      server.records(keys.vaultId).filter((record) => !record.deleted).length,
+      2,
+    );
+  });
+
   it("defers when a note changes while a remote version is being written", async () => {
     const { device, clock } = setup();
     const a = await device();

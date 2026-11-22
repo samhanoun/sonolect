@@ -86,7 +86,7 @@ Every error is `{error, message}`. The message never quotes the request.
 | Request body                 | 5 MiB                                                                   |
 | Writes per request           | 100                                                                     |
 | Page of changes              | 200 records and 4 MiB                                                   |
-| Vault                        | 20,000 records and 200 MiB                                              |
+| Vault                        | 20,000 notes and 200 MiB; tombstones up to 20,000 more records          |
 | Tombstones                   | Purged 90 days after the delete                                         |
 | Full resync (client)         | After 60 days without a sync                                            |
 | Requests                     | 600 per minute per IP address (not `/health`), 120 per minute per vault |

@@ -23,6 +23,7 @@ import {
 
 const QUOTAS: Quotas = {
   maxVaultRecords: 20_000,
+  maxVaultTombstones: 20_000,
   maxVaultBytes: 200 << 20,
   maxTombstoneBytes: 1024,
 };
@@ -99,6 +100,7 @@ export function defineStoreTests(factory: StoreFactory): void {
       assert.equal(meta?.epoch, "epoch-one00");
       assert.equal(meta?.head, 0);
       assert.equal(meta?.records, 0);
+      assert.equal(meta?.tombstones, 0);
       assert.equal(meta?.bytes, 0);
       assert.equal(meta?.purgedSeq, 0);
       assert.equal(meta?.deletedAt, undefined);
@@ -280,6 +282,7 @@ export function defineStoreTests(factory: StoreFactory): void {
       const vaultId = await vault(store);
       const quotas: Quotas = {
         maxVaultRecords: 2,
+        maxVaultTombstones: 0,
         maxVaultBytes: 1000,
         maxTombstoneBytes: 1024,
       };
@@ -302,7 +305,7 @@ export function defineStoreTests(factory: StoreFactory): void {
         status: "rejected",
         reason: "quota_records",
       });
-      // A new tombstone counts like any record.
+      // A new tombstone takes a record beyond the notes: none here.
       const newTombstone = await store.write(
         vaultId,
         [tombstone(c, 0)],
@@ -342,6 +345,7 @@ export function defineStoreTests(factory: StoreFactory): void {
       // Even a tombstone larger than the record it replaces, in a full vault.
       const full: Quotas = {
         maxVaultRecords: 2,
+        maxVaultTombstones: 0,
         maxVaultBytes: 564,
         maxTombstoneBytes: 1024,
       };
@@ -377,6 +381,93 @@ export function defineStoreTests(factory: StoreFactory): void {
       const meta2 = await store.getVault(vaultId);
       assert.equal(meta2?.bytes, 364);
       assert.equal(meta2?.records, 2);
+      assert.equal(meta2?.tombstones, 2);
+    });
+
+    it("counts notes toward the record quota, so a delete frees a slot at once", async () => {
+      const store = await open();
+      const vaultId = await vault(store);
+      const quotas: Quotas = {
+        maxVaultRecords: 2,
+        maxVaultTombstones: 2,
+        maxVaultBytes: 1 << 20,
+        maxTombstoneBytes: 1024,
+      };
+      const [a, b, c, d, e] = [
+        newRid(),
+        newRid(),
+        newRid(),
+        newRid(),
+        newRid(),
+      ];
+      const first = await store.write(
+        vaultId,
+        [put(a), put(b), put(c)],
+        quotas,
+        T0,
+      );
+      ok(first[0]);
+      ok(first[1]);
+      assert.deepEqual(first[2], {
+        rid: c,
+        status: "rejected",
+        reason: "quota_records",
+      });
+      // Deleting a note lets the next one in, in the same batch.
+      const swapped = await store.write(
+        vaultId,
+        [tombstone(a, 1), put(c), put(d)],
+        quotas,
+        T0,
+      );
+      ok(swapped[0]);
+      ok(swapped[1]);
+      assert.deepEqual(swapped[2], {
+        rid: d,
+        status: "rejected",
+        reason: "quota_records",
+      });
+      let meta = await store.getVault(vaultId);
+      assert.equal(meta?.records, 3);
+      assert.equal(meta?.tombstones, 1);
+      // A delete of a note the server never had stores a new tombstone.
+      ok((await store.write(vaultId, [tombstone(e, 0)], quotas, T0))[0]);
+      ok((await store.write(vaultId, [tombstone(b, 1)], quotas, T0))[0]);
+      meta = await store.getVault(vaultId);
+      assert.equal(meta?.records, 4);
+      assert.equal(meta?.tombstones, 3);
+      // One note and three tombstones: room for a note, but no record is
+      // left beyond the notes for a new id. A note over a tombstone fits.
+      const capped = await store.write(
+        vaultId,
+        [put(d), put(a, 2)],
+        quotas,
+        T0,
+      );
+      assert.deepEqual(capped[0], {
+        rid: d,
+        status: "rejected",
+        reason: "quota_records",
+      });
+      ok(capped[1]);
+      meta = await store.getVault(vaultId);
+      assert.equal(meta?.records, 4);
+      assert.equal(meta?.tombstones, 2);
+      // Purging the tombstones gives their records back.
+      assert.equal(await store.purge(vaultId, T0 + 95 * DAY, 90 * DAY, DAY), 2);
+      meta = await store.getVault(vaultId);
+      assert.equal(meta?.records, 2);
+      assert.equal(meta?.tombstones, 0);
+      ok(
+        (
+          await store.write(
+            vaultId,
+            [tombstone(c, 1), put(d)],
+            quotas,
+            T0 + 95 * DAY,
+          )
+        )[1],
+      );
     });
 
     it("deletes a vault for good, keeping only its marker", async () => {
@@ -391,6 +482,7 @@ export function defineStoreTests(factory: StoreFactory): void {
       assert.equal(meta?.verifier, verifier);
       assert.equal(meta?.epoch, EPOCH);
       assert.equal(meta?.records, 0);
+      assert.equal(meta?.tombstones, 0);
       assert.equal(meta?.bytes, 0);
       assert.deepEqual(await store.changes(vaultId, 0, 200, 1 << 20), {
         records: [],
@@ -456,12 +548,14 @@ export function defineStoreTests(factory: StoreFactory): void {
       );
       const before = await store.getVault(vaultId);
       assert.equal(before?.records, 4);
+      assert.equal(before?.tombstones, 3);
       assert.equal(before?.bytes, 100 + 50 + 60 + 70);
 
       const now = T0 + 95 * DAY;
       assert.equal(await store.purge(vaultId, now, 90 * DAY, DAY), 2);
       const after = await store.getVault(vaultId);
       assert.equal(after?.records, 2);
+      assert.equal(after?.tombstones, 1);
       assert.equal(after?.bytes, 170);
       assert.equal(after?.purgedSeq, 5);
       assert.equal(after?.purgedAt, now);

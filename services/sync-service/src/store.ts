@@ -10,8 +10,12 @@ import type { QuotaReason } from "@sonolect/sync-core/wire";
  *   `since`, in write order.
  * - Writes are compare-and-swap on the revision, applied in request order in
  *   one transaction per batch.
- * - `records` and `bytes` count every stored record, tombstones included. A
- *   delete that replaces a stored record is never refused for quota, so a
+ * - `records` and `bytes` count every stored record, tombstones included,
+ *   and `tombstones` how many of them are tombstones. The record quota
+ *   counts notes only (records that are not tombstones), so deleting notes
+ *   frees room for new ones at once; tombstones may take up to
+ *   `Quotas.maxVaultTombstones` records beyond that until they are purged.
+ * - A delete that replaces a stored record is never refused for quota, so a
  *   full vault can always be cleaned up, as long as it does not grow the
  *   vault by more than a tombstone can be (`Quotas.maxTombstoneBytes`): a
  *   write flagged as a delete cannot carry data past the quota.
@@ -43,7 +47,10 @@ export interface VaultMeta {
   epoch: string;
   /** The vault's latest seq. */
   head: number;
+  /** Stored records, tombstones included. */
   records: number;
+  /** How many of `records` are tombstones. */
+  tombstones: number;
   bytes: number;
   /** The highest seq of a purged tombstone. */
   purgedSeq: number;
@@ -66,7 +73,10 @@ export type StoreWriteResult =
   | { rid: string; status: "rejected"; reason: QuotaReason };
 
 export interface Quotas {
+  /** Notes: stored records that are not tombstones. */
   maxVaultRecords: number;
+  /** Records tombstones may take beyond `maxVaultRecords`. */
+  maxVaultTombstones: number;
   maxVaultBytes: number;
   /** A delete over a stored record is exempt from the quotas up to this size. */
   maxTombstoneBytes: number;
@@ -141,6 +151,7 @@ export interface VaultStore {
 export interface VaultCounters {
   head: number;
   records: number;
+  tombstones: number;
   bytes: number;
 }
 
@@ -162,6 +173,10 @@ export function decideWrite(
   const size = write.ct.length;
   const growth = size - (current?.size ?? 0);
   const added = current ? 0 : 1;
+  const tombstoneGrowth =
+    (write.deleted ? 1 : 0) - (current?.deleted === true ? 1 : 0);
+  // Notes: a write adds one when it stores a note where none was.
+  const noteGrowth = added - tombstoneGrowth;
   // Deleting a stored record must work even in a full vault.
   // Only a real delete: one that does not make the vault larger, or no
   // larger than a sealed tombstone is.
@@ -169,7 +184,14 @@ export function decideWrite(
     write.deleted &&
     current !== undefined &&
     (growth <= 0 || size <= quotas.maxTombstoneBytes);
-  if (!exempt && added > 0 && counters.records + added > quotas.maxVaultRecords)
+  const overRecords =
+    (noteGrowth > 0 &&
+      counters.records - counters.tombstones + noteGrowth >
+        quotas.maxVaultRecords) ||
+    (added > 0 &&
+      counters.records + added >
+        quotas.maxVaultRecords + quotas.maxVaultTombstones);
+  if (!exempt && overRecords)
     return {
       result: { rid: write.rid, status: "rejected", reason: "quota_records" },
     };
@@ -179,6 +201,7 @@ export function decideWrite(
     };
   counters.head += 1;
   counters.records += added;
+  counters.tombstones += tombstoneGrowth;
   counters.bytes += growth;
   const record: StoredRecord = {
     rid: write.rid,

@@ -21,7 +21,10 @@ export interface ServiceLimits {
   maxRequestBytes: number;
   maxPageRecords: number;
   maxPageBytes: number;
+  /** Notes a vault may hold (tombstones not counted). */
   maxVaultRecords: number;
+  /** Records tombstones may take beyond the notes until they are purged. */
+  maxVaultTombstones: number;
   maxVaultBytes: number;
   tombstoneTtlMs: number;
   /** A vault's tombstones are purged at most this often. */
@@ -43,6 +46,7 @@ export const DEFAULT_LIMITS: Readonly<ServiceLimits> = {
   maxPageRecords: SYNC_LIMITS.maxPageRecords,
   maxPageBytes: SYNC_LIMITS.maxPageBytes,
   maxVaultRecords: SYNC_LIMITS.maxVaultRecords,
+  maxVaultTombstones: SYNC_LIMITS.maxVaultTombstones,
   maxVaultBytes: SYNC_LIMITS.maxVaultBytes,
   tombstoneTtlMs: SYNC_LIMITS.tombstoneTtlMs,
   purgeIntervalMs: 24 * 60 * 60_000,

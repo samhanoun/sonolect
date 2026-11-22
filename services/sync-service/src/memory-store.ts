@@ -21,6 +21,7 @@ const metaOf = (vault: MemoryVault): VaultMeta => ({
   epoch: vault.epoch,
   head: vault.head,
   records: vault.records,
+  tombstones: vault.tombstones,
   bytes: vault.bytes,
   purgedSeq: vault.purgedSeq,
   purgedAt: vault.purgedAt,
@@ -52,6 +53,7 @@ export class MemoryStore implements VaultStore {
       epoch,
       head: 0,
       records: 0,
+      tombstones: 0,
       bytes: 0,
       purgedSeq: 0,
       purgedAt: now,
@@ -90,6 +92,7 @@ export class MemoryStore implements VaultStore {
     const counters = {
       head: vault.head,
       records: vault.records,
+      tombstones: vault.tombstones,
       bytes: vault.bytes,
     };
     const results: StoreWriteResult[] = [];
@@ -106,6 +109,7 @@ export class MemoryStore implements VaultStore {
     }
     vault.head = counters.head;
     vault.records = counters.records;
+    vault.tombstones = counters.tombstones;
     vault.bytes = counters.bytes;
     return results;
   }
@@ -115,6 +119,7 @@ export class MemoryStore implements VaultStore {
     if (!vault) return;
     vault.recordsById.clear();
     vault.records = 0;
+    vault.tombstones = 0;
     vault.bytes = 0;
     vault.deletedAt ??= now;
   }
@@ -135,6 +140,7 @@ export class MemoryStore implements VaultStore {
       if (!record.deleted || record.updatedAt >= cutoff) continue;
       vault.recordsById.delete(rid);
       vault.records -= 1;
+      vault.tombstones -= 1;
       vault.bytes -= record.size;
       vault.purgedSeq = Math.max(vault.purgedSeq, record.seq);
       purged += 1;

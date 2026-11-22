@@ -334,10 +334,18 @@ export function createMemoryVaultServer(
         item.deleted &&
         current !== undefined &&
         (size <= (current?.size ?? 0) || size <= limits.maxTombstoneBytes);
+      // Notes count toward the record quota; tombstones take up to
+      // maxVaultTombstones records beyond it.
+      const notes = [...vault.records.values()].filter(
+        (record) => !record.deleted,
+      ).length;
+      const addsNote = !item.deleted && (!current || current.deleted);
       if (
         !exempt &&
-        !current &&
-        vault.records.size + 1 > limits.maxVaultRecords
+        ((addsNote && notes + 1 > limits.maxVaultRecords) ||
+          (!current &&
+            vault.records.size + 1 >
+              limits.maxVaultRecords + limits.maxVaultTombstones))
       ) {
         results.push({
           rid: item.rid,

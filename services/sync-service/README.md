@@ -42,10 +42,11 @@ the client crypto.
   - `{status: "ok", rev, seq}`: stored as revision `baseRev + 1`, at the
     vault's next seq;
   - `{status: "conflict", current}`: the record the server holds, or null;
-  - `{status: "rejected", reason}`: `quota_records` (20,000 records) or
-    `quota_bytes` (200 MiB). Turning a stored record into a tombstone is
-    never refused, so a full vault can always be cleaned up. Tombstones
-    count as records until they are purged, 90 days later.
+  - `{status: "rejected", reason}`: `quota_records` (20,000 notes, or
+    40,000 records with the tombstones) or `quota_bytes` (200 MiB).
+    Turning a stored record into a tombstone is never refused, so a full
+    vault can always be cleaned up, and it frees the note's slot at once.
+    Tombstones count in the bytes until they are purged, 90 days later.
 
   One batch is one transaction, and the seqs it assigns have no gaps. A
   sealed record is 42 bytes to 768 KiB; a larger one answers 413. A write

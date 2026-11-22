@@ -41,8 +41,14 @@ export const SYNC_LIMITS = {
   /** Records and ciphertext bytes in one page of changes. */
   maxPageRecords: 200,
   maxPageBytes: 4 * MIB,
-  /** Per vault quotas (notes only: recordings do not sync in v1). */
+  /**
+   * Per vault quotas (notes only: recordings do not sync in v1). Records
+   * count notes, so a delete frees a slot at once; tombstones count in the
+   * bytes, and may take up to `maxVaultTombstones` records beyond the notes
+   * until they are purged.
+   */
   maxVaultRecords: 20_000,
+  maxVaultTombstones: 20_000,
   maxVaultBytes: 200 * MIB,
   /** Tombstones are purged this long after the delete. */
   tombstoneTtlMs: 90 * DAY_MS,

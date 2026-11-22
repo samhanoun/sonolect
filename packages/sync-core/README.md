@@ -206,11 +206,12 @@ const report = await engine.sync();
 - **Joining** with `parsePairing(code)` merges the local notes into the
   vault. The first sync uploads them and pulls everything else.
 - **Quotas.**
-  - A vault holds at most 20,000 records and 200 MiB. A refused write sets
+  - A vault holds at most 20,000 notes and 200 MiB. A refused write sets
     `report.quotaExceeded`.
   - Deleting a stored record is never refused, so a full vault can always
-    be cleaned up. A tombstone still counts as a record until the service
-    purges it, 90 days later; it frees its bytes at once.
+    be cleaned up. A delete frees its note's slot and bytes at once. Its
+    tombstone (298 bytes) counts in the bytes, and tombstones may take up
+    to 20,000 more records, until the service purges them 90 days later.
   - A note too large to seal is listed in `report.tooLarge` and not
     uploaded.
 
