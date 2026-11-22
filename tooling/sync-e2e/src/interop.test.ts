@@ -18,6 +18,7 @@ import {
 import {
   type TranscriptSegment,
   segmentsFromCapture,
+  segmentsToSave,
   segmentsToText,
 } from "../../../apps/desktop/src/segmentEditor";
 import { createDesktopNoteStore } from "../../../apps/desktop/src/sync/desktopNotes";
@@ -134,7 +135,8 @@ const phoneCopiesOf = (phone: Phone, id: string) =>
 /**
  * The studio opens a note of the library (appStore's openCapture), lets
  * `change` edit its segments, and saves it back (StudioWorkbench's
- * update_local_capture): returns the transcript it sent.
+ * update_local_capture, with segmentsToSave): returns the transcript it
+ * sent.
  */
 function studioSave(
   desk: Desktop,
@@ -152,18 +154,7 @@ function studioSave(
     }),
   );
   const transcript = segmentsToText(segments);
-  desk.native.edit(
-    id,
-    transcript,
-    segments
-      .filter((segment) => segment.text.trim())
-      .map((segment) => ({
-        startMs: Math.round(segment.startMs),
-        endMs: Math.round(Math.max(segment.startMs, segment.endMs)),
-        text: segment.text.trim(),
-        ...(segment.speaker ? { speaker: segment.speaker } : {}),
-      })),
-  );
+  desk.native.edit(id, transcript, segmentsToSave(segments));
   return transcript;
 }
 
@@ -853,6 +844,75 @@ describe("desktop and phone sync through the sync service", () => {
     assert.equal(desk.capture(id)?.refinedText, "Bakery: Saturday's order.");
     assert.deepEqual(desk.capture(id)?.segments, segments);
     assert.deepEqual(desktopCopiesOf(desk, id), []);
+  });
+
+  it("a note the studio timed by estimate says so, and a typed note gets no subtitles", async () => {
+    const w = await world();
+    const { desk, phone } = await paired(w);
+    // A typed note lasts 0 ms; a dictation from before Subtitles has a
+    // length but no segments.
+    const typed = (
+      await phone.dictate("Buy milk. Call Ana.", {
+        source: "typed",
+        durationMs: 0,
+      })
+    ).id;
+    const older = (
+      await phone.dictate("Buy milk. Call Ana. Then ship it.", {
+        durationMs: 12_000,
+      })
+    ).id;
+    await phone.sync();
+    await desk.sync();
+
+    // The studio opens each without times, spreads its sentences over the
+    // note's length, and saves a fixed word.
+    await w.clock.advance(10_000);
+    for (const id of [typed, older]) {
+      studioSave(desk, id, (list) =>
+        list.map((segment, index) =>
+          index === 0 ? { ...segment, text: "Buy oat milk." } : segment,
+        ),
+      );
+    }
+    await desk.sync();
+    await phone.sync();
+
+    const typedOnDesk = desk.capture(typed)?.segments ?? [];
+    assert.equal(typedOnDesk.length, 2);
+    assert.ok(
+      typedOnDesk.every(
+        (segment) => segment.approx === true && segment.endMs === 0,
+      ),
+      "estimates, of 0 ms",
+    );
+    assert.equal(phone.turn(typed)?.rawText, "Buy oat milk.\n\nCall Ana.");
+    assert.equal(phone.turn(typed)?.segments, undefined, "no Subtitles");
+
+    const olderOnPhone = phone.turn(older)?.segments;
+    assert.ok(olderOnPhone, "the older dictation has Subtitles");
+    assert.deepEqual(
+      olderOnPhone.map((segment) => segment.text),
+      ["Buy oat milk.", "Call Ana.", "Then ship it."],
+    );
+    assert.equal(olderOnPhone.at(-1)?.endMs, 12_000);
+    assert.ok(
+      olderOnPhone.every((segment) => segment.approx === true),
+      "the WebVTT file says the times are approximate",
+    );
+
+    // A pin on the phone sends the studio's segments back as they came.
+    await w.clock.advance(10_000);
+    await phone.change(typed, { pinned: true });
+    await phone.sync();
+    await desk.sync();
+    assert.equal(desk.capture(typed)?.pinned, true);
+    assert.deepEqual(desk.capture(typed)?.segments, typedOnDesk);
+    for (const id of [typed, older]) {
+      assert.deepEqual(await phone.syncedNote(id), await desktopNote(desk, id));
+      assert.deepEqual(desktopCopiesOf(desk, id), []);
+      assert.deepEqual(phoneCopiesOf(phone, id), []);
+    }
   });
 
   it("a pin on the phone keeps every segment and the whole transcript of a long desktop note", async () => {
