@@ -39,6 +39,10 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// so a full batch of notes still uploads over a slow link.
 const UPLOAD_BYTES_PER_SECOND: u64 = 32 * 1024;
 const MAX_REQUEST_BYTES: usize = 5 * 1024 * 1024;
+/// The largest answer read. A full page of changes holds up to 4 MiB of
+/// ciphertext, counted decoded (sync-core's SYNC_LIMITS.maxPageBytes), and
+/// travels as base64url in JSON, a third larger: about 5.4 MiB (sync-core's
+/// MAX_RESPONSE_BYTES), well under this cap.
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 /// One saved piece of the engine's state (its meta, or one bucket of records).
 const MAX_STATE_VALUE_BYTES: usize = 16 * 1024 * 1024;
@@ -1471,6 +1475,37 @@ mod tests {
             check_request("POST", &records, Some(&full), Some(TOKEN)),
             Ok(Route::Records)
         );
+    }
+
+    #[test]
+    fn a_full_page_of_changes_fits_in_the_answer_read() {
+        // The largest page the server sends (sync-core's SYNC_LIMITS): 200
+        // records holding 4 MiB of ciphertext as base64url, with the widest
+        // numbers.
+        const MAX_PAGE_BYTES: usize = 4 * 1024 * 1024;
+        const MAX_PAGE_RECORDS: usize = 200;
+        let share = MAX_PAGE_BYTES / MAX_PAGE_RECORDS;
+        let records: Vec<_> = (0..MAX_PAGE_RECORDS)
+            .map(|index| {
+                serde_json::json!({
+                    "rid": format!("{:A>24}", index),
+                    "rev": MAX_SAFE_INTEGER,
+                    "seq": MAX_SAFE_INTEGER,
+                    "deleted": false,
+                    "ct": URL_SAFE_NO_PAD.encode(vec![index as u8; share]),
+                })
+            })
+            .collect();
+        let page = serde_json::json!({
+            "records": records,
+            "next": MAX_SAFE_INTEGER,
+            "hasMore": true,
+            "head": MAX_SAFE_INTEGER,
+            "epoch": "e0000000001",
+        })
+        .to_string();
+        assert!(page.len() > 5 * 1024 * 1024);
+        assert!(page.len() <= MAX_RESPONSE_BYTES, "{}", page.len());
     }
 
     #[test]

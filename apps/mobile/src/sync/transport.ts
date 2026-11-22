@@ -1,5 +1,6 @@
 import {
   type HttpRequester,
+  MAX_RESPONSE_BYTES as PAGE_RESPONSE_BYTES,
   SYNC_LIMITS,
   SyncError,
 } from "@sonolect/sync-core";
@@ -15,10 +16,11 @@ import type { Timers } from "./timers";
 /** No answer within this time counts as no answer (SyncError "network"). */
 export const REQUEST_TIMEOUT_MS = 30_000;
 /**
- * The largest answer read: a page of changes (4 MiB of ciphertext) with
- * the JSON around its records.
+ * The largest answer read: a full page of changes. The server counts a
+ * page's 4 MiB of ciphertext in decoded bytes; as base64url in JSON it is
+ * about 5.4 MiB (sync-core's MAX_RESPONSE_BYTES).
  */
-export const MAX_RESPONSE_BYTES = SYNC_LIMITS.maxPageBytes + 1024 * 1024;
+export const MAX_RESPONSE_BYTES = PAGE_RESPONSE_BYTES;
 
 /** What the requester needs from `fetch` (React Native's, or Node's in scripts). */
 export type FetchLike = (

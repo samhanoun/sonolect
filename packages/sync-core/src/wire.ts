@@ -50,6 +50,30 @@ export const SYNC_LIMITS = {
   fullResyncAfterMs: 60 * DAY_MS,
 } as const;
 
+/** The length of `bytes` bytes as unpadded base64url. */
+export const base64urlLength = (bytes: number): number =>
+  Math.ceil((bytes * 4) / 3);
+
+/**
+ * JSON around one record of a page of changes: its rid, rev, seq, deleted
+ * flag, key names and punctuation (about 120 bytes with 16-digit numbers).
+ */
+const PAGE_RECORD_JSON_BYTES = 256;
+
+/**
+ * The largest answer a client must read: a full page of changes. Its
+ * ciphertext is measured in decoded bytes (`maxPageBytes`, or one record
+ * alone, at most `maxRecordBytes`) and travels as base64url, a third
+ * larger, with the JSON of up to `maxPageRecords` records around it and
+ * the page's own fields. About 5.4 MiB.
+ */
+export const MAX_RESPONSE_BYTES =
+  base64urlLength(
+    Math.max(SYNC_LIMITS.maxPageBytes, SYNC_LIMITS.maxRecordBytes),
+  ) +
+  SYNC_LIMITS.maxPageRecords * PAGE_RECORD_JSON_BYTES +
+  16 * KIB;
+
 /** A vault epoch: 8 random bytes the server picks when it creates the vault. */
 export const EPOCH_PATTERN = /^[A-Za-z0-9_-]{11}$/;
 

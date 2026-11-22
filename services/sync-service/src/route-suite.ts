@@ -7,6 +7,7 @@ import { after, describe, it } from "node:test";
 
 import {
   EPOCH_PATTERN,
+  MAX_RESPONSE_BYTES,
   SYNC_LIMITS,
   type ChangesResponse,
   type WireRecord,
@@ -310,6 +311,26 @@ export function defineRouteTests(factory: StoreFactory): void {
       // Defaults: since 0, a full page.
       const defaults = await changes(keys, "");
       assert.equal(defaults.json<ChangesResponse>().records.length, 2);
+    });
+
+    it("a full page of changes fits in the answer every client reads", async () => {
+      const { put, changes, vault } = await setup();
+      const keys = await vault();
+      // Six records that fill the page's ciphertext budget (decoded bytes).
+      const size = Math.floor(SYNC_LIMITS.maxPageBytes / 6);
+      const rids = Array.from({ length: 6 }, () => newRid());
+      for (const half of [rids.slice(0, 3), rids.slice(3)]) {
+        const written = await put(
+          keys,
+          half.map((rid) => write(rid, 0, size)),
+        );
+        assert.equal(written.statusCode, 200, written.body);
+      }
+      const page = await changes(keys);
+      assert.equal(page.json<ChangesResponse>().records.length, 6);
+      // As base64url in JSON it is a third larger than the page's budget.
+      assert.ok(page.body.length > 5 * 1024 * 1024, String(page.body.length));
+      assert.ok(page.body.length <= MAX_RESPONSE_BYTES);
     });
 
     it("pages changes by record count and by bytes", async () => {

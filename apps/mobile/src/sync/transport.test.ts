@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  type ChangesResponse,
+  SYNC_LIMITS,
   SyncError,
   createHttpTransport,
   deriveVaultKeys,
@@ -10,6 +12,7 @@ import {
 import { FakeClock } from "./testSupport";
 import {
   type FetchLike,
+  MAX_RESPONSE_BYTES,
   REQUEST_TIMEOUT_MS,
   createFetchRequester,
 } from "./transport";
@@ -172,6 +175,46 @@ describe("fetch requester", () => {
       request2({ method: "GET", path: "/v1/x", headers: {} }),
       (error) => error instanceof SyncError && error.kind === "server",
     );
+  });
+
+  it("reads a full page of changes at the server's limit", async () => {
+    // The largest page the server sends: 200 records holding 4 MiB of
+    // ciphertext (counted decoded), as base64url, with the widest numbers.
+    const vault = deriveVaultKeys(new Uint8Array(32).fill(5));
+    const records = SYNC_LIMITS.maxPageRecords;
+    const share = Math.floor(SYNC_LIMITS.maxPageBytes / records);
+    const page: ChangesResponse = {
+      records: Array.from({ length: records }, (_, index) => ({
+        rid: "A".repeat(23) + String.fromCharCode(65 + (index % 26)),
+        rev: Number.MAX_SAFE_INTEGER,
+        seq: Number.MAX_SAFE_INTEGER - records + index,
+        deleted: false,
+        ct: Buffer.alloc(share, index).toString("base64url"),
+      })),
+      next: Number.MAX_SAFE_INTEGER,
+      hasMore: true,
+      head: Number.MAX_SAFE_INTEGER,
+      epoch: "e0000000001",
+    };
+    const body = JSON.stringify(page);
+    // Over the 5 MiB this cap once was, which refused such a page forever.
+    assert.ok(body.length > 5 * 1024 * 1024);
+    assert.ok(body.length <= MAX_RESPONSE_BYTES);
+    const { fetch } = fakeFetch(() => ({
+      status: 200,
+      body,
+      headers: { "content-length": String(body.length) },
+    }));
+    const transport = createHttpTransport({
+      request: createFetchRequester({
+        baseUrl: BASE,
+        fetch,
+        timers: clock().timersApi,
+      }),
+      vault,
+    });
+    const answer = await transport.changes(0, records);
+    assert.equal(answer.records.length, records);
   });
 
   it("refuses an answer from another server (a redirect)", async () => {
