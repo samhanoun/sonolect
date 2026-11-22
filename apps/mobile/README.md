@@ -224,8 +224,11 @@ involved, and the provider bills the user's own account.
   the original, so _Clean up_ brings it back. With sync on, the edited note
   syncs to the user's other devices like any other edit. A rejected key,
   missing credits, a rate limit, an unknown model, a timeout (60 seconds) or
-  no network shows a notice, and the note does not change. Redirects are
-  refused, and the provider's error text is never shown.
+  no network shows a notice, and the note does not change. If the note's
+  text changes while the provider answers (an edit on this phone, or a
+  newer version from another device), the answer is not used: the newer
+  text stays, and a notice says so. Redirects are refused, and the
+  provider's error text is never shown.
 - **Code**: `src/onlineRefine.ts` (endpoints, prompts and checks that mirror
   `apps/desktop/src-tauri/src/online.rs`), `src/onlineEdit.ts` (consent
   plan and one send, tested with a mocked fetch), `src/providerKeys.ts`

@@ -466,6 +466,56 @@ describe("a note that goes away during the request", () => {
   });
 });
 
+describe("a note that changes during the request", () => {
+  it("keeps an edit made here while the provider answers", async () => {
+    let refinedText = TURN.refinedText;
+    const harness = setup({
+      respond: () => {
+        // The user edits the note while the provider answers.
+        refinedText = "So tell Sonolect that Friday works";
+        return reply("Done.");
+      },
+      current: () => ({ ...TURN, refinedText }),
+    });
+    assert.deepEqual(await runOnlineEdit(harness.input), {
+      kind: "failed",
+      notice: "onlineNoteChanged",
+    });
+    assert.equal(harness.calls.length, 1);
+  });
+
+  it("keeps a newer text that came from another device", async () => {
+    let rawText = TURN.rawText;
+    const harness = setup({
+      respond: () => {
+        // Sync brings in a newer version of the same note.
+        rawText = "so tell sam lect friday works";
+        return reply("Done.");
+      },
+      current: () => ({ ...TURN, rawText }),
+    });
+    assert.deepEqual(await runOnlineEdit(harness.input), {
+      kind: "failed",
+      notice: "onlineNoteChanged",
+    });
+  });
+
+  it("shows the provider's failure when the request also failed", async () => {
+    let refinedText = TURN.refinedText;
+    const harness = setup({
+      respond: () => {
+        refinedText = "Edited meanwhile";
+        return new Response("{}", { status: 401 });
+      },
+      current: () => ({ ...TURN, refinedText }),
+    });
+    assert.deepEqual(await runOnlineEdit(harness.input), {
+      kind: "failed",
+      notice: "onlineKeyRejected",
+    });
+  });
+});
+
 describe("the key", () => {
   it("never appears in an outcome, a sent body or the settings", async () => {
     const outcomes = [];

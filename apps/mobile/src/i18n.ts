@@ -131,6 +131,8 @@ const en = {
         "This note is too long to send (over 12,000 characters). Nothing was sent.",
       onlineNothingToSend:
         "This note has no text left to send. Nothing was sent.",
+      onlineNoteChanged:
+        "This note changed while the provider was answering, so the answer was not used. Your changes were kept. Tap again to edit the new text.",
       onlineFailed:
         "The provider request failed. Try again later. Your note was not changed.",
     },
@@ -599,6 +601,8 @@ const fr: Strings = {
         "Cette note est trop longue pour être envoyée (plus de 12\u00a0000 caractères). Rien n'a été envoyé.",
       onlineNothingToSend:
         "Cette note n'a plus de texte à envoyer. Rien n'a été envoyé.",
+      onlineNoteChanged:
+        "Cette note a changé pendant que le fournisseur répondait, sa réponse n'a donc pas été utilisée. Vos modifications sont conservées. Touchez à nouveau pour modifier le nouveau texte.",
       onlineFailed:
         "La requête au fournisseur a échoué. Réessayez plus tard. Votre note n'a pas changé.",
     },

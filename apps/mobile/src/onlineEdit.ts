@@ -228,6 +228,15 @@ export async function runOnlineEdit(
   if (result.status === "failed") {
     return { kind: "failed", notice: onlineFailureNotice(result.reason) };
   }
+  // The answer can take a minute. If the note's text was edited here, or
+  // came in from another device meanwhile, the answer is for the old text:
+  // the newer text is kept, and the user can send it again.
+  if (
+    current.rawText !== turn.rawText ||
+    current.refinedText !== turn.refinedText
+  ) {
+    return { kind: "failed", notice: "onlineNoteChanged" };
+  }
   return {
     kind: "applied",
     turn: {

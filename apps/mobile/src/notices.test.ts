@@ -422,6 +422,7 @@ describe("online editing notices", () => {
       "onlineEmpty",
       "onlineTooLong",
       "onlineNothingToSend",
+      "onlineNoteChanged",
       "onlineFailed",
     ]);
     for (const kind of ONLINE_KINDS) {

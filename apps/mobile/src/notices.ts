@@ -22,6 +22,7 @@ export const ONLINE_NOTICE_KINDS = [
   "onlineEmpty",
   "onlineTooLong",
   "onlineNothingToSend",
+  "onlineNoteChanged",
   "onlineFailed",
 ] as const;
 export type OnlineNoticeKind = (typeof ONLINE_NOTICE_KINDS)[number];
@@ -139,6 +140,7 @@ const DEFAULT_ACTIONS: Record<NoticeKind, readonly NoticeAction[]> = {
   onlineEmpty: ["dismiss"],
   onlineTooLong: ["dismiss"],
   onlineNothingToSend: ["dismiss"],
+  onlineNoteChanged: ["dismiss"],
   onlineFailed: ["dismiss"],
 };
 
@@ -202,6 +204,7 @@ const TEXT: Record<NoticeKind, (t: Strings, language: string) => string> = {
   onlineEmpty: (t) => t.capture.notices.onlineEmpty,
   onlineTooLong: (t) => t.capture.notices.onlineTooLong,
   onlineNothingToSend: (t) => t.capture.notices.onlineNothingToSend,
+  onlineNoteChanged: (t) => t.capture.notices.onlineNoteChanged,
   onlineFailed: (t) => t.capture.notices.onlineFailed,
 };
 
