@@ -366,8 +366,9 @@ describe("the sync controller", () => {
     assert.ok(pairing);
     assert.equal(pairing.code.replaceAll("-", "").length, 56);
     assert.equal(pairing.groups.join("-"), pairing.code);
-    assert.ok(pairing.link.startsWith("sonolect://sync/join"));
-    assert.ok(pairing.qr.size > 0);
+    // Plain text for the phone's scanner, not a link.
+    assert.equal(pairing.payload, `SONOLECT SYNC 1 ${pairing.code}`);
+    assert.equal(pairing.qr.size, 33);
 
     const typed = pairing.code.replaceAll("-", "");
     const wrong =
@@ -378,7 +379,18 @@ describe("the sync controller", () => {
     assert.equal(second.view().phase, "off");
     assert.equal(second.native.key, null);
 
-    await second.controller.join(pairing.link);
+    // A link is not a code, the old pairing link included.
+    const link = await second.controller
+      .join(`sonolect://sync/join?v=1&k=${first.native.key}`)
+      .catch((error) => error);
+    assert.ok(link instanceof PairingError);
+    assert.equal(
+      syncActionErrorText(link, getT()),
+      "This is not a Sonolect sync code.",
+    );
+    assert.equal(second.native.key, null);
+
+    await second.controller.join(pairing.payload);
     assert.equal(second.native.key, first.native.key);
     await w.clock.advance(0);
     assert.deepEqual(second.native.transcripts(), [
@@ -888,7 +900,7 @@ describe("the sync controller", () => {
       syncActionErrorText(new PairingError("version", "x"), t),
       "Update Sonolect to use this code.",
     );
-    for (const code of ["key", "length", "character"] as const)
+    for (const code of ["length", "character"] as const)
       assert.equal(
         syncActionErrorText(new PairingError(code, "x"), t),
         "Check the code: it has 56 characters.",

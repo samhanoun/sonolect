@@ -85,7 +85,7 @@ Sync between devices is built in but hidden: a build shows it only when it names
 
    Expo inlines `EXPO_PUBLIC_` variables when Metro bundles the app, so restart Metro after changing it (`pnpm exec expo start --clear` if the old value sticks). The web build never shows sync.
 
-4. Pair the two: turn sync on in one app's Settings, then join from the other with the 56-character code (or, on a phone, by opening the QR code's link). Notes made on one appear on the other within a minute or two; recordings stay where they were made. Joining shares every note with whoever holds the code, so use test notes.
+4. Pair the two: turn sync on in one app's Settings, then join from the other with the 56-character code (or, on a phone, with **Scan code** in Settings › Sync, which reads the QR code in the app). Notes made on one appear on the other within a minute or two; recordings stay where they were made. Joining shares every note with whoever holds the code, so use test notes.
 
 `pnpm --filter @sonolect/sync-service test` runs the service's own tests, including two devices syncing through it over HTTP.
 

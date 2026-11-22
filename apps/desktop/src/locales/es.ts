@@ -239,8 +239,7 @@ export const es: Partial<Record<LocaleKeys, string>> = {
   "studio.sync.turnOn": "Activar la sincronización",
   "studio.sync.turningOn": "Activando…",
   "studio.sync.join": "Unirse con un código",
-  "studio.sync.joinLabel":
-    "Código o enlace de sincronización de tu otro dispositivo",
+  "studio.sync.joinLabel": "Código de sincronización de tu otro dispositivo",
   "studio.sync.joinSubmit": "Unirse",
   "studio.sync.joining": "Uniéndose…",
   "studio.sync.cancel": "Cancelar",
@@ -253,7 +252,7 @@ export const es: Partial<Record<LocaleKeys, string>> = {
   "studio.sync.showCode": "Mostrar el código",
   "studio.sync.hideCode": "Ocultar el código",
   "studio.sync.codeHint":
-    "En tu otro dispositivo, elige unirte a la sincronización y luego escanea este código QR o escribe el código.",
+    "En tu teléfono, escanea este código QR con Sonolect (Settings, Sync, Scan code), no con la app de cámara. En otro ordenador, elige «Unirse con un código» y escribe el código.",
   "studio.sync.codeLabel": "Código de sincronización",
   "studio.sync.qrLabel": "Código QR para unirse a esta sincronización",
   "studio.sync.turnOff": "Desactivar la sincronización",

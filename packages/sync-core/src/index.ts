@@ -67,17 +67,15 @@ export {
 } from "./keys";
 export {
   PAIRING_CODE_LENGTH,
-  PAIRING_LINK_PREFIX,
+  PAIRING_PAYLOAD_PREFIX,
   PAIRING_VERSION,
   PairingError,
   type PairingErrorCode,
   pairingCode,
   pairingCodeGroups,
-  pairingLink,
+  pairingPayload,
   parsePairing,
   parsePairingCode,
-  parsePairingLink,
-  parsePairingParams,
 } from "./pairing";
 export {
   InvalidPayloadError,

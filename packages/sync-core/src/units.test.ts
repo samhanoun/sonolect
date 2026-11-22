@@ -5,14 +5,13 @@ import { SyncError } from "./errors";
 import { HLC_MAX_FUTURE_MS, HlcClock, compareHlc, isHlc } from "./hlc";
 import {
   PAIRING_CODE_LENGTH,
+  PAIRING_PAYLOAD_PREFIX,
   PairingError,
   pairingCode,
   pairingCodeGroups,
-  pairingLink,
+  pairingPayload,
   parsePairing,
   parsePairingCode,
-  parsePairingLink,
-  parsePairingParams,
 } from "./pairing";
 import {
   InvalidPayloadError,
@@ -40,7 +39,6 @@ import {
 } from "./transport";
 import { DAY, VECTOR_ROOT, newKeys, note, randomBytes } from "./test-helpers";
 import { generateRootKey } from "./keys";
-import { base64urlEncode } from "./encoding";
 
 describe("hlc", () => {
   it("orders by time, then counter, then device", () => {
@@ -102,62 +100,73 @@ describe("hlc", () => {
 describe("pairing", () => {
   const root = generateRootKey(randomBytes);
 
-  it("puts only the key in the link, in the query string", () => {
-    const link = pairingLink(VECTOR_ROOT);
+  const failure = (fn: () => unknown) => {
+    try {
+      fn();
+    } catch (error) {
+      return error instanceof PairingError ? error.code : "other";
+    }
+    return "none";
+  };
+
+  it("puts only the typed code in the QR code, as plain text", () => {
+    assert.equal(PAIRING_PAYLOAD_PREFIX, "SONOLECT SYNC");
     assert.equal(
-      link,
-      "sonolect://sync/join?v=1&k=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      pairingPayload(VECTOR_ROOT),
+      "SONOLECT SYNC 1 000G-40R4-0M30-E209-185G-R38E-1W81-24GK-2GAH-C5RR-34D1-P70X-3RFP-63ED",
     );
-    assert.deepEqual(parsePairingLink(pairingLink(root)), root);
+    assert.deepEqual(parsePairing(pairingPayload(root)), root);
+    // Not a URL: no scheme for another app to claim, nothing to open.
+    assert.doesNotMatch(pairingPayload(root), /:/);
+    assert.match(pairingPayload(root), /^[A-Z0-9 -]+$/);
   });
 
-  it("accepts the fragment form, three slashes and parameters it does not know", () => {
-    const k = base64urlEncode(root);
-    for (const link of [
-      `sonolect://sync/join#v=1&k=${k}`,
-      `sonolect://sync/join?v=1&k=${k}`,
-      `sonolect:///sync/join?v=1&k=${k}`,
-      `SONOLECT://sync/join/#v=1&k=${k}&s=https://example.org`,
-      `sonolect://sync/join?x=1#k=${k}&v=1&later=yes`,
-      `  sonolect://sync/join#v=1&k=${k}  `,
+  it("reads the QR text in any letter case and spacing", () => {
+    const code = pairingCode(root);
+    for (const text of [
+      `SONOLECT SYNC 1 ${code}`,
+      `  sonolect sync 1 ${code.toLowerCase()}\n`,
+      `Sonolect  Sync\t1\n${code.replace(/-/g, " ")}`,
+      `SONOLECT SYNC 1 ${code.replace(/-/g, "")}`,
     ])
-      assert.deepEqual(parsePairingLink(link), root, link);
-    assert.deepEqual(
-      parsePairingParams({ v: "1", k, other: ["a", "b"] }),
-      root,
-    );
-    assert.deepEqual(parsePairingParams({ v: ["1"], k: [k] }), root);
+      assert.deepEqual(parsePairing(text), root, text);
   });
 
-  it("explains what is wrong with a link", () => {
-    const k = base64urlEncode(root);
-    const code = (fn: () => unknown) => {
-      try {
-        fn();
-      } catch (error) {
-        return error instanceof PairingError ? error.code : "other";
-      }
-      return "none";
-    };
+  it("refuses links, other prefixes and newer QR codes", () => {
+    const code = pairingCode(root);
+    const k = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+    for (const text of [
+      // The link earlier builds put in the QR code: never read again.
+      `sonolect://sync/join?v=1&k=${k}`,
+      `sonolect://sync/join#v=1&k=${k}`,
+      `sonolect:///sync/join?v=1&k=${k}`,
+      `SONOLECT://sync/join?v=1&k=${k}`,
+      `sonolect:${code}`,
+      `https://sonolect.app/join#${code}`,
+      `sonolect-sync:1:${code}`,
+      `SONOLECT-SYNC:1:${code}`,
+      "SONOLECT SYNC",
+      `SONOLECT SYNC ${code}`,
+      `SONOLECT SYNC X ${code}`,
+    ])
+      assert.equal(
+        failure(() => parsePairing(text)),
+        "invalid",
+        text,
+      );
     assert.equal(
-      code(() => parsePairingLink("https://sonolect.app/join")),
-      "invalid",
-    );
-    assert.equal(
-      code(() => parsePairingLink(`sonolect://sync/join#v=2&k=${k}`)),
+      failure(() => parsePairing(`SONOLECT SYNC 2 ${code}`)),
       "version",
     );
+    const typo =
+      code.slice(0, 5) + (code[5] === "7" ? "8" : "7") + code.slice(6);
     assert.equal(
-      code(() => parsePairingLink("sonolect://sync/join#v=1&k=AAAA")),
-      "key",
+      failure(() => parsePairing(`SONOLECT SYNC 1 ${typo}`)),
+      "typo",
     );
     assert.equal(
-      code(() => parsePairingLink("sonolect://sync/join#v=1&k=***")),
-      "key",
-    );
-    assert.equal(
-      code(() => parsePairingParams({ v: "1" })),
-      "key",
+      failure(() => parsePairing(`SONOLECT SYNC 1 ${code.slice(0, 20)}`)),
+      "length",
     );
   });
 
@@ -203,17 +212,23 @@ describe("pairing", () => {
     );
   });
 
-  it("tells a link from a code", () => {
-    assert.deepEqual(parsePairing(pairingLink(root)), root);
+  it("reads the QR text and the typed code with one parser", () => {
+    assert.deepEqual(parsePairing(pairingPayload(root)), root);
     assert.deepEqual(parsePairing(pairingCode(root)), root);
+    const sloppy = pairingCode(VECTOR_ROOT).toLowerCase().replace(/-/g, " ");
+    assert.deepEqual(parsePairing(sloppy), VECTOR_ROOT);
+    assert.equal(
+      failure(() => parsePairing("hello")),
+      "length",
+    );
   });
 
-  it("draws the link as a version 5 QR matrix", () => {
-    const matrix = qrMatrix(pairingLink(root));
-    assert.equal(matrix.version, 5);
-    assert.equal(matrix.size, 37);
-    assert.equal(matrix.modules.length, 37);
-    assert.ok(matrix.modules.every((row) => row.length === 37));
+  it("draws the QR text as a version 4 QR matrix", () => {
+    const matrix = qrMatrix(pairingPayload(root));
+    assert.equal(matrix.version, 4);
+    assert.equal(matrix.size, 33);
+    assert.equal(matrix.modules.length, 33);
+    assert.ok(matrix.modules.every((row) => row.length === 33));
     // Finder pattern: the top-left corner is dark.
     assert.equal(matrix.modules[0]![0], true);
   });

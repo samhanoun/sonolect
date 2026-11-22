@@ -396,7 +396,7 @@ const en = {
       tryQuick: "Try Quick dictation",
     },
   },
-  /** Sync (Settings and the join link); only builds with a sync server show it. */
+  /** Sync, in Settings; only builds with a sync server show it. */
   sync: {
     title: "SYNC",
     intro:
@@ -404,13 +404,23 @@ const en = {
     shareWarning: "Joining shares every note with whoever holds the code.",
     turnOn: "Turn on sync",
     join: "Join with a code",
+    scanCode: "Scan code",
+    scanTitle: "Scan the sync code",
+    scanHelp:
+      "Point the camera at the QR code under Sync on your other device.",
+    scanNotSonolect: "This QR code is not a Sonolect sync code.",
+    cameraNeeded:
+      "Sonolect needs the camera to scan the code. Tap Scan code to allow it, or join with a code instead.",
+    cameraDenied:
+      "Sonolect can't use the camera, so it can't scan the code. Allow camera access for Sonolect in your phone's settings, or join with a code instead.",
+    cameraFailed: "The camera could not start. Join with a code instead.",
     codeLabel: "Sync code",
     codePlaceholder: "Paste or type the 56-character code",
     codeNext: "Next",
     showCode: "Show sync code",
     hideCode: "Hide sync code",
     codeHelp:
-      "Scan this QR code with your other phone, or type the code there.",
+      "Scan this QR code with Sonolect on your other phone (Settings, Sync, Scan code), not with the camera app. Or type the code there.",
     qrLabel: "QR code to join this sync",
     turnOff: "Turn off sync",
     turnOffTitle: "Turn off sync?",
@@ -444,17 +454,14 @@ const en = {
       length: "Check the code: it has 56 characters.",
       typo: "A character is wrong.",
     },
-    joinScreenTitle: "Join sync",
     joinTitle: "Join this sync?",
     joinNotes: (n: number) =>
       n === 0
         ? "This phone has no notes to copy yet."
         : `This phone's ${n === 1 ? "note" : `${n} notes`} will be copied into this sync.`,
-    joinInvalidTitle: "This link can't be used",
     joinConfirm: "Join",
     alreadyJoined: "This phone already uses this sync.",
     otherVaultOn: "Sync is already on. Turn it off to join another sync.",
-    openSettings: "Open Settings",
     eraseMessage:
       "All Sonolect data on this phone will be erased. This can't be undone. Delete the server copy too, and your other devices stop syncing.",
     eraseDeleteServerCopy: "Erase and delete server copy",
@@ -884,13 +891,25 @@ const fr: Strings = {
       "Rejoindre partage toutes les notes avec quiconque détient le code.",
     turnOn: "Activer la synchronisation",
     join: "Rejoindre avec un code",
+    scanCode: "Scanner un code",
+    scanTitle: "Scanner le code de synchronisation",
+    scanHelp:
+      "Pointez l'appareil photo vers le QR code de la section Synchronisation de votre autre appareil.",
+    scanNotSonolect:
+      "Ce QR code n'est pas un code de synchronisation Sonolect.",
+    cameraNeeded:
+      "Sonolect a besoin de l'appareil photo pour scanner le code. Touchez Scanner un code pour l'autoriser, ou rejoignez avec un code.",
+    cameraDenied:
+      "Sonolect ne peut pas utiliser l'appareil photo pour scanner le code. Autorisez l'accès à l'appareil photo pour Sonolect dans les réglages du téléphone, ou rejoignez avec un code.",
+    cameraFailed:
+      "L'appareil photo n'a pas pu démarrer. Rejoignez plutôt avec un code.",
     codeLabel: "Code de synchronisation",
     codePlaceholder: "Collez ou saisissez le code de 56 caractères",
     codeNext: "Suivant",
     showCode: "Afficher le code",
     hideCode: "Masquer le code",
     codeHelp:
-      "Scannez ce QR code avec votre autre téléphone, ou saisissez-y le code.",
+      "Scannez ce QR code avec Sonolect sur votre autre téléphone (Réglages, Synchronisation, Scanner un code), pas avec l'app Appareil photo. Ou saisissez-y le code.",
     qrLabel: "QR code pour rejoindre cette synchronisation",
     turnOff: "Désactiver la synchronisation",
     turnOffTitle: "Désactiver la synchronisation ?",
@@ -927,7 +946,6 @@ const fr: Strings = {
       length: "Vérifiez le code : il compte 56 caractères.",
       typo: "Un caractère est erroné.",
     },
-    joinScreenTitle: "Rejoindre la synchronisation",
     joinTitle: "Rejoindre cette synchronisation ?",
     joinNotes: (n: number) =>
       n === 0
@@ -935,12 +953,10 @@ const fr: Strings = {
         : n === 1
           ? "La note de ce téléphone sera copiée dans cette synchronisation."
           : `Les ${n} notes de ce téléphone seront copiées dans cette synchronisation.`,
-    joinInvalidTitle: "Ce lien ne peut pas être utilisé",
     joinConfirm: "Rejoindre",
     alreadyJoined: "Ce téléphone utilise déjà cette synchronisation.",
     otherVaultOn:
       "La synchronisation est déjà activée. Désactivez-la pour en rejoindre une autre.",
-    openSettings: "Ouvrir les réglages",
     eraseMessage:
       "Toutes les données Sonolect de ce téléphone seront effacées. C'est irréversible. Supprimez aussi la copie du serveur, et vos autres appareils arrêtent de synchroniser.",
     eraseDeleteServerCopy: "Effacer et supprimer la copie du serveur",

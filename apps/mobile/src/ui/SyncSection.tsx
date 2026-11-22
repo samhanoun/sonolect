@@ -1,24 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, StyleSheet, Text, TextInput, View } from "react-native";
+import { useCameraPermissions } from "expo-camera";
 import { useFocusEffect } from "expo-router";
 import Svg, { Path, Rect } from "react-native-svg";
 
-import { SYNC_URL } from "../features";
 import type { Strings } from "../i18n";
 import { formatNoteDate } from "../library";
 import type { Pairing, SyncController } from "../sync/controller";
-import { joinPlanForText } from "../sync/joinLink";
 import {
   actionErrorText,
   pairingErrorText,
   syncStatusLines,
 } from "../sync/messages";
+import { readTypedCode } from "../sync/pairingInput";
 import { qrPath } from "../sync/qr";
 import { useSyncView } from "../sync/useSync";
-import { showFailure } from "./actions";
+import { openAppSettings, showFailure } from "./actions";
 import { Button, Card, Label, inputColors } from "./components";
 import { choose } from "./confirm";
 import { FadeIn } from "./glass";
+import { SyncScanner } from "./SyncScanner";
 import { colors, fonts, glass, radius, space } from "./theme";
 
 /** Groups of the typed code per line: 4 lines that fit any phone. */
@@ -26,12 +27,22 @@ const GROUPS_PER_LINE = 4;
 /** The QR code's largest side, in points. */
 const QR_MAX_SIZE = 232;
 
+/** Why the scanner could not open. */
+type ScanProblem =
+  /** Camera access refused; Scan code asks again. */
+  | "denied"
+  /** Camera access refused for good: only the phone's settings can allow it. */
+  | "blocked"
+  /** No camera, or it did not start. */
+  | "camera";
+
 /**
  * Settings' Sync section, in builds with a sync server (never on web): turn
- * sync on and show the code for another device, join with a code, turn it
- * off keeping or deleting the server copy, and what sync is doing in plain
- * words. Every view of the code, and the field that takes one, says that
- * joining shares every note.
+ * sync on and show the code for another device, join by scanning the other
+ * device's QR code (SyncScanner.tsx) or by typing its code, turn sync off
+ * keeping or deleting the server copy, and what sync is doing in plain
+ * words. Every view of the code, the scanner and the field that takes a
+ * code say that joining shares every note.
  */
 export function SyncSection({
   sync,
@@ -54,7 +65,10 @@ export function SyncSection({
   const [code, setCode] = useState("");
   const [codeError, setCodeError] = useState<string | null>(null);
   const [joinRoot, setJoinRoot] = useState<Uint8Array | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanProblem, setScanProblem] = useState<ScanProblem | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [, requestCameraPermission] = useCameraPermissions({ get: false });
   // One action at a time: a second tap while one runs does nothing.
   const acting = useRef(false);
   const on = view?.status === "on";
@@ -63,6 +77,11 @@ export function SyncSection({
   useEffect(() => {
     if (!on) setPairing(null);
   }, [on]);
+  // The scanner is for joining: it closes when sync is no longer off.
+  const off = view?.status === "off";
+  useEffect(() => {
+    if (!off) setScanning(false);
+  }, [off]);
 
   // Tabs stay mounted: the code also goes when Settings loses focus and
   // when the app leaves the screen (iOS 'inactive' comes before the app
@@ -80,6 +99,7 @@ export function SyncSection({
     });
     return () => subscription.remove();
   }, [leave]);
+  const closeScanner = useCallback(() => setScanning(false), []);
 
   if (!view) return null;
   const lines = syncStatusLines(t, view, (ms) =>
@@ -105,6 +125,25 @@ export function SyncSection({
     setJoinRoot(null);
   };
 
+  /** Asks for the camera (once; the phone remembers), then opens the scanner. */
+  const scan = () =>
+    act(async () => {
+      setMessage(null);
+      setScanProblem(null);
+      try {
+        const permission = await requestCameraPermission();
+        if (permission.granted) setScanning(true);
+        else setScanProblem(permission.canAskAgain ? "denied" : "blocked");
+      } catch {
+        setScanProblem("camera");
+      }
+    });
+
+  const scanned = (root: Uint8Array) => {
+    setScanning(false);
+    setJoinRoot(root);
+  };
+
   /** Shows the code read, unless the user left Settings or the app since `at`. */
   const showPairing = (at: number, next: Pairing | null) => {
     if (leaves.current === at) setPairing(next);
@@ -113,6 +152,7 @@ export function SyncSection({
   const turnOn = () =>
     act(async () => {
       const at = leaves.current;
+      setScanProblem(null);
       try {
         await sync.turnOn();
         showPairing(at, await sync.pairing());
@@ -132,16 +172,12 @@ export function SyncSection({
     });
 
   const checkCode = () => {
-    const plan = joinPlanForText(SYNC_URL, code);
+    const plan = readTypedCode(code);
     if (plan.kind === "confirm") {
       setCodeError(null);
       setJoinRoot(plan.root);
     } else {
-      setCodeError(
-        plan.kind === "invalid"
-          ? pairingErrorText(t, plan.error)
-          : t.sync.pairingErrors.invalid,
-      );
+      setCodeError(pairingErrorText(t, plan.error));
     }
   };
 
@@ -188,7 +224,7 @@ export function SyncSection({
     >
       <Label heading>{t.sync.title}</Label>
       <Card>
-        {view.status === "off" && !entering ? (
+        {view.status === "off" && !entering && !joinRoot ? (
           <Text style={styles.body}>{t.sync.intro}</Text>
         ) : null}
         {lines.status ? (
@@ -251,23 +287,61 @@ export function SyncSection({
             </View>
           </>
         ) : null}
-        {view.status === "off" && !entering ? (
-          <View style={styles.row}>
-            <Button
-              variant="primary"
-              label={t.sync.turnOn}
-              disabled={busy}
-              onPress={() => void turnOn()}
-            />
-            <Button
-              label={t.sync.join}
-              disabled={busy}
-              onPress={() => {
-                setMessage(null);
-                setEntering(true);
-              }}
-            />
-          </View>
+        {view.status === "off" && !entering && !joinRoot ? (
+          <>
+            <View style={styles.row}>
+              <Button
+                variant="primary"
+                label={t.sync.turnOn}
+                disabled={busy}
+                onPress={() => void turnOn()}
+              />
+              <Button
+                label={t.sync.scanCode}
+                disabled={busy}
+                onPress={() => void scan()}
+              />
+              <Button
+                label={t.sync.join}
+                disabled={busy}
+                onPress={() => {
+                  setMessage(null);
+                  setScanProblem(null);
+                  setEntering(true);
+                }}
+              />
+            </View>
+            {scanProblem ? (
+              <>
+                <Text style={[styles.help, styles.problem]}>
+                  {scanProblem === "camera"
+                    ? t.sync.cameraFailed
+                    : scanProblem === "denied"
+                      ? t.sync.cameraNeeded
+                      : t.sync.cameraDenied}
+                </Text>
+                {scanProblem === "blocked" ? (
+                  <View style={styles.row}>
+                    <Button
+                      label={t.capture.actions.openSettings}
+                      onPress={openAppSettings}
+                    />
+                  </View>
+                ) : null}
+              </>
+            ) : null}
+          </>
+        ) : null}
+        {view.status === "off" && scanning ? (
+          <SyncScanner
+            t={t}
+            onScanned={scanned}
+            onClose={closeScanner}
+            onCameraFailed={() => {
+              setScanning(false);
+              setScanProblem("camera");
+            }}
+          />
         ) : null}
 
         {on && pairing ? <PairingCode t={t} pairing={pairing} /> : null}
@@ -294,9 +368,12 @@ export function SyncSection({
   );
 }
 
-/** The QR code of the join link, and the typed code in groups of 4. */
+/**
+ * The QR code for Sonolect's scanner on the other phone (plain text, not a
+ * link), and the typed code in groups of 4.
+ */
 function PairingCode({ t, pairing }: { t: Strings; pairing: Pairing }) {
-  const qr = useMemo(() => qrPath(pairing.link), [pairing.link]);
+  const qr = useMemo(() => qrPath(pairing.payload), [pairing.payload]);
   // Whole points per module: no seams between the rows of dark modules.
   const side = Math.max(3, Math.floor(QR_MAX_SIZE / qr.size)) * qr.size;
   const lines: string[] = [];
@@ -329,22 +406,19 @@ function PairingCode({ t, pairing }: { t: Strings; pairing: Pairing }) {
 }
 
 /**
- * The question before joining (Settings and the join link): how many notes
- * this phone shares, and with whom.
+ * The question before joining, after a code was scanned or typed: how many
+ * notes this phone shares, and with whom.
  */
-export function JoinConfirmation({
+function JoinConfirmation({
   t,
   noteCount,
   busy,
-  ready = true,
   onJoin,
   onCancel,
 }: {
   t: Strings;
   noteCount: number;
   busy: boolean;
-  /** False while joining must wait (the join link, before the key is read). */
-  ready?: boolean;
   onJoin: () => void;
   onCancel: () => void;
 }) {
@@ -359,7 +433,7 @@ export function JoinConfirmation({
         <Button
           variant="primary"
           label={t.sync.joinConfirm}
-          disabled={busy || !ready}
+          disabled={busy}
           onPress={onJoin}
         />
         <Button label={t.common.cancel} disabled={busy} onPress={onCancel} />

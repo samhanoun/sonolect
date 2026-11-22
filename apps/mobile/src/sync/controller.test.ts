@@ -4,8 +4,8 @@ import { describe, it } from "node:test";
 import {
   SyncError,
   createKeyValueStateStore,
+  parsePairing,
   parsePairingCode,
-  parsePairingLink,
 } from "@sonolect/sync-core";
 import { createMemoryVaultServer } from "@sonolect/sync-core/testing";
 
@@ -115,9 +115,13 @@ describe("sync controller: turning on and joining", () => {
     const pairing = await a.sync.pairing();
     assert.ok(pairing);
     assert.equal(pairing.groups.length, 14);
-    assert.match(pairing.link, /^sonolect:\/\/sync\/join\?v=1&k=/);
+    // The QR code holds plain text for Sonolect's scanner, not a link.
+    assert.equal(
+      pairing.payload,
+      `SONOLECT SYNC 1 ${pairing.groups.join("-")}`,
+    );
     assert.deepEqual(
-      parsePairingLink(pairing.link),
+      parsePairing(pairing.payload),
       parsePairingCode(pairing.groups.join("")),
     );
     assert.equal(w.server.records(vaultIdOf(a)).length, 1);
@@ -152,12 +156,11 @@ describe("sync controller: turning on and joining", () => {
     await a.sync.turnOn();
     const pairing = await a.sync.pairing();
     assert.ok(pairing);
-    const root = parsePairingLink(pairing.link);
-    assert.equal(b.sync.joinOutcome(root), null, "off: it would join");
+    const root = parsePairing(pairing.payload);
     await b.sync.turnOn();
-    assert.equal(b.sync.joinOutcome(root), "otherVaultOn");
-    assert.equal(a.sync.joinOutcome(root), "alreadyJoined");
+    const own = vaultIdOf(b);
     assert.equal(await pair(a, b), "otherVaultOn");
+    assert.equal(vaultIdOf(b), own, "b keeps its own vault");
     assert.equal(await a.sync.join(root), "alreadyJoined");
   });
 

@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import {
   checkSyncServerUrl,
   createKeyValueStateStore,
-  parsePairingLink,
+  parsePairing,
 } from "@sonolect/sync-core";
 
 import { SYNC_STATE_PREFIX } from "../storageCore";
@@ -128,8 +128,8 @@ export async function runLiveCheck(rawUrl: string): Promise<string[]> {
     assert.equal(pairing.groups.length, 14);
     log.push("phone A turned sync on and showed a 14-group code");
 
-    // B joins with the link the QR code carries.
-    assert.equal(await b.sync.join(parsePairingLink(pairing.link)), "joined");
+    // B joins with the text the QR code carries, as its scanner reads it.
+    assert.equal(await b.sync.join(parsePairing(pairing.payload)), "joined");
     await nextRun(b, "join");
     assert.ok(b.phone.get(early.id), "A's early note reached B");
     await foreground(a, "pull B's own note");

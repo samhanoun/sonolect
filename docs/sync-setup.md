@@ -181,8 +181,9 @@ curl http://127.0.0.1:8080/health   # in another terminal
 ## 6. Deploy with Terraform
 
 [`infra/terraform/sync`](../infra/terraform/sync/main.tf) is a root of its
-own, apart from the full platform in `infra/terraform` (which also creates
-Cloud SQL and needs a private network). It creates:
+own, apart from the full platform in `infra/terraform` (which can also
+create Cloud SQL, off unless `enable_cloud_sql` is set, and then needs a
+private network). It creates:
 
 - the Firestore database (native mode) with delete protection;
 - an index exemption for the `ct` field of the `records` collection group:
@@ -409,7 +410,7 @@ gcloud logging read \
 The URL is fixed when an app is built; there is no setting for it in the
 apps. Without it, an app looks and behaves as before and makes no sync
 request. Release builds accept only an `https://` URL with no user name,
-query or fragment. Pairing links and codes never carry the URL, so every
+query or fragment. Pairing codes and QR codes never carry the URL, so every
 device must run a build made with the same server.
 
 ### Desktop
@@ -484,10 +485,17 @@ With two devices running builds made with the same URL:
 
 1. On the first, open Settings › Sync and turn sync on. It creates the vault
    and shows a QR code and a 56-character code.
-2. On the second, join: scan the QR code with the phone's camera app (it
-   opens Sonolect's join screen), or choose to join with a code and type it.
-   Both screens say that joining shares every note with whoever holds the
-   code, so show the code only to your own devices.
+2. On the second, join:
+   - On a phone, open Settings › Sync in Sonolect and tap **Scan code**. The
+     first time, Sonolect asks for the camera. Point it at the QR code:
+     Sonolect asks how many notes it shares before it joins. Do not scan the
+     QR code with the phone's camera app: the code is plain text, not a
+     link, so the camera app can only show it, or send it to a web search.
+   - On a computer, or without the camera, choose **Join with a code** and
+     type the 56-character code.
+   - The screens that show or take the code say that joining shares every
+     note with whoever holds it, so show it only to your own devices.
+
 3. Make a note on one device. Within a couple of minutes it appears on the
    other (sooner after bringing the app to the front, or with **Sync now** on
    the desktop). Edit it, then delete it, and check

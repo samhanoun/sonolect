@@ -28,6 +28,7 @@ import type { NoteSegment } from "../../../apps/mobile/src/domain";
 import { SYNC_COMPANION_PREFIX } from "../../../apps/mobile/src/storageCore";
 import { CHANGE_DELAY_MS } from "../../../apps/mobile/src/sync/controller";
 import { SYNC_KEY_ITEM } from "../../../apps/mobile/src/sync/keyStore";
+import { readScannedCode } from "../../../apps/mobile/src/sync/pairingInput";
 import { subtitleCues, toSrt, toVtt } from "../../../apps/mobile/src/subtitles";
 import {
   type Desktop,
@@ -88,26 +89,41 @@ async function turnOnPhone(w: World, phone: Phone) {
   assert.equal(phone.view().problem, null);
 }
 
-/** The phone joins the desktop's vault with the typed code, as Settings does. */
-async function phoneJoinsDesktop(w: World, desk: Desktop, phone: Phone) {
+/**
+ * The phone joins the desktop's vault, as Settings does: with the typed
+ * code, or with the text of the desktop's QR code, read the way the
+ * phone's scanner reads it.
+ */
+async function phoneJoinsDesktop(
+  w: World,
+  desk: Desktop,
+  phone: Phone,
+  how: "typed" | "scanned" = "typed",
+) {
   const pairing = await desk.controller.pairing();
   assert.ok(pairing, "the desktop shows its code");
   await phone.controller.start();
-  assert.equal(
-    await phone.controller.join(parsePairing(pairing.groups.join(" "))),
-    "joined",
-  );
+  let root: Uint8Array;
+  if (how === "typed") {
+    root = parsePairing(pairing.groups.join(" "));
+  } else {
+    const scanned = readScannedCode(pairing.payload);
+    if (scanned.kind !== "confirm")
+      assert.fail(`the scanner refused the QR text: ${scanned.kind}`);
+    root = scanned.root;
+  }
+  assert.equal(await phone.controller.join(root), "joined");
   await w.clock.advance(0);
   assert.equal(phone.view().status, "on");
   assert.equal(phone.view().problem, null);
 }
 
-/** The desktop joins the phone's vault with the link in its QR code. */
+/** The desktop joins the phone's vault with the text of its QR code, pasted. */
 async function desktopJoinsPhone(w: World, phone: Phone, desk: Desktop) {
   const pairing = await phone.controller.pairing();
   assert.ok(pairing, "the phone shows its code");
   await desk.controller.start();
-  await desk.controller.join(pairing.link);
+  await desk.controller.join(pairing.payload);
   await w.clock.advance(0);
   await desk.controller.idle();
   assert.equal(desk.view().phase, "on");
@@ -277,7 +293,31 @@ describe("desktop and phone sync through the sync service", () => {
     ]);
   });
 
-  it("a desktop with notes joins a phone's vault by its QR link", async () => {
+  it("a phone joins a desktop's vault by scanning its QR code", async () => {
+    const w = await world();
+    const desk = w.desktop();
+    const phone = await w.phone();
+    desk.native.record("Desk note.");
+    await phone.dictate("Phone note.");
+    await turnOnDesktop(w, desk);
+
+    await phoneJoinsDesktop(w, desk, phone, "scanned");
+    assert.equal(
+      base64urlEncode(
+        parsePairing((await phone.controller.pairing())!.payload),
+      ),
+      base64urlEncode(desk.root()),
+      "one vault, one key",
+    );
+    await desk.sync();
+    assert.deepEqual(desk.native.transcripts(), ["Desk note.", "Phone note."]);
+    assert.deepEqual(phone.notes.history.map((turn) => turn.rawText).sort(), [
+      "Desk note.",
+      "Phone note.",
+    ]);
+  });
+
+  it("a desktop with notes joins a phone's vault by its QR text", async () => {
     const w = await world();
     const phone = await w.phone();
     const desk = w.desktop();
@@ -297,7 +337,9 @@ describe("desktop and phone sync through the sync service", () => {
     ]);
     assert.equal(
       base64urlEncode(desk.root()),
-      base64urlEncode(parsePairing((await phone.controller.pairing())!.link)),
+      base64urlEncode(
+        parsePairing((await phone.controller.pairing())!.payload),
+      ),
       "one vault, one key",
     );
   });

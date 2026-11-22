@@ -52,10 +52,11 @@ Studio palette (forest `#1F3429`, lime `#DDF39A`), drawn as glass (see
   (`plugins/withAsyncStorageSize.js`).
 - **Languages**: on a first run (and after _Erase all data_) the app
   language and the dictation language follow the phone's preferred
-  languages (`src/firstRun.ts`). The iOS microphone and speech prompts are
-  translated in `locales/fr.json`. The layout stays left-to-right on phones
-  set to a right-to-left language, because the app has no right-to-left UI
-  yet (`expo-localization` plugin, `supportsRTL: false`).
+  languages (`src/firstRun.ts`). The iOS microphone, speech and camera
+  prompts are translated in `locales/fr.json`. The layout stays
+  left-to-right on phones set to a right-to-left language, because the app
+  has no right-to-left UI yet (`expo-localization` plugin,
+  `supportsRTL: false`).
 - **Privacy policy**: Settings and the onboarding card link to the policy at
   `SONOLECT_PRIVACY_POLICY_URL`. Development builds may leave it unset and
   show no link; release builds fail without it (`config/release.cjs`, see
@@ -88,11 +89,20 @@ server stores only ciphertext. Recordings don't sync (the phone keeps none).
   it, and on the web, the app shows no sync and makes no sync request. It
   does not depend on `API_FEATURES_ENABLED`.
 - **Settings › Sync** turns sync on (QR code and the 56-character code),
-  joins with a code, shows the code again and turns sync off (keeping or
-  deleting the server copy). The camera app opens the QR code's link,
-  `sonolect://sync/join?v=1&k=…`, on `app/sync/join.tsx`, which asks first.
-  Every screen with a code says that joining shares every note with
-  whoever holds it.
+  joins by scanning another device's QR code or by typing its code, shows
+  the code again and turns sync off (keeping or deleting the server copy).
+  **Scan code** asks for the camera (CAMERA only, no audio; optional on
+  Android, `plugins/withOptionalCamera.js`), then opens a full-screen
+  scanner (`src/ui/SyncScanner.tsx`, expo-camera) that reads QR codes only
+  and takes only a Sonolect sync code; it closes, releasing the camera,
+  when it has one or when the user leaves Settings or the app. On Android,
+  expo-camera reads the code with Google ML Kit, on the phone:
+  [docs/mobile-release.md](../../docs/mobile-release.md) says what it adds
+  to the build and what it sends Google. The QR code holds
+  plain text (`SONOLECT SYNC 1 ` and the code), not a link: no screen reads
+  a key from a URL, and `sonolect://sync/join` opens Capture. Either way the
+  phone asks before joining. Every screen with a code says that joining
+  shares every note with whoever holds it.
 - **Code** (`src/sync/`): `keyStore.ts` keeps the key in SecureStore
   (`WHEN_UNLOCKED_THIS_DEVICE_ONLY`); `noteStore.ts` and `noteMapping.ts`
   map notes to note/1, keeping other devices' fields whole in

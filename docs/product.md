@@ -62,7 +62,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 
 ### Privacy Controls
 
-- **No telemetry by default** — opt-in analytics only
+- **No telemetry by default** — opt-in analytics only. One exception on Android: the library behind the sync QR code scanner, Google ML Kit, sends Google usage and diagnostic data (such as the device model, the app version and how long a scan took), never the camera images or the code it reads
 - Configurable audio retention (auto-delete after N days or manual purge). Choosing a shorter period asks first when it would delete recordings right away.
 - One-click "Delete all my data" action
 - All processing local unless the user turns on a cloud feature: note sync, which sends only end-to-end encrypted notes, or online editing with their own provider key, which asks before each note is sent unless the user turns on Send without asking (never in Ephemeral)

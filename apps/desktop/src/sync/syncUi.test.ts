@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { strict as assert } from "node:assert";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { generateRootKey, pairingLink, qrMatrix } from "@sonolect/sync-core";
+import { generateRootKey, pairingPayload, qrMatrix } from "@sonolect/sync-core";
 
 import {
   hasPlayableAudio,
@@ -20,7 +20,7 @@ describe("the sync interface", () => {
     const root = generateRootKey((n) =>
       crypto.getRandomValues(new Uint8Array(n)),
     );
-    const qr = qrMatrix(pairingLink(root));
+    const qr = qrMatrix(pairingPayload(root));
     const svg = renderToStaticMarkup(
       createElement(QrCodeSvg, { qr, label: "QR code to join this sync" }),
     );

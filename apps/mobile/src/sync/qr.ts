@@ -4,7 +4,7 @@ import { qrMatrix } from "@sonolect/sync-core";
 export const QR_QUIET_ZONE = 4;
 
 /**
- * The QR code of a pairing link as one SVG path (react-native-svg), in
+ * The QR code of the pairing text as one SVG path (react-native-svg), in
  * module units: a rectangle per run of dark modules in a row, offset by the
  * quiet zone. Draw it dark on light, scaled to `size` modules.
  */

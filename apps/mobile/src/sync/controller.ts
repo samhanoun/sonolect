@@ -17,7 +17,7 @@ import {
   isSyncError,
   openSyncEngine,
   pairingCodeGroups,
-  pairingLink,
+  pairingPayload,
   pendingDeletesOf,
   withSyncedVersions,
 } from "@sonolect/sync-core";
@@ -124,8 +124,11 @@ export interface SyncControllerOptions {
 export type JoinResult = "joined" | "alreadyJoined" | "otherVaultOn";
 
 export interface Pairing {
-  /** sonolect://sync/join?v=1&k=… for the QR code. */
-  link: string;
+  /**
+   * The QR code's text (sync-core pairingPayload): plain text that
+   * Sonolect's scanner reads, never a link another app could open.
+   */
+  payload: string;
   /** The typed code: 14 groups of 4 characters. */
   groups: string[];
 }
@@ -307,22 +310,13 @@ export class SyncController {
     });
   }
 
-  /** What joining with this key would answer now: null when it would join. */
-  joinOutcome(root: Uint8Array): Exclude<JoinResult, "joined"> | null {
-    const engine = this.engine;
-    if (!engine) return null;
-    return engine.vaultId === deriveVaultKeys(root).vaultId
-      ? "alreadyJoined"
-      : "otherVaultOn";
-  }
-
-  /** The pairing link and code of this phone's vault, read from the key store. */
+  /** The QR text and code of this phone's vault, read from the key store. */
   async pairing(): Promise<Pairing | null> {
     const engine = this.engine;
     if (!engine) return null;
     const root = await this.options.keyStore.load();
     if (!root || deriveVaultKeys(root).vaultId !== engine.vaultId) return null;
-    return { link: pairingLink(root), groups: pairingCodeGroups(root) };
+    return { payload: pairingPayload(root), groups: pairingCodeGroups(root) };
   }
 
   /**

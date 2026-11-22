@@ -537,7 +537,7 @@ export const en = {
   "studio.sync.turnOn": "Turn on sync",
   "studio.sync.turningOn": "Turning on…",
   "studio.sync.join": "Join with a code",
-  "studio.sync.joinLabel": "Sync code or link from your other device",
+  "studio.sync.joinLabel": "Sync code from your other device",
   "studio.sync.joinSubmit": "Join",
   "studio.sync.joining": "Joining…",
   "studio.sync.cancel": "Cancel",
@@ -550,7 +550,7 @@ export const en = {
   "studio.sync.showCode": "Show code",
   "studio.sync.hideCode": "Hide code",
   "studio.sync.codeHint":
-    "On your other device, choose to join sync, then scan this QR code or type the code.",
+    "On your phone, scan this QR code with Sonolect (Settings, Sync, Scan code), not with the camera app. On another computer, choose Join with a code and type the code.",
   "studio.sync.codeLabel": "Sync code",
   "studio.sync.qrLabel": "QR code to join this sync",
   "studio.sync.turnOff": "Turn off sync",

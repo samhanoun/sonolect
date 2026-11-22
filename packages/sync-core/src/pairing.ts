@@ -1,33 +1,32 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 
-import { base64urlDecode, base64urlEncode, concatBytes } from "./encoding";
+import { concatBytes } from "./encoding";
 import { ROOT_KEY_BYTES, assertRootKey } from "./keys";
 
 /**
  * Pairing hands the 32-byte root key to another device, and nothing else:
- * the server URL is fixed at build time. Whoever holds the link or the code
- * can read and change every synced note.
+ * the server URL is fixed at build time. Whoever holds the code can read and
+ * change every synced note.
  *
- * - Link (QR code): sonolect://sync/join?v=1&k=<base64url root>. The key is in
- *   the query string because Expo Router (SDK 58) hands a native deep link's
- *   query parameters to the screen and drops its fragment. Parsers also
- *   accept the fragment form (#v=1&k=), which earlier builds of the link
- *   used, and ignore parameters they do not know.
  * - Typed code: Crockford base32 of the root and a 3-byte SHA-256 checksum,
  *   56 characters shown in 14 groups of 4. Spaces, dashes and lower case
  *   are accepted; I and L read as 1, O as 0.
+ * - QR code: "SONOLECT SYNC 1 " and the typed code, such as
+ *   "SONOLECT SYNC 1 000G-40R4-…-63ED". It is plain text, not a link: no
+ *   app can register to open it, so the phone never hands the key to
+ *   another app. Sonolect's own scanner reads it (Settings, Sync, Scan
+ *   code). Its letters, digits, spaces and dashes fit the QR alphanumeric
+ *   mode.
  */
-export const PAIRING_LINK_PREFIX = "sonolect://sync/join";
+export const PAIRING_PAYLOAD_PREFIX = "SONOLECT SYNC";
 export const PAIRING_VERSION = "1";
 export const PAIRING_CODE_LENGTH = 56;
 
 export type PairingErrorCode =
-  /** Neither a pairing link nor a code. */
+  /** Not a sync code: a link, or other text. */
   | "invalid"
-  /** A link from a newer app version. */
+  /** A QR code from a newer app version. */
   | "version"
-  /** A link whose key is not 32 bytes. */
-  | "key"
   /** A code with the wrong number of characters. */
   | "length"
   /** A code with a character outside the code alphabet. */
@@ -42,84 +41,6 @@ export class PairingError extends Error {
     this.name = "PairingError";
     this.code = code;
   }
-}
-
-/** The link for the QR code. */
-export function pairingLink(root: Uint8Array): string {
-  assertRootKey(root);
-  return `${PAIRING_LINK_PREFIX}?v=${PAIRING_VERSION}&k=${base64urlEncode(root)}`;
-}
-
-function decodeComponent(value: string): string {
-  try {
-    return decodeURIComponent(value.replace(/\+/g, " "));
-  } catch {
-    return value;
-  }
-}
-
-/** Parses "a=1&b=2" (no URLSearchParams: React Native's is incomplete). First value wins. */
-function parseParams(text: string): Map<string, string> {
-  const params = new Map<string, string>();
-  for (const part of text.split("&")) {
-    if (!part) continue;
-    const equals = part.indexOf("=");
-    const key = decodeComponent(equals < 0 ? part : part.slice(0, equals));
-    const value = decodeComponent(equals < 0 ? "" : part.slice(equals + 1));
-    if (!params.has(key)) params.set(key, value);
-  }
-  return params;
-}
-
-function keyFromParams(params: {
-  get(name: string): string | undefined;
-}): Uint8Array {
-  const version = params.get("v");
-  if (version !== PAIRING_VERSION)
-    throw new PairingError(
-      "version",
-      "This sync link is from a newer version of Sonolect.",
-    );
-  let root: Uint8Array;
-  try {
-    root = base64urlDecode((params.get("k") ?? "").trim());
-  } catch {
-    throw new PairingError("key", "This sync link is damaged.");
-  }
-  if (root.length !== ROOT_KEY_BYTES)
-    throw new PairingError("key", "This sync link is damaged.");
-  return root;
-}
-
-/**
- * The root key in a pairing link. Accepts the parameters in the fragment or
- * in the query string, and `sonolect:///sync/join` (three slashes) as some
- * link handlers rewrite it.
- */
-export function parsePairingLink(text: string): Uint8Array {
-  const value = text.trim();
-  const match = /^sonolect:\/\/\/?sync\/join\/?(\?[^#]*)?(#.*)?$/i.exec(value);
-  if (!match)
-    throw new PairingError("invalid", "This is not a Sonolect sync link.");
-  const fragment = parseParams((match[2] ?? "").slice(1));
-  const query = parseParams((match[1] ?? "").slice(1));
-  const source = fragment.has("k") ? fragment : query;
-  return keyFromParams({ get: (name) => source.get(name) });
-}
-
-/**
- * The root key from a deep-link screen's parameters, such as Expo Router's
- * `useLocalSearchParams()` for sonolect://sync/join?v=1&k=…
- */
-export function parsePairingParams(
-  params: Record<string, string | readonly string[] | undefined>,
-): Uint8Array {
-  return keyFromParams({
-    get: (name) => {
-      const value = params[name];
-      return typeof value === "string" ? value : value?.[0];
-    },
-  });
 }
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -193,9 +114,39 @@ export function parsePairingCode(text: string): Uint8Array {
   return root;
 }
 
-/** A pairing link or a typed code, whichever was pasted or typed. */
+/** The text of the QR code: the prefix, the version and the typed code. */
+export function pairingPayload(root: Uint8Array): string {
+  return `${PAIRING_PAYLOAD_PREFIX} ${PAIRING_VERSION} ${pairingCode(root)}`;
+}
+
+/** "SONOLECT SYNC <version> <code>", in any letter case and spacing. */
+const PAYLOAD = /^SONOLECT\s+SYNC(?:\s+(\S+)\s+(\S[\s\S]*))?$/i;
+/** A link or a URI ("scheme:"), which is never a code. */
+const LINK = /^[a-z][a-z0-9+.-]*:|:\/\//i;
+
+/**
+ * The root key in a scanned QR code or in a typed or pasted code. The only
+ * parser the apps use. Throws PairingError: "invalid" for a link or URI
+ * (such as sonolect://…) and for "SONOLECT SYNC" without a code, "version"
+ * for a QR code from a newer app, and the codes of parsePairingCode for the
+ * code itself.
+ */
 export function parsePairing(text: string): Uint8Array {
-  return /^\s*sonolect:/i.test(text)
-    ? parsePairingLink(text)
-    : parsePairingCode(text);
+  const value = text.trim();
+  if (/^SONOLECT\s*SYNC\b/i.test(value)) {
+    const match = PAYLOAD.exec(value);
+    if (!match?.[1] || !match[2])
+      throw new PairingError("invalid", "This is not a Sonolect sync code.");
+    if (match[1] !== PAIRING_VERSION)
+      throw /^\d+$/.test(match[1])
+        ? new PairingError(
+            "version",
+            "This sync code is from a newer version of Sonolect.",
+          )
+        : new PairingError("invalid", "This is not a Sonolect sync code.");
+    return parsePairingCode(match[2]);
+  }
+  if (LINK.test(value))
+    throw new PairingError("invalid", "This is not a Sonolect sync code.");
+  return parsePairingCode(value);
 }

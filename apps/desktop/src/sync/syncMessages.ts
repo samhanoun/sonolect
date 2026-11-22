@@ -44,7 +44,6 @@ export function syncActionErrorText(error: unknown, t: Translator): string {
         return t("studio.sync.pairing.version");
       case "typo":
         return t("studio.sync.pairing.typo");
-      case "key":
       case "length":
       case "character":
         return t("studio.sync.pairing.length");

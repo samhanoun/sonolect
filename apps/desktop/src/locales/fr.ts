@@ -547,8 +547,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.sync.turnOn": "Activer la synchronisation",
   "studio.sync.turningOn": "Activation…",
   "studio.sync.join": "Rejoindre avec un code",
-  "studio.sync.joinLabel":
-    "Code ou lien de synchronisation de votre autre appareil",
+  "studio.sync.joinLabel": "Code de synchronisation de votre autre appareil",
   "studio.sync.joinSubmit": "Rejoindre",
   "studio.sync.joining": "Connexion…",
   "studio.sync.cancel": "Annuler",
@@ -561,7 +560,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.sync.showCode": "Afficher le code",
   "studio.sync.hideCode": "Masquer le code",
   "studio.sync.codeHint":
-    "Sur votre autre appareil, choisissez de rejoindre la synchronisation, puis scannez ce code QR ou saisissez le code.",
+    "Sur votre téléphone, scannez ce code QR avec Sonolect (Réglages, Synchronisation, Scanner un code), pas avec l'app Appareil photo. Sur un autre ordinateur, choisissez Rejoindre avec un code et saisissez le code.",
   "studio.sync.codeLabel": "Code de synchronisation",
   "studio.sync.qrLabel": "Code QR pour rejoindre cette synchronisation",
   "studio.sync.turnOff": "Désactiver la synchronisation",

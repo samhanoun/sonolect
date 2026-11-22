@@ -43,6 +43,23 @@ describe("sync strings", () => {
       }
   });
 
+  it("say to scan the QR code with Sonolect on the phone, not the camera app", () => {
+    assert.match(
+      en["studio.sync.codeHint"],
+      /with Sonolect \(Settings, Sync, Scan code\), not with the camera app\./,
+    );
+    assert.match(
+      fr["studio.sync.codeHint"],
+      /avec Sonolect \(Réglages, Synchronisation, Scanner un code\), pas avec l'app Appareil photo\./,
+    );
+    // The field takes a code: no link carries the key.
+    for (const strings of [en, fr, ar, de, es])
+      assert.doesNotMatch(
+        strings["studio.sync.joinLabel"] ?? "",
+        /link|lien|enlace|رابط/i,
+      );
+  });
+
   it("warn that a code shares every note, on each screen that shows or takes one", () => {
     assert.equal(
       en["studio.sync.warning"],

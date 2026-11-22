@@ -290,20 +290,20 @@ back unchanged.
 
 ## Errors and what to tell the user
 
-| Error                                                     | Meaning                                                      | UI text and action                                                                                |
-| --------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `SyncError` kind `unauthorized` (401/409)                 | The server does not accept this key                          | "This sync key is not accepted by the server." Offer to turn sync off.                            |
-| `SyncError` kind `gone`, code `vault_deleted`             | Another device deleted the server copy                       | "This sync was deleted." Call `engine.forget()` and turn sync off. The notes stay on this device. |
-| `SyncError` kind `rateLimited`                            | Too many requests                                            | No message. Retry after `error.retryAfterMs`.                                                     |
-| `SyncError` kind `tooLarge`                               | The server refused the request size                          | "A note is too large to sync." Notes too large to seal are listed in `report.tooLarge`.           |
-| `SyncError` kind `server`                                 | 5xx, or an answer this version does not understand           | "Sync is unavailable right now." Retry later with backoff.                                        |
-| `SyncError` kind `network`                                | No answer: offline, DNS, TLS or timeout                      | "Offline. Notes will sync when you're back online." Retry later.                                  |
-| `SyncClosedError`                                         | The engine was closed, forgotten or deleted                  | Ignore it.                                                                                        |
-| `report.quotaExceeded`                                    | The vault is full (20,000 notes or 200 MiB)                  | "Sync storage is full. Delete notes to sync new ones."                                            |
-| `report.newerSchema` > 0                                  | A newer app wrote notes this version cannot read             | "Update Sonolect to sync every note."                                                             |
-| `PairingError` code `invalid`                             | Neither a link nor a code                                    | "This is not a Sonolect sync code."                                                               |
-| `PairingError` code `version`                             | A link from a newer app                                      | "Update Sonolect to use this code."                                                               |
-| `PairingError` codes `key`, `length`, `character`, `typo` | Malformed, the wrong length, an invalid character, or a typo | "Check the code: it has 56 characters." For `typo`: "A character is wrong."                       |
+| Error                                              | Meaning                                            | UI text and action                                                                                |
+| -------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `SyncError` kind `unauthorized` (401/409)          | The server does not accept this key                | "This sync key is not accepted by the server." Offer to turn sync off.                            |
+| `SyncError` kind `gone`, code `vault_deleted`      | Another device deleted the server copy             | "This sync was deleted." Call `engine.forget()` and turn sync off. The notes stay on this device. |
+| `SyncError` kind `rateLimited`                     | Too many requests                                  | No message. Retry after `error.retryAfterMs`.                                                     |
+| `SyncError` kind `tooLarge`                        | The server refused the request size                | "A note is too large to sync." Notes too large to seal are listed in `report.tooLarge`.           |
+| `SyncError` kind `server`                          | 5xx, or an answer this version does not understand | "Sync is unavailable right now." Retry later with backoff.                                        |
+| `SyncError` kind `network`                         | No answer: offline, DNS, TLS or timeout            | "Offline. Notes will sync when you're back online." Retry later.                                  |
+| `SyncClosedError`                                  | The engine was closed, forgotten or deleted        | Ignore it.                                                                                        |
+| `report.quotaExceeded`                             | The vault is full (20,000 notes or 200 MiB)        | "Sync storage is full. Delete notes to sync new ones."                                            |
+| `report.newerSchema` > 0                           | A newer app wrote notes this version cannot read   | "Update Sonolect to sync every note."                                                             |
+| `PairingError` code `invalid`                      | Not a sync code: a link, or other text             | "This is not a Sonolect sync code."                                                               |
+| `PairingError` code `version`                      | A QR code from a newer app                         | "Update Sonolect to use this code."                                                               |
+| `PairingError` codes `length`, `character`, `typo` | The wrong length, an invalid character, or a typo  | "Check the code: it has 56 characters." For `typo`: "A character is wrong."                       |
 
 `error.retryable` is true for `network`, `server` and `rateLimited`.
 `error.vaultGone` is true for `unauthorized` and `gone`.
@@ -313,22 +313,25 @@ back unchanged.
 Pairing gives another device only the root key. The server URL comes from the
 build.
 
-- **Link (QR code)**: `sonolect://sync/join?v=1&k=<base64url root>`.
-  - The key is in the query string: Expo Router (SDK 58) passes a native
-    deep link's query parameters to the screen and drops its fragment.
-  - The parsers also accept the fragment form `#v=1&k=…`.
-  - They also accept `sonolect:///sync/join`, any letter case, and unknown
-    parameters, which they ignore.
-  - `parsePairingParams(useLocalSearchParams())` reads a deep-link screen's
-    parameters.
-  - `qrMatrix(pairingLink(root))` returns a 37×37 matrix (version 5, ECC M,
-    no border). Draw it with a quiet zone of 4 modules.
 - **Code**: `pairingCode(root)` is 56 characters of Crockford base32 (the
   root key plus a 3-byte SHA-256 checksum), shown as 14 groups of 4.
   - `parsePairingCode` ignores spaces, dashes, `_` and `.`, and accepts
     lower case.
   - It reads I and L as 1, and O as 0.
-- **`parsePairing(text)`** accepts either form.
+- **QR code**: `pairingPayload(root)` is plain text, `SONOLECT SYNC 1 `
+  and the code, such as `SONOLECT SYNC 1 000G-40R4-…-63ED`.
+  - It is not a link, so the phone has nothing to open and no app can
+    claim it. The phone reads it with Sonolect's own scanner (Settings ›
+    Sync › Scan code).
+  - `1` is the format version. A newer version is refused with `version`.
+  - Its characters fit the QR alphanumeric mode:
+    `qrMatrix(pairingPayload(root))` returns a 33×33 matrix (version 4,
+    ECC M, no border). Draw it with a quiet zone of 4 modules.
+- **`parsePairing(text)`** is the one parser the apps use, for a scanned
+  QR code and for a typed or pasted code. It reads the QR text in any
+  letter case and spacing, and the code with `parsePairingCode`'s
+  tolerance. It refuses anything else with `invalid`, links included
+  (`sonolect://…`, `https://…`): no build reads a key from a link.
 
 Every screen that shows or accepts a code says, in one short line, that
 joining shares every note with whoever holds the code.
@@ -354,13 +357,22 @@ joining shares every note with whoever holds the code.
   - learn the number and approximate sizes of notes, and when devices sync.
 - **A malicious server cannot:** read, forge or move a record between notes
   or vaults.
-- **Whoever holds the root key** (link, code or QR) has full read and write
-  access to the vault.
+- **Whoever holds the root key** (the code or the QR code) has full read
+  and write access to the vault.
   - There is no revocation in v1. "Turn off sync and delete the server copy"
     deletes the vault; the remaining devices see "this sync was deleted",
     turn sync off and keep their notes.
   - Erase-all also forgets the key and the sync state, and first offers to
     delete the server copy.
+- **The key never goes through a link.** A custom URL scheme such as
+  `sonolect://` belongs to no one app: any app on the phone can claim it,
+  and the phone then picks which app opens the link, so a link with the key
+  could reach another app. The QR code holds plain text instead, read by
+  Sonolect's own scanner, and no build reads a key from a link.
+  - A camera app that reads the QR code shows its text, and may offer a web
+    search with it, which would send the key to a search engine. The
+    screens that show the QR code therefore say to scan it with Sonolect on
+    the phone, not with the camera app.
 - **Not covered:** a compromised device, and traffic analysis beyond sizes
   and timing.
 
