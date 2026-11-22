@@ -2,6 +2,7 @@ import { isHlc, toHlc } from "@sonolect/sync-core";
 import type { SonolectMode } from "@sonolect/types";
 
 import type { DictionaryEntry, Snippet, TranscriptTurn } from "./domain";
+import { sanitizeSegments } from "./noteSegments";
 
 /**
  * Notes on the phone, one key per note plus an index of ids (data-1,
@@ -151,6 +152,7 @@ export function sanitizeTurn(
   const refinedText = refined ?? raw;
   if (rawText === undefined || refinedText === undefined) return null;
   const { language, durationMs } = note;
+  const segments = sanitizeSegments(note.segments, MAX_TEXT_LENGTH);
   return {
     id: note.id,
     rawText,
@@ -176,6 +178,7 @@ export function sanitizeTurn(
     ...(note.pinned === true ? { pinned: true } : {}),
     ...(isHlc(note.hlc) ? { hlc: toHlc(note.hlc) } : {}),
     ...(isNoteId(note.conflictOf) ? { conflictOf: note.conflictOf } : {}),
+    ...(segments ? { segments } : {}),
   };
 }
 

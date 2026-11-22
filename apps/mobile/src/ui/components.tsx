@@ -304,32 +304,51 @@ export function Chip({
   selected,
   onPress,
   disabled,
+  icon,
+  busy,
+  accessibilityHint,
 }: {
   label: string;
   selected?: boolean;
   onPress?: () => void;
   disabled?: boolean;
+  /** Shown before the label, such as the cloud of an online action. */
+  icon?: IconName;
+  /** Its action is running: not pressable, and not dimmed like disabled. */
+  busy?: boolean;
+  accessibilityHint?: string;
 }) {
+  const off = Boolean(disabled) || Boolean(busy);
   return (
     <PressableScale
       accessibilityRole="button"
       accessibilityState={{
         selected: Boolean(selected),
-        disabled: Boolean(disabled),
+        disabled: off,
+        busy: Boolean(busy),
       }}
+      {...(accessibilityHint ? { accessibilityHint } : {})}
       onPress={onPress}
-      disabled={disabled}
+      disabled={off}
       style={[
         styles.chip,
+        icon && styles.chipWithIcon,
         selected && styles.chipSelected,
-        disabled && styles.disabled,
+        disabled && !busy && styles.disabled,
       ]}
     >
+      {icon ? (
+        <Icon
+          name={icon}
+          size={14}
+          color={selected ? colors.lime : colors.text}
+        />
+      ) : null}
       <Text
         maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
         style={[styles.chipText, selected && styles.chipTextSelected]}
       >
-        {label}
+        {busy ? `${label}…` : label}
       </Text>
     </PressableScale>
   );
@@ -858,6 +877,7 @@ export const styles = StyleSheet.create({
     backgroundColor: glass.recess,
     justifyContent: "center",
   },
+  chipWithIcon: { flexDirection: "row", alignItems: "center", gap: 6 },
   chipSelected: {
     backgroundColor: glass.accent,
     borderColor: glass.accentEdge,

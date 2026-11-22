@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   Animated,
   BackHandler,
   KeyboardAvoidingView,
@@ -12,17 +13,24 @@ import {
   type ScrollViewInstance,
 } from "react-native";
 import * as Haptics from "expo-haptics";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 
 import { openPrivacyPolicy, privacyPolicyUrl } from "../src/appInfo";
 import { apiConfig, availableRefinementModes } from "../src/features";
 import { strings } from "../src/i18n";
 import { formatDuration } from "../src/library";
 import { actionLabel, noticeText, type NoticeAction } from "../src/notices";
+import type { RefinementMode } from "../src/domain";
+import { refiningFor, type OnlineChoice } from "../src/onlineEdit";
+import {
+  PROVIDER_NAMES,
+  isOnlineEditingReady,
+  isOnlineMode,
+} from "../src/onlineRefine";
 import { requestDictationPermission } from "../src/speech";
 import { useCompanionStore } from "../src/store";
 import {
-  copyText,
+  copyNote,
   currentShareTarget,
   openAppSettings,
   shareText,
@@ -62,6 +70,11 @@ export default function CaptureScreen() {
   const storePlan = useCompanionStore((s) => s.plan);
   const downloading = useCompanionStore((s) => s.downloading);
   const refining = useCompanionStore((s) => s.refining);
+  const refiningId = useCompanionStore((s) => s.refiningId);
+  const refiningMode = useCompanionStore((s) => s.refiningMode);
+  const sendingTo = useCompanionStore((s) => s.sendingTo);
+  const onlineKeySaved = useCompanionStore((s) => s.onlineKeySaved);
+  const onlinePlan = useCompanionStore((s) => s.onlinePlan);
   const startCapture = useCompanionStore((s) => s.startCapture);
   const stopCapture = useCompanionStore((s) => s.stopCapture);
   const cancelCapture = useCompanionStore((s) => s.cancelCapture);
@@ -77,6 +90,7 @@ export default function CaptureScreen() {
   );
   const dismissNotice = useCompanionStore((s) => s.dismissNotice);
   const t = strings(settings.uiLanguage);
+  const router = useRouter();
 
   const clearance = useTabBarClearance();
   const reduced = useReducedMotion();
@@ -88,6 +102,8 @@ export default function CaptureScreen() {
   const [copied, setCopied] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [asking, setAsking] = useState(false);
+  /** The Send dialog of online editing is open: a second tap does nothing. */
+  const consenting = useRef(false);
   const scrollRef = useRef<ScrollViewInstance>(null);
   const liveRef = useRef<ScrollViewInstance>(null);
   /** The typing card's y in the screen's ScrollView, once laid out. */
@@ -104,6 +120,20 @@ export default function CaptureScreen() {
   const idlePlan = useRecognitionPlan(settings, capturing);
   const plan = capturing ? (storePlan ?? idlePlan) : idlePlan;
   const apiConnected = Boolean(apiConfig(settings, apiToken).apiUrl);
+  // Rewrite and Reply with the user's own key: a provider, a model and a
+  // saved key, and never in the web preview.
+  const onlineEditing = isOnlineEditingReady(
+    settings,
+    onlineKeySaved,
+    Platform.OS === "web",
+  )
+    ? settings.onlineEditing
+    : undefined;
+  // Only the note being refined shows as busy: one dictated or typed while
+  // an online edit waits keeps its chips.
+  const busyNote = latest
+    ? refiningFor({ refining, refiningId, refiningMode, sendingTo }, latest.id)
+    : null;
 
   useEffect(() => {
     const animation = Animated.timing(glow, {
@@ -250,6 +280,14 @@ export default function CaptureScreen() {
       case "openSettings":
         openAppSettings();
         break;
+      case "openOnlineSettings":
+        dismissNotice();
+        // A new value each time, so Settings scrolls to the section again.
+        router.navigate({
+          pathname: "/settings",
+          params: { section: "online", at: String(Date.now()) },
+        });
+        break;
       case "typeInstead":
         openTyping();
         dismissNotice();
@@ -277,6 +315,58 @@ export default function CaptureScreen() {
     }
   };
 
+  /**
+   * A refinement chip. Rewrite and Reply with online editing ask before
+   * sending the note, unless "Send without asking" is on outside Ephemeral.
+   * The dialog names the provider and the model; Send agrees to those only.
+   */
+  const onRefine = async (turnId: string, mode: RefinementMode) => {
+    if (consenting.current) return;
+    const plan = onlinePlan(turnId, mode);
+    const o = t.settings.onlineEditing;
+    let consentedTo: OnlineChoice | undefined;
+    if (plan.kind === "ask") {
+      const { provider, model } = plan.editing;
+      const name = PROVIDER_NAMES[provider];
+      consenting.current = true;
+      let send = false;
+      try {
+        send = await confirm({
+          title: o.consentTitle(name),
+          message: o.consentMessage(t.modes[mode], name, model),
+          confirmLabel: o.send,
+          cancelLabel: t.common.cancel,
+        });
+      } finally {
+        consenting.current = false;
+      }
+      if (!send) return;
+      consentedTo = { provider, model };
+    }
+    // An online edit can take up to a minute: screen readers hear it start
+    // and end. A failure is a notice, which is read out as well.
+    const sendingTo =
+      plan.kind === "ask" || plan.kind === "send"
+        ? plan.editing.provider
+        : undefined;
+    if (sendingTo) {
+      AccessibilityInfo.announceForAccessibility(
+        o.sending(PROVIDER_NAMES[sendingTo]),
+      );
+    }
+    const edited = await refine(
+      turnId,
+      mode,
+      consentedTo ? { consentedTo } : undefined,
+    );
+    const note = useCompanionStore.getState().latest;
+    if (edited && note?.id === turnId) {
+      AccessibilityInfo.announceForAccessibility(
+        `${o.a11yEdited} ${note.refinedText.slice(0, 300)}`,
+      );
+    }
+  };
+
   // partialTranscript goes stale after a refine, a delete or a clear.
   const liveText = capturing
     ? capture.partialTranscript
@@ -295,7 +385,7 @@ export default function CaptureScreen() {
   const copyLatest = async () => {
     if (!latest) return;
     // A failure says so instead of failing silently (data-14).
-    if (!(await copyText(latest.refinedText, t))) return;
+    if (!(await copyNote(latest.refinedText, t))) return;
     setCopied(true);
     if (copiedTimer.current) clearTimeout(copiedTimer.current);
     copiedTimer.current = setTimeout(() => setCopied(false), 1500);
@@ -518,8 +608,12 @@ export default function CaptureScreen() {
                     {t.modeTag[latest.mode] ?? latest.mode}
                   </Label>
                   <Label>
-                    {refining
-                      ? t.capture.refining
+                    {busyNote
+                      ? busyNote.sendingTo
+                        ? t.settings.onlineEditing.sending(
+                            PROVIDER_NAMES[busyNote.sendingTo],
+                          )
+                        : t.capture.refining
                       : latest.source === "typed"
                         ? t.library.typed
                         : formatDuration(latest.durationMs)}
@@ -535,34 +629,50 @@ export default function CaptureScreen() {
                     label={copied ? t.capture.copied : t.capture.copy}
                     onPress={() => void copyLatest()}
                   />
-                  {currentShareTarget() === "download" ? (
-                    <Button
-                      compact
-                      icon="download"
-                      label={t.capture.download}
-                      onPress={() =>
-                        void shareText(latest.refinedText, t, latest.createdAt)
-                      }
-                    />
-                  ) : (
-                    <Button
-                      compact
-                      icon="share"
-                      label={t.capture.share}
-                      onPress={() => void shareText(latest.refinedText, t)}
-                    />
-                  )}
+                  <Button
+                    compact
+                    icon={
+                      currentShareTarget() === "download" ? "download" : "share"
+                    }
+                    label={
+                      currentShareTarget() === "download"
+                        ? t.capture.download
+                        : t.capture.share
+                    }
+                    onPress={() =>
+                      void shareText(latest.refinedText, t, latest.createdAt)
+                    }
+                  />
                 </View>
                 <View style={styles.chips}>
-                  {availableRefinementModes().map((mode) => (
-                    <Chip
-                      key={mode}
-                      label={t.modes[mode]}
-                      selected={latest.mode === mode}
-                      disabled={refining}
-                      onPress={() => void refine(latest.id, mode)}
-                    />
-                  ))}
+                  {availableRefinementModes(onlineEditing !== undefined).map(
+                    (mode) => {
+                      const busy = busyNote?.mode === mode;
+                      // The cloud marks a chip that sends the note out.
+                      const online =
+                        onlineEditing !== undefined && isOnlineMode(mode)
+                          ? {
+                              icon: "cloud" as const,
+                              accessibilityHint:
+                                t.settings.onlineEditing.chipHint(
+                                  PROVIDER_NAMES[onlineEditing.provider],
+                                ),
+                            }
+                          : {};
+                      return (
+                        <Chip
+                          key={mode}
+                          label={t.modes[mode]}
+                          selected={latest.mode === mode}
+                          // One refinement at a time for this note.
+                          disabled={busyNote !== null && !busy}
+                          busy={busy}
+                          {...online}
+                          onPress={() => void onRefine(latest.id, mode)}
+                        />
+                      );
+                    },
+                  )}
                 </View>
               </Card>
             ) : (

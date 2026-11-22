@@ -37,6 +37,7 @@ import { SegmentEditor, useCapturePlayer } from "./StudioSegments";
 import { SpeakerModelSettings } from "./StudioSpeakers";
 import {
   formatTimestamp,
+  segmentsToSave,
   singleCaptureId,
   type SavedCaptureSegment,
 } from "../segmentEditor";
@@ -53,6 +54,7 @@ import {
   type CaptureFormat,
 } from "../captureStorage";
 import { transcribeAudioFile } from "../liveCaptureNative";
+import { downloadFile, readCaptureAudioFile } from "../captureAudioFile";
 import { STT_LANGUAGES } from "../sttLanguages";
 import { loadBubbleVisibility, saveBubbleVisibility } from "../bubbleBridge";
 import type { BubbleVisibility } from "../dictationBubble";
@@ -131,7 +133,13 @@ function SignalMeter({ live }: { live: boolean }) {
         <span>
           {live ? t("studio.signal.listening") : t("studio.signal.ready")}
         </span>
-        <span className="studio-signal-meta">{t("studio.signal.meta")}</span>
+        <span className="studio-signal-meta">
+          {t(
+            isTauriRuntime() && loadCaptureFormat() === "hq"
+              ? "studio.signal.metaHigh"
+              : "studio.signal.meta",
+          )}
+        </span>
       </div>
       <div className="studio-signal-bars" ref={bars}>
         {SIGNAL_BARS.map((height, index) => (
@@ -591,14 +599,7 @@ export function StudioTranscribe({
         ...(opened ? { base: { hlc: opened.hlc } } : {}),
         id: libraryCaptureId,
         transcript: state.transcript,
-        segments: state.transcriptSegments
-          .filter((segment) => segment.text.trim())
-          .map((segment) => ({
-            startMs: Math.round(segment.startMs),
-            endMs: Math.round(Math.max(segment.startMs, segment.endMs)),
-            text: segment.text.trim(),
-            ...(segment.speaker ? { speaker: segment.speaker } : {}),
-          })),
+        segments: segmentsToSave(state.transcriptSegments),
       });
       state.setOpenedVersion(libraryCaptureId, saved?.hlc ?? null);
       setMessage(
@@ -1100,6 +1101,13 @@ export function StudioLibrary({
       setMessage(error instanceof Error ? error.message : String(error));
     }
   };
+  const saveAudio = async (item: SavedCapture) => {
+    try {
+      downloadFile(await readCaptureAudioFile(nativeProviderCall, item));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
   const needle = query.toLocaleLowerCase(t.locale);
   const visible = captures.filter((item) =>
     [item.title, item.transcript || item.error]
@@ -1236,6 +1244,15 @@ export function StudioLibrary({
                         {formatTimestamp(player.positionMs)}
                       </span>
                     )}
+                  </button>
+                )}
+                {item.hasAudio !== false && (
+                  <button
+                    className="studio-link"
+                    onClick={() => void saveAudio(item)}
+                  >
+                    <Download size={14} />
+                    {t("studio.library.saveAudio")}
                   </button>
                 )}
                 <button
@@ -1491,7 +1508,9 @@ function PrivacyControls() {
         ? t("studio.privacy.savedPreview")
         : next === "opus"
           ? t("studio.storage.savedOpus")
-          : t("studio.storage.savedWav"),
+          : next === "hq"
+            ? t("studio.storage.savedHq")
+            : t("studio.storage.savedWav"),
     );
   };
   const sync = getSyncController();
@@ -1563,7 +1582,7 @@ function PrivacyControls() {
             ))}
           </select>
         </label>
-        <label>
+        <label className="studio-storage-format">
           {t("studio.storage.format")}
           <select
             value={format}
@@ -1578,7 +1597,7 @@ function PrivacyControls() {
             ))}
           </select>
         </label>
-        {native && format === "opus" && (
+        {native && format !== "wav" && (
           <button
             className="studio-button secondary"
             disabled={compressing || busy || capturing}

@@ -299,6 +299,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.signal.listening": "Écoute",
   "studio.signal.ready": "Prêt",
   "studio.signal.meta": "16 kHz · mono · sur l'appareil",
+  "studio.signal.metaHigh": "48 kHz · stéréo si disponible · sur l'appareil",
   "studio.overview.eyebrow": "Un peu moins de saisie",
   "studio.overview.title": "Faites de la place à vos idées",
   "studio.overview.subtitle":
@@ -857,6 +858,7 @@ export const fr: Record<LocaleKeys, string> = {
     "L'enregistrement reste sur l'appareil qui l'a fait.",
   "studio.library.conflictOf": "Copie de conflit de la note du {date}",
   "studio.library.conflictCopy": "Copie de conflit",
+  "studio.library.saveAudio": "Enregistrer l'audio",
   "native.audioGone":
     "L'audio de cet enregistrement n'est plus sur cet appareil.",
   "native.recordingGone":
@@ -897,8 +899,10 @@ export const fr: Record<LocaleKeys, string> = {
   "toast.micFellBack":
     "Micro choisi introuvable. Enregistrement avec le micro par défaut du système.",
   "studio.storage.format": "Format des enregistrements",
-  "studio.storage.wav": "Qualité d'origine (WAV)",
-  "studio.storage.opus": "Compressé (Opus, 10× plus léger)",
+  "studio.storage.wav": "Qualité voix (WAV, 16 kHz mono)",
+  "studio.storage.opus": "Qualité voix, compressé (Opus, 10× plus léger)",
+  "studio.storage.hq":
+    "Haute qualité (Opus, 48 kHz, stéréo si la source l'est)",
   "studio.storage.compressNow": "Compresser les enregistrements",
   "studio.storage.compressing": "Compression…",
   "studio.storage.compressed.one":
@@ -914,7 +918,9 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.storage.savedOpus":
     "Les nouveaux enregistrements sont compressés une fois transcrits. Vous pouvez toujours les écouter et les transcrire à nouveau.",
   "studio.storage.savedWav":
-    "Les nouveaux enregistrements sont conservés en qualité d'origine. Ceux déjà compressés le restent.",
+    "Les nouveaux enregistrements sont conservés en WAV, en qualité voix. Ceux déjà compressés le restent.",
+  "studio.storage.savedHq":
+    "Les nouveaux enregistrements sont conservés en 48 kHz, en stéréo si la source l'est. Les fichiers importés et les anciens enregistrements sont compressés en qualité voix.",
   "studio.transcribe.liveLabel": "Entendu jusqu'ici",
   "capture.keptForRetry":
     "{error} L'enregistrement est dans votre Bibliothèque, où vous pouvez le transcrire à nouveau.",
@@ -930,7 +936,7 @@ export const fr: Record<LocaleKeys, string> = {
   "studio.source.microphone": "Le microphone",
   "studio.source.system": "Le son de cet ordinateur",
   "studio.source.systemHint":
-    "Le bouton d'enregistrement capte ce qui est joué sur cet ordinateur, une réunion ou une vidéo par exemple. La dictée avec les raccourcis ou la bulle utilise toujours le microphone.",
+    "Le bouton d'enregistrement capte ce qui est joué sur cet ordinateur, une réunion ou une vidéo par exemple. Un raccourci de dictée pressé quand Sonolect est au premier plan fait de même. La dictée dans d'autres applications et la bulle utilisent toujours le microphone.",
   "studio.dock.recordingSystem": "Enregistrement du son de l'ordinateur…",
   "native.noPlaybackDevice": "Aucun périphérique de lecture à enregistrer.",
   "native.playbackFormat":
@@ -961,6 +967,13 @@ export const fr: Record<LocaleKeys, string> = {
   "native.systemAudioBusy": "Le son de l'ordinateur n'est pas disponible.",
   "native.ffmpegNeeded":
     "ffmpeg est nécessaire pour enregistrer le son de l'ordinateur.",
+  "native.invalidPcmFormat":
+    "Fréquence d'échantillonnage ou nombre de canaux non valide.",
+  "native.invalidPcmFrames": "Audio PCM 16 bits ou taille de trame non valide.",
+  "native.pcmFormatChanged":
+    "Le format audio a changé pendant l'enregistrement.",
+  "native.invalidQuality": "Qualité d'enregistrement non valide.",
+  "native.cannotConvert": "Impossible de convertir l'audio : {reason}",
   "native.syncNotAvailable":
     "La synchronisation n'est pas disponible dans cette version de Sonolect.",
   "native.syncKeychainLinux":

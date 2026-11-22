@@ -361,4 +361,27 @@ export const es: Partial<Record<LocaleKeys, string>> = {
   "native.speakerModelLoad":
     "No se puede cargar el modelo de hablantes: {reason}",
   "native.speakerModelFailed": "El modelo de hablantes falló: {reason}",
+  // High-quality recording
+  "studio.storage.format": "Guardar grabaciones como",
+  "studio.storage.wav": "Calidad de voz (WAV, 16 kHz mono)",
+  "studio.storage.opus": "Calidad de voz, comprimido (Opus, 10× más pequeño)",
+  "studio.storage.hq":
+    "Alta calidad (Opus, 48 kHz, estéreo si la fuente lo es)",
+  "studio.storage.savedWav":
+    "Las grabaciones nuevas se guardan en WAV, con calidad de voz. Las que ya están comprimidas siguen comprimidas.",
+  "studio.storage.savedHq":
+    "Las grabaciones nuevas se guardan a 48 kHz, en estéreo si la fuente lo es. Los archivos importados y las grabaciones anteriores se comprimen con calidad de voz.",
+  "studio.signal.meta": "16 kHz · mono · en el dispositivo",
+  "studio.signal.metaHigh":
+    "48 kHz · estéreo si está disponible · en el dispositivo",
+  "studio.library.saveAudio": "Guardar audio",
+  "studio.source.systemHint":
+    "El botón de grabar graba lo que suena en este ordenador, como una reunión o un vídeo. También lo hace un atajo de dictado pulsado mientras Sonolect está en primer plano. El dictado en otras apps y la burbuja siempre usan el micrófono.",
+  "native.invalidPcmFormat":
+    "Frecuencia de muestreo o número de canales no válidos.",
+  "native.invalidPcmFrames":
+    "Audio PCM de 16 bits o tamaño de trama no válido.",
+  "native.pcmFormatChanged": "El formato de audio cambió durante la grabación.",
+  "native.invalidQuality": "Calidad de grabación no válida.",
+  "native.cannotConvert": "No se puede convertir el audio: {reason}",
 };

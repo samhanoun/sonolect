@@ -256,6 +256,11 @@ decisions.
    it must say instead what sync sends, who runs the sync server and where,
    how long the server keeps it, and how to delete it (see
    [Note sync](#note-sync)).
+   It must also cover online editing: when the user sets it up with their
+   own OpenRouter or OpenCode Zen key and taps _Rewrite_ or _Reply_, the
+   text of that note goes from the phone to the provider they picked,
+   under that provider's terms and billed to their account. The developer
+   never receives it. The key stays on the phone.
 2. Host it at an `https://` URL.
 3. Set `SONOLECT_PRIVACY_POLICY_URL` in the EAS production environment
    (`eas env:set`), and in CI if CI ever builds releases.
@@ -270,6 +275,12 @@ decisions.
 2. Decide, with legal advice if needed, how to declare the hand-off of audio
    to the OS speech service (Google or Apple), and, for a build with a sync
    URL, how to declare sync.
+3. Decide the same for online editing: the text of a note the user sends,
+   on request, to the provider they picked with their own key. App Review
+   may ask about third-party AI (guideline 5.1.2(i) asks for disclosure and
+   explicit permission before personal data goes to a third-party AI). The
+   dialog shown before each note names the provider and the model; keep a
+   screenshot of it ready for the review notes.
 
 ### Sync server (optional)
 
@@ -373,7 +384,10 @@ URL in the build (see [Note sync](#note-sync)).
     _Local first_ or _Ephemeral_ it happens only after the user agrees, for
     one dictation or with _Use the system speech service_ turned on in
     Settings.
-- **Notes, dictionary and snippets** stay on the phone (AsyncStorage).
+- **Notes, dictionary and snippets** stay on the phone (AsyncStorage). A
+  dictated note keeps when each part was said (text and times, no audio),
+  for its subtitles. With sync on, those times go with the note, end-to-end
+  encrypted like its text (see [Note sync](#note-sync)).
   Android backups are off (`allowBackup: false`). _Ephemeral_ saves nothing.
   _Clear history_ and _Erase all data_ delete them. _Keep notes for_
   (forever by default; 1, 7, 30 or 90 days) deletes older notes at launch
@@ -384,6 +398,16 @@ URL in the build (see [Note sync](#note-sync)).
   network are not offered.
 - **Copy, Share and Export** happen only when the user taps them, and go to
   the app the user picks.
+- **Online editing** (_Rewrite_ and _Reply_) is off by default. Once the
+  user saves their own OpenRouter or OpenCode Zen key and picks a model,
+  each tap asks before sending; the user can turn on _Send without asking
+  each time_, which _Ephemeral_ ignores. What goes out is the text of that
+  one note, after the dictionary was applied on the phone, straight from
+  the phone to that provider over HTTPS. Never the audio, the times of a
+  dictation's parts, other notes or the dictionary. The developer receives
+  none of it. The key is kept in the iOS Keychain or Android Keystore on
+  this phone only, and _Erase all data_ deletes it. Loading the model list
+  sends no key and no note.
 - **Permissions**: microphone (`RECORD_AUDIO` on Android), and on iOS
   microphone and speech recognition, with English and French prompts.
 
@@ -398,7 +422,8 @@ nothing to the sync server. Sync adds no permission.
   owner picked ([sync-setup.md](sync-setup.md)). Only over HTTPS.
 - **Sent end-to-end encrypted, unreadable by the server and the developer**:
   every note's text and its other fields (title, language, mode, times,
-  duration, pinned, segments, and fields other devices added), plus a
+  duration, pinned, segments with when each part was said, and fields other
+  devices added), plus a
   random per-install device id inside each note's clock. Each note is
   sealed on the phone with XChaCha20-Poly1305 under a key that exists only
   on the user's devices. Dictionary entries, snippets and settings do not
@@ -431,3 +456,7 @@ Open question for the owner: whether the hand-off of audio to the OS speech
 service counts as data collected or shared on either form. The developer
 never receives that audio; Apple or Google process it under their own terms,
 and in _Local first_ and _Ephemeral_ only with the user's consent.
+
+The same question applies to online editing. The developer never receives
+the note's text: the user sends it, on request and with their own key, to
+the provider they picked, which processes it under its own terms.

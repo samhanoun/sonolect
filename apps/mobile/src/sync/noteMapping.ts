@@ -1,7 +1,8 @@
 import type { Hlc, SyncNote } from "@sonolect/sync-core";
 
-import type { TranscriptTurn } from "../domain";
-import { sanitizeTurn } from "../storageCore";
+import type { NoteSegment, TranscriptTurn } from "../domain";
+import { segmentsSayText, segmentsToShow } from "../noteSegments";
+import { MAX_TEXT_LENGTH, sanitizeTurn } from "../storageCore";
 
 /**
  * A phone note (TranscriptTurn) to and from a synced note ("note/1": the
@@ -11,13 +12,24 @@ import { sanitizeTurn } from "../storageCore";
  * kept in the note's companion value (storageCore SYNC_COMPANION_PREFIX), so
  * a note changed on the phone goes back with every field another device
  * wrote:
- * - `extra`: fields the phone has no place for (title, segments, origin,
- *   updatedAt and fields it does not know), written back unchanged;
+ * - `extra`: fields the phone has no place for (title, origin, updatedAt
+ *   and fields it does not know), and the segments another device wrote,
+ *   written back unchanged;
  * - `kept`: fields the phone shows another way, such as a desktop "system"
  *   source shown as "remote", a text cut at 200,000 characters or an absent
  *   language shown as "auto". Each keeps the note's value and a digest of
  *   what the phone showed: while the phone still shows that, the note's
  *   value goes back; once the user changed the field here, the phone's does.
+ *
+ * Segments: a phone dictation sends its own (noteSegments.ts), with the
+ * phone-only `approx` mark, which sync-core and the desktop keep as an
+ * unknown field of the segment. The phone shows a synced note's segments,
+ * without speakers, for its Subtitles, when they all fit its limits
+ * (segmentsToShow), and none otherwise. It never changes them: a refine
+ * changes the refined text and leaves the segments as they are. Segments
+ * the turn does not send as its own (with speakers, unknown fields, or too
+ * many to show) stay in `extra` and always go back as they came. Builds
+ * from before Subtitles keep them there too, so they also send them back.
  *
  * Local only, never synced: `syncState` (the dormant API sync).
  */
@@ -58,6 +70,20 @@ export interface Companion {
   v: 1;
   extra: Record<string, unknown>;
   kept: Partial<Record<ShownField, KeptField>>;
+}
+
+/**
+ * The segments a turn sends: a dictation's own, while they say its words.
+ * The desktop's studio shows a note's segments as its text, so segments
+ * that said other words would change the note there.
+ */
+function ownSegments(turn: TranscriptTurn): NoteSegment[] | undefined {
+  const { segments } = turn;
+  return segments &&
+    segments.length > 0 &&
+    segmentsSayText(segments, turn.rawText)
+    ? segments
+    : undefined;
 }
 
 /** The note/1 value of each shown field, from the turn alone. */
@@ -151,6 +177,7 @@ export function noteToTurn(
       pinned: note.pinned,
       conflictOf: note.conflictOf,
       hlc,
+      segments: segmentsToShow(note.segments, MAX_TEXT_LENGTH, note.durationMs),
     },
     nowMs,
   );
@@ -160,6 +187,8 @@ export function noteToTurn(
   const extra: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(note))
     if (!SHOWN.has(key) && value !== undefined) extra[key] = value;
+  // The turn sends its own segments; anything else stays in extra.
+  if (sameValue(ownSegments(turn), note.segments)) delete extra.segments;
   const own = ownFields(turn);
   const kept: Companion["kept"] = {};
   for (const field of SHOWN_FIELDS) {
@@ -228,6 +257,11 @@ export function turnToNote(
     }
     const value = own[field];
     if (value !== undefined) fields[field] = value;
+  }
+  // Another device's segments came in extra, and go back as they came.
+  if (!("segments" in fields)) {
+    const segments = ownSegments(turn);
+    if (segments) fields.segments = segments;
   }
   if (typeof fields.origin !== "string" || !fields.origin)
     fields.origin = "mobile";

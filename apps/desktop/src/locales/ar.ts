@@ -333,4 +333,24 @@ export const ar: Partial<Record<LocaleKeys, string>> = {
   "native.speakerModelUnreadable": "تعذّرت قراءة نموذج المتحدثين: {reason}",
   "native.speakerModelLoad": "تعذّر تحميل نموذج المتحدثين: {reason}",
   "native.speakerModelFailed": "فشل نموذج المتحدثين: {reason}",
+  // High-quality recording
+  "studio.storage.format": "حفظ التسجيلات بصيغة",
+  "studio.storage.wav": "جودة الكلام (WAV، 16 كيلوهرتز أحادي)",
+  "studio.storage.opus": "جودة الكلام، مضغوط (Opus، أصغر بعشر مرات)",
+  "studio.storage.hq":
+    "جودة عالية (Opus، 48 كيلوهرتز، ستيريو إذا كان المصدر ستيريو)",
+  "studio.storage.savedWav":
+    "تُحفظ التسجيلات الجديدة بصيغة WAV بجودة الكلام. وتبقى التسجيلات المضغوطة مضغوطة.",
+  "studio.storage.savedHq":
+    "تُحفظ التسجيلات الجديدة بتردد 48 كيلوهرتز، وبالستيريو إذا كان المصدر ستيريو. وتُضغط الملفات المستوردة والتسجيلات الأقدم بجودة الكلام.",
+  "studio.signal.meta": "16 كيلوهرتز · أحادي · على الجهاز",
+  "studio.signal.metaHigh": "48 كيلوهرتز · ستيريو عند توفره · على الجهاز",
+  "studio.library.saveAudio": "حفظ الصوت",
+  "studio.source.systemHint":
+    "يسجّل زر التسجيل ما يُشغَّل على هذا الكمبيوتر، مثل اجتماع أو فيديو. وكذلك اختصار الإملاء إذا ضُغط وSonolect في المقدمة. أما الإملاء في التطبيقات الأخرى والفقاعة فيستخدمان الميكروفون دائمًا.",
+  "native.invalidPcmFormat": "معدل العينات أو عدد القنوات غير صالح.",
+  "native.invalidPcmFrames": "صوت PCM بدقة 16 بت أو حجم إطار غير صالح.",
+  "native.pcmFormatChanged": "تغيّر تنسيق الصوت أثناء التسجيل.",
+  "native.invalidQuality": "جودة التسجيل غير صالحة.",
+  "native.cannotConvert": "تعذّر تحويل الصوت: {reason}",
 };

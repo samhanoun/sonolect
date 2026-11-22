@@ -4,11 +4,14 @@ import {
   LiveCaptureSession,
   type LiveCaptureTransport,
   type LivePartialEvent,
+  type PcmFormat,
 } from "./liveCapture";
 
 type Fake = LiveCaptureTransport & {
   calls: string[];
   pieces: Uint8Array[];
+  /** The format each piece was sent with; none means 16 kHz mono. */
+  formats: (PcmFormat | undefined)[];
   emit: (event: LivePartialEvent) => void;
   listening: () => boolean;
   failAppendWith?: string;
@@ -21,6 +24,7 @@ function fakeTransport(): Fake {
   const fake: Fake = {
     calls: [],
     pieces: [],
+    formats: [],
     emit: (event) => listener?.(event),
     listening: () => listener !== undefined,
     listen: async (onPartial) => {
@@ -35,11 +39,12 @@ function fakeTransport(): Fake {
       fake.calls.push(`begin ${JSON.stringify(settings)}`);
       return "17-1";
     },
-    append: async (captureId, pcm) => {
+    append: async (captureId, pcm, format) => {
       await fake.hold;
       if (fake.failAppendWith) throw new Error(fake.failAppendWith);
       fake.calls.push(`append ${captureId} ${pcm.length}`);
       fake.pieces.push(pcm);
+      fake.formats.push(format);
       return fake.pieces.reduce((total, piece) => total + piece.length, 0) / 32;
     },
     finish: async (captureId) => {
@@ -59,6 +64,16 @@ function fakeTransport(): Fake {
 }
 
 const second = (rate: number) => new Float32Array(rate).fill(0.25);
+
+/** Interleaved stereo: the left channel at `left`, the right at `right`. */
+function stereo(frames: number, left: number, right: number) {
+  const block = new Float32Array(frames * 2);
+  for (let frame = 0; frame < frames; frame++) {
+    block[2 * frame] = left;
+    block[2 * frame + 1] = right;
+  }
+  return block;
+}
 
 describe("live capture session", () => {
   it("sends half-second pieces in order and returns the transcript", async () => {
@@ -207,5 +222,110 @@ describe("live capture session", () => {
       /Install the local speech model/,
     );
     assert.equal(transport.listening(), false);
+  });
+  it("sends a high-quality recording as it comes, in half-second pieces of whole frames", async () => {
+    const transport = fakeTransport();
+    const levels: number[] = [];
+    const session = await LiveCaptureSession.start(
+      transport,
+      { language: "en", quality: "high" },
+      { onLevel: (level) => levels.push(level) },
+    );
+    // 1.2 seconds at 48 kHz stereo, in audio-thread sized blocks.
+    for (let sent = 0; sent < 57600; sent += 1024)
+      session.push(stereo(Math.min(1024, 57600 - sent), 0.25, -0.25), 48000, 2);
+    await session.finish();
+
+    assert.deepEqual(transport.calls.slice(0, 5), [
+      "listen",
+      'begin {"language":"en","quality":"high"}',
+      // 24,000 frames of two 16-bit samples, then the 9,600 frames left.
+      "append 17-1 96000",
+      "append 17-1 96000",
+      "append 17-1 38400",
+    ]);
+    assert.deepEqual(transport.formats, [
+      { rate: 48000, channels: 2 },
+      { rate: 48000, channels: 2 },
+      { rate: 48000, channels: 2 },
+    ]);
+    // Not resampled nor mixed: left then right, as they came.
+    assert.deepEqual(
+      [...transport.pieces[0]!.subarray(0, 8)],
+      [0, 32, 0, 224, 0, 32, 0, 224],
+    );
+    assert.ok(levels.length > 0 && levels.every((level) => level > 0.2));
+  });
+
+  it("sends a 44.1 kHz mono microphone at its own rate in high quality", async () => {
+    const transport = fakeTransport();
+    const session = await LiveCaptureSession.start(transport, {
+      quality: "high",
+    });
+    session.push(second(44100), 44100, 1);
+    await session.finish();
+    assert.deepEqual(
+      transport.calls.filter((call) => call.startsWith("append")),
+      ["append 17-1 44100", "append 17-1 44100"],
+    );
+    assert.deepEqual(transport.formats, [
+      { rate: 44100, channels: 1 },
+      { rate: 44100, channels: 1 },
+    ]);
+  });
+
+  it("mixes two channels to mono at 16 kHz in speech quality, without format headers", async () => {
+    const transport = fakeTransport();
+    const session = await LiveCaptureSession.start(transport, {});
+    session.push(stereo(16000, 0.5, 0), 16000, 2);
+    await session.finish();
+    assert.deepEqual(
+      transport.calls.filter((call) => call.startsWith("append")),
+      ["append 17-1 16000", "append 17-1 16000"],
+    );
+    assert.deepEqual(transport.formats, [undefined, undefined]);
+    // The average of the two channels: 0.25 of full scale.
+    assert.deepEqual([...transport.pieces[0]!.subarray(0, 4)], [0, 32, 0, 32]);
+  });
+
+  it("stops a high-quality recording whose format changes, and keeps what it has", async () => {
+    const transport = fakeTransport();
+    const stalls: string[] = [];
+    const session = await LiveCaptureSession.start(
+      transport,
+      { quality: "high" },
+      { onStalled: (message) => stalls.push(message) },
+    );
+    session.push(stereo(24000, 0.25, 0.25), 48000, 2);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    session.push(stereo(1024, 0.25, 0.25), 44100, 2);
+    session.push(stereo(24000, 0.25, 0.25), 48000, 2);
+    assert.equal(stalls.length, 1);
+    assert.match(stalls[0]!, /format changed/);
+    const result = await session.finish();
+    assert.equal(result.text, "Hello there.");
+    assert.deepEqual(
+      transport.calls.filter((call) => call.startsWith("append")),
+      ["append 17-1 96000"],
+    );
+  });
+
+  it("gives up when high-quality pieces pile up behind a stuck recorder", async () => {
+    const transport = fakeTransport();
+    let release!: () => void;
+    transport.hold = new Promise((resolve) => (release = resolve));
+    const stalls: string[] = [];
+    const session = await LiveCaptureSession.start(
+      transport,
+      { quality: "high" },
+      { onStalled: (message) => stalls.push(message) },
+    );
+    // Half a second each: 240 pieces wait, the next one is refused.
+    for (let index = 0; index < 241; index++)
+      session.push(stereo(24000, 0.1, 0.1), 48000, 2);
+    assert.equal(stalls.length, 1);
+    assert.match(stalls[0]!, /not keeping up/);
+    release();
+    await session.cancel();
   });
 });

@@ -1,15 +1,19 @@
 //! Live recordings of any length.
 //!
-//! The web layer sends 16 kHz mono PCM in small pieces while it records. Each
-//! piece is written to the recording's WAV file straight away, so nothing is
-//! lost if the app stops, and the audio is transcribed chunk by chunk at
-//! natural pauses. Every finished chunk is announced with a `capture-partial`
-//! event, which is how text appears while the user is still speaking.
+//! The web layer sends PCM in small pieces while it records: 16 kHz mono,
+//! or, for a high-quality recording, the rate and channels of its source.
+//! Each piece is written straight away to the recording's 16 kHz mono WAV
+//! file, the working copy that the speech engine reads, so nothing is lost
+//! if the app stops, and the audio is transcribed chunk by chunk at natural
+//! pauses. A high-quality recording also writes a 48 kHz Opus copy as it
+//! goes, which replaces the WAV once the recording is finished. Every
+//! finished chunk is announced with a `capture-partial` event, which is how
+//! text appears while the user is still speaking.
 use serde::Serialize;
 use std::{
     fs::{self, File},
     io::{Read, Seek, SeekFrom, Write},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc, Mutex,
@@ -19,7 +23,11 @@ use std::{
 };
 use tauri::Emitter;
 
-use super::{compact_audio, local_history, WhisperResult, WhisperSegment};
+use super::{
+    compact_audio, local_history,
+    resample::{Converter, PcmFormat, HIGH_RATE},
+    WhisperResult, WhisperSegment,
+};
 
 pub const SAMPLE_RATE: u64 = 16_000;
 /// Four hours, the longest session the product promises.
@@ -324,32 +332,56 @@ impl Recorder {
         })
     }
 
-    /// Adds little-endian 16-bit samples. Returns the length recorded so far
-    /// in milliseconds.
+    /// Adds little-endian 16-bit samples, as the web layer sends them.
+    /// Returns the length recorded so far in milliseconds.
+    #[cfg(test)]
     pub fn append(&mut self, pcm: &[u8]) -> Result<u64, String> {
-        if pcm.is_empty() || pcm.len() & 1 == 1 {
-            return Err("Invalid 16-bit mono PCM audio or sample rate.".into());
+        if pcm.len() & 1 == 1 {
+            return Err(INVALID_MONO_PCM.into());
+        }
+        self.append_samples(&samples_of(pcm))
+    }
+
+    /// Adds 16 kHz mono samples. Returns the length recorded so far in
+    /// milliseconds.
+    pub fn append_samples(&mut self, samples: &[i16]) -> Result<u64, String> {
+        if samples.is_empty() {
+            return Err(INVALID_MONO_PCM.into());
         }
         if self.samples >= MAX_SAMPLES {
-            return Err("The recording reached the four-hour limit.".into());
+            return Err(FOUR_HOURS.into());
         }
+        self.write(samples)?;
+        Ok(self.recorded_ms())
+    }
+
+    /// Adds the last samples of a recording, which the four-hour limit has
+    /// already let in: the end of audio a converter was still holding.
+    fn append_last(&mut self, samples: &[i16]) -> Result<(), String> {
+        if samples.is_empty() {
+            return Ok(());
+        }
+        self.write(samples)
+    }
+
+    fn write(&mut self, samples: &[i16]) -> Result<(), String> {
+        let pcm: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
         self.file
-            .write_all(pcm)
+            .write_all(&pcm)
             .map_err(|e| format!("Cannot save recording: {e}"))?;
-        self.samples += pcm.len() as u64 / 2;
+        self.samples += samples.len() as u64;
         if self.samples - self.synced >= HEADER_SYNC_SAMPLES {
             self.sync_header()?;
         }
-        let samples: Vec<i16> = pcm
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|pair| i16::from_le_bytes(*pair))
-            .collect();
-        for chunk in self.chunker.push(&samples) {
+        for chunk in self.chunker.push(samples) {
             self.send(chunk);
         }
-        Ok(self.samples * 1000 / SAMPLE_RATE)
+        Ok(())
+    }
+
+    /// The length recorded so far, in milliseconds.
+    pub fn recorded_ms(&self) -> u64 {
+        self.samples * 1000 / SAMPLE_RATE
     }
 
     fn send(&self, chunk: Chunk) {
@@ -405,6 +437,239 @@ impl Recorder {
         self.abandoned.store(true, Ordering::SeqCst);
         drop(self.jobs.take());
         let _ = self.sync_header();
+    }
+}
+
+const INVALID_MONO_PCM: &str = "Invalid 16-bit mono PCM audio or sample rate.";
+const INVALID_PCM: &str = "Invalid 16-bit PCM audio or frame size.";
+const FOUR_HOURS: &str = "The recording reached the four-hour limit.";
+const FORMAT_CHANGED: &str = "The audio format changed during the recording.";
+
+fn samples_of(pcm: &[u8]) -> Vec<i16> {
+    pcm.as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| i16::from_le_bytes(*pair))
+        .collect()
+}
+
+/// How a live recording is kept.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Quality {
+    /// 16 kHz mono, what the speech engine works with.
+    Speech,
+    /// A 48 kHz Opus copy of one or two channels as well, which replaces the
+    /// working WAV once the recording is finished.
+    High,
+}
+
+impl Quality {
+    /// "speech" (the default) or "high".
+    pub fn parse(value: Option<&str>) -> Result<Self, String> {
+        match value {
+            None | Some("speech") => Ok(Self::Speech),
+            Some("high") => Ok(Self::High),
+            Some(_) => Err("Invalid recording quality.".into()),
+        }
+    }
+}
+
+/// The high-quality copy is tuned for any sound, not only speech, at these
+/// rates: about 44 MB an hour in stereo and 29 MB in mono.
+const HIGH_BITRATE_STEREO: i32 = 96_000;
+const HIGH_BITRATE_MONO: i32 = 64_000;
+
+/// The audio of a recording in progress: its working 16 kHz mono WAV and,
+/// for a high-quality recording, the Opus copy written beside it
+/// (`{id}.hq.opus`). Each piece goes to both as it arrives.
+///
+/// The copy is optional. Should it fail to be started, written or ended (a
+/// full disk, say), it is removed, and the recording goes on in the WAV,
+/// which then stays as its audio, as in speech quality.
+pub struct LiveAudio {
+    wav: PathBuf,
+    high_path: PathBuf,
+    opus: PathBuf,
+    quality: Quality,
+    recorder: Recorder,
+    /// Made with the first piece, whose format every later piece must have.
+    converter: Option<Converter>,
+    high: Option<compact_audio::OpusWriter<File>>,
+    /// The longest a recording may be, in 16 kHz samples.
+    limit: u64,
+}
+
+impl LiveAudio {
+    pub fn begin(
+        directory: &Path,
+        id: &str,
+        quality: Quality,
+        transcribe: Transcriber,
+        on_partial: PartialSink,
+    ) -> Result<Self, String> {
+        let wav = directory.join(format!("{id}.wav"));
+        let recorder = Recorder::begin(&wav, transcribe, on_partial)?;
+        Ok(Self {
+            wav,
+            high_path: directory.join(format!("{id}.hq.opus")),
+            opus: directory.join(format!("{id}.opus")),
+            quality,
+            recorder,
+            converter: None,
+            high: None,
+            limit: MAX_SAMPLES,
+        })
+    }
+
+    /// Adds interleaved samples in `format`. The first piece fixes the
+    /// format; every later one must have it and hold whole frames. Returns
+    /// the length recorded so far in milliseconds.
+    pub fn append(&mut self, format: PcmFormat, samples: &[i16]) -> Result<u64, String> {
+        let channels = usize::from(format.channels);
+        if samples.is_empty() || !samples.len().is_multiple_of(channels) {
+            return Err(invalid_pcm(format).into());
+        }
+        self.take_format(format)?;
+        let Some(converter) = self.converter.as_mut() else {
+            return Err(FORMAT_CHANGED.into());
+        };
+        // Counted on the speech engine's samples, before anything of this
+        // piece is written, so the copy never holds more than the WAV.
+        if converter.speech_length() >= self.limit {
+            return Err(FOUR_HOURS.into());
+        }
+        let converted = converter.push(samples)?;
+        self.write_high(&converted.high);
+        if !converted.speech.is_empty() {
+            self.recorder.append_samples(&converted.speech)?;
+        }
+        Ok(self.recorder.recorded_ms())
+    }
+
+    /// Fixes the format with the first piece, and starts the high-quality
+    /// copy then, when it has the channels to know.
+    fn take_format(&mut self, format: PcmFormat) -> Result<(), String> {
+        if let Some(converter) = &self.converter {
+            return if converter.format() == format {
+                Ok(())
+            } else {
+                Err(FORMAT_CHANGED.into())
+            };
+        }
+        let converter = Converter::new(format, self.quality == Quality::High)?;
+        let channels = converter.high_channels();
+        self.converter = Some(converter);
+        if let Some(channels) = channels {
+            let bitrate = if channels == 2 {
+                HIGH_BITRATE_STEREO
+            } else {
+                HIGH_BITRATE_MONO
+            };
+            match compact_audio::OpusWriter::create(
+                &self.high_path,
+                HIGH_RATE,
+                channels,
+                bitrate,
+                opus::Application::Audio,
+            ) {
+                Ok(high) => self.high = Some(high),
+                Err(error) => self.drop_high(&error),
+            }
+        }
+        Ok(())
+    }
+
+    /// Adds 48 kHz audio to the high-quality copy, while there is one.
+    fn write_high(&mut self, samples: &[i16]) {
+        if samples.is_empty() {
+            return;
+        }
+        if let Some(Err(error)) = self.high.as_mut().map(|high| high.write(samples)) {
+            self.drop_high(&error);
+        }
+    }
+
+    /// Gives up the high-quality copy after `error`: the copy is removed and
+    /// the recording goes on in the WAV, which then stays as its audio.
+    fn drop_high(&mut self, error: &str) {
+        // Closed before it is removed: Windows keeps open files.
+        drop(self.high.take());
+        remove_high(&self.high_path, error);
+        if let Some(converter) = self.converter.as_mut() {
+            converter.drop_high();
+        }
+    }
+
+    /// What the converter still holds goes to the copy and the WAV.
+    fn flush(&mut self) -> Result<(), String> {
+        let Some(converter) = self.converter.as_mut() else {
+            return Ok(());
+        };
+        let rest = converter.finish()?;
+        self.write_high(&rest.high);
+        self.recorder.append_last(&rest.speech)
+    }
+
+    /// Transcribes what is left and waits for the engine. A complete
+    /// high-quality copy then takes the WAV's place. Should the rename fail,
+    /// the WAV stays, with the whole recording, and the copy left beside it
+    /// is taken up later (see `compact_audio::compress`). Without a complete
+    /// copy, the WAV is the recording.
+    pub fn finish(mut self) -> Result<Outcome, String> {
+        self.flush()?;
+        let outcome = self.recorder.finish()?;
+        if end_high(self.high.take(), &self.high_path)
+            && fs::rename(&self.high_path, &self.opus).is_ok()
+        {
+            // Left behind, the WAV is removed by the next compression.
+            let _ = fs::remove_file(&self.wav);
+        }
+        Ok(outcome)
+    }
+
+    /// Stops without transcribing what is still queued. The WAV stays, and
+    /// a high-quality copy is completed beside it, to take its place later
+    /// as a copy a crash left would.
+    pub fn abandon(mut self) {
+        let _ = self.flush();
+        self.recorder.abandon();
+        end_high(self.high.take(), &self.high_path);
+    }
+
+    /// Stops and removes the high-quality copy. The caller removes the rest.
+    pub fn cancel(mut self) {
+        self.recorder.abandon();
+        // Closed before it is removed: Windows keeps open files.
+        drop(self.high.take());
+        let _ = fs::remove_file(&self.high_path);
+    }
+}
+
+/// Ends the high-quality copy `high` at `path`, if there still is one.
+/// Returns whether it is complete, every piece of the recording in it; one
+/// that cannot be ended is removed.
+fn end_high(high: Option<compact_audio::OpusWriter<File>>, path: &Path) -> bool {
+    match high.map(compact_audio::OpusWriter::finish) {
+        Some(Ok(_)) => true,
+        Some(Err(error)) => {
+            remove_high(path, &error);
+            false
+        }
+        None => false,
+    }
+}
+
+/// Removes a high-quality copy that could not be written, closed already.
+fn remove_high(path: &Path, error: &str) {
+    let _ = fs::remove_file(path);
+    eprintln!("The high-quality copy of a recording stopped: {error}");
+}
+
+fn invalid_pcm(format: PcmFormat) -> &'static str {
+    if format.channels == 1 {
+        INVALID_MONO_PCM
+    } else {
+        INVALID_PCM
     }
 }
 
@@ -475,7 +740,7 @@ fn transcribe_samples(
 struct Live {
     id: String,
     record: local_history::Capture,
-    recorder: Recorder,
+    audio: LiveAudio,
     /// Keeps the WAV from being compressed while it is still being written.
     hold: compact_audio::Hold,
 }
@@ -560,7 +825,8 @@ fn finished(
     }
 }
 
-/// Starts a live recording and returns its ID.
+/// Starts a live recording and returns its ID. `quality` is "speech" (the
+/// default) or "high", which keeps a 48 kHz Opus copy of what is recorded.
 #[tauri::command(async)]
 pub fn capture_begin(
     app: tauri::AppHandle,
@@ -568,7 +834,9 @@ pub fn capture_begin(
     model_path: Option<String>,
     provider: Option<String>,
     model: Option<String>,
+    quality: Option<String>,
 ) -> Result<String, String> {
+    let quality = Quality::parse(quality.as_deref())?;
     let transcribe = transcriber(&app, language.clone(), model_path, provider, model)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -585,8 +853,10 @@ pub fn capture_begin(
         ..Default::default()
     };
     let hold = compact_audio::hold(&id);
-    let recorder = Recorder::begin(
-        &directory.join(format!("{id}.wav")),
+    let audio = LiveAudio::begin(
+        &directory,
+        &id,
+        quality,
         transcribe,
         partial_sink(&app, &id),
     )?;
@@ -597,43 +867,50 @@ pub fn capture_begin(
         .replace(Live {
             id: id.clone(),
             record,
-            recorder,
+            audio,
             hold,
         });
     if let Some(previous) = previous {
         // Never finished (the window was reloaded, say). Its audio stays in
         // the library, marked for retry.
-        previous.recorder.abandon();
+        previous.audio.abandon();
     }
     Ok(id)
 }
 
-/// Adds audio to the live recording. The raw IPC body is 16-bit PCM; the
-/// recording's ID travels in `x-sonolect-capture`. Returns the recorded
-/// length in milliseconds.
+/// Adds audio to the live recording. The raw IPC body is interleaved 16-bit
+/// PCM, 16 kHz mono unless `x-sonolect-rate` and `x-sonolect-channels` say
+/// otherwise; the recording's ID travels in `x-sonolect-capture`. Returns
+/// the recorded length in milliseconds.
 #[tauri::command(async)]
 pub fn capture_append(request: tauri::ipc::Request<'_>) -> Result<u64, String> {
     let id = super::ipc_audio::header(&request, "x-sonolect-capture").unwrap_or_default();
+    let format = super::ipc_audio::pcm_format(&request)?;
     let pcm = super::ipc_audio::pcm_chunk(&request)?;
-    append_bytes(&id, &pcm)
+    if pcm.len() & 1 == 1 {
+        return Err(invalid_pcm(format).into());
+    }
+    append_live(&id, format, &samples_of(&pcm))
 }
 
-fn append_bytes(id: &str, pcm: &[u8]) -> Result<u64, String> {
+/// Adds interleaved samples in `format` to the live recording, from the
+/// window or a native source (system audio). Returns the recorded length in
+/// milliseconds.
+pub fn append_live(id: &str, format: PcmFormat, samples: &[i16]) -> Result<u64, String> {
     let mut live = LIVE.lock().map_err(|_| "Speech engine unavailable")?;
     match live.as_mut().filter(|live| live.id == id) {
-        Some(live) => live.recorder.append(pcm),
+        Some(live) => live.audio.append(format, samples),
         None => Err(NOT_IN_PROGRESS.into()),
     }
 }
 
-/// Adds samples from a native source (system audio) to the live recording.
-/// Returns the recorded length in milliseconds.
-pub fn append_live(id: &str, samples: &[i16]) -> Result<u64, String> {
-    let pcm: Vec<u8> = samples
-        .iter()
-        .flat_map(|sample| sample.to_le_bytes())
-        .collect();
-    append_bytes(id, &pcm)
+/// How the recording `id` is kept, while it is in progress.
+pub fn live_quality(id: &str) -> Option<Quality> {
+    LIVE.lock().ok().and_then(|live| {
+        live.as_ref()
+            .filter(|live| live.id == id)
+            .map(|live| live.audio.quality)
+    })
 }
 
 /// The ID of the recording in progress, if any.
@@ -660,10 +937,10 @@ pub async fn capture_finish(app: tauri::AppHandle, id: String) -> Result<Whisper
         let Live {
             id,
             mut record,
-            recorder,
+            audio,
             hold: _hold,
         } = take_live(&id)?;
-        let outcome = recorder.finish()?;
+        let outcome = audio.finish()?;
         if outcome.duration_ms == 0 {
             local_history::discard(&app, &id)?;
             return Err("No audio was recorded.".into());
@@ -680,7 +957,7 @@ pub async fn capture_finish(app: tauri::AppHandle, id: String) -> Result<Whisper
 #[tauri::command(async)]
 pub fn capture_cancel(app: tauri::AppHandle, id: String) -> Result<(), String> {
     let live = take_live(&id)?;
-    live.recorder.abandon();
+    live.audio.cancel();
     local_history::discard(&app, &live.id)
 }
 
@@ -1020,6 +1297,353 @@ mod tests {
             transcribe_file(&opus, fake_engine(), Box::new(|_| {})).unwrap_err(),
             "Invalid compressed audio."
         );
+    }
+
+    /// `seconds` of 48 kHz audio: a 220 Hz tone on the left and, in
+    /// stereo, 3 kHz on the right, interleaved.
+    fn high(seconds: f32, channels: usize) -> Vec<i16> {
+        (0..(seconds * 48_000.0) as usize)
+            .flat_map(|i| {
+                let t = i as f32 / 48_000.0;
+                [220.0f32, 3000.0]
+                    .into_iter()
+                    .take(channels)
+                    .map(move |hz| ((t * hz * std::f32::consts::TAU).sin() * 8000.0) as i16)
+            })
+            .collect()
+    }
+
+    fn stereo_48k() -> PcmFormat {
+        PcmFormat::new(48_000, 2).unwrap()
+    }
+
+    fn files(folder: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn live(folder: &Path, id: &str, quality: Quality) -> LiveAudio {
+        LiveAudio::begin(folder, id, quality, fake_engine(), Box::new(|_| {})).unwrap()
+    }
+
+    #[test]
+    fn a_high_quality_recording_keeps_a_working_wav_and_ends_as_one_opus_file() {
+        let folder = tempfile::tempdir().unwrap();
+        let (seen, sink) = collector();
+        let mut audio =
+            LiveAudio::begin(folder.path(), "11-1", Quality::High, fake_engine(), sink).unwrap();
+        let mut sent = high(4.0, 2);
+        sent.extend(vec![0; 2 * 48_000 * 6]);
+        sent.extend(high(2.0, 2));
+        // Half-second pieces, as the web layer sends them.
+        let mut recorded = 0;
+        for piece in sent.chunks(2 * 24_000) {
+            recorded = audio.append(stereo_48k(), piece).unwrap();
+        }
+        assert!(recorded > 11_900 && recorded <= 12_000, "{recorded}");
+        // While recording: the 16 kHz WAV the engine reads, and the copy.
+        assert_eq!(files(folder.path()), ["11-1.hq.opus", "11-1.wav"]);
+        let wav = hound::WavReader::open(folder.path().join("11-1.wav")).unwrap();
+        assert_eq!((wav.spec().sample_rate, wav.spec().channels), (16_000, 1));
+        assert!(wav.duration() >= 10 * 16_000);
+        drop(wav);
+
+        let outcome = audio.finish().unwrap();
+        // The WAV had exactly the recording's length, to the sample.
+        assert_eq!(outcome.duration_ms, 12_000);
+        assert_eq!(outcome.segments.len(), 2);
+        assert_eq!(*seen.lock().unwrap(), outcome.segments);
+        // One Opus file is left: two channels, the recording's length.
+        assert_eq!(files(folder.path()), ["11-1.opus"]);
+        let opus = folder.path().join("11-1.opus");
+        let bytes = fs::read(&opus).unwrap();
+        assert_eq!((bytes[28 + 9], &bytes[28..36]), (2, &b"OpusHead"[..]));
+        assert_eq!(compact_audio::open(&opus).unwrap().count(), 12 * 16_000);
+        // And it is transcribed again like any recording.
+        let again = transcribe_file(&opus, fake_engine(), Box::new(|_| {})).unwrap();
+        assert_eq!(again.duration_ms, 12_000);
+        assert_eq!(again.segments.len(), 2);
+    }
+
+    #[test]
+    fn a_high_quality_mono_source_keeps_a_mono_copy_at_48_khz() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut audio = live(folder.path(), "12-1", Quality::High);
+        // A 44.1 kHz microphone, resampled on the way.
+        let format = PcmFormat::new(44_100, 1).unwrap();
+        let samples: Vec<i16> = (0..44_100 * 2)
+            .map(|i| ((i as f32 * 440.0 * std::f32::consts::TAU / 44_100.0).sin() * 8000.0) as i16)
+            .collect();
+        for piece in samples.chunks(22_050) {
+            audio.append(format, piece).unwrap();
+        }
+        assert_eq!(audio.finish().unwrap().duration_ms, 2_000);
+        let opus = folder.path().join("12-1.opus");
+        assert_eq!(fs::read(&opus).unwrap()[28 + 9], 1);
+        assert_eq!(compact_audio::open(&opus).unwrap().count(), 2 * 16_000);
+        assert_eq!(files(folder.path()), ["12-1.opus"]);
+    }
+
+    #[test]
+    fn a_speech_quality_recording_is_a_wav_as_before() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut audio = live(folder.path(), "13-1", Quality::Speech);
+        let sent = speech(3.0);
+        for piece in sent.chunks(8000) {
+            audio.append(PcmFormat::SPEECH, piece).unwrap();
+        }
+        assert_eq!(audio.finish().unwrap().duration_ms, 3_000);
+        assert_eq!(files(folder.path()), ["13-1.wav"]);
+        let mut saved = hound::WavReader::open(folder.path().join("13-1.wav")).unwrap();
+        let read: Vec<i16> = saved.samples::<i16>().map(Result::unwrap).collect();
+        assert_eq!(read, sent);
+
+        // 48 kHz stereo sent for a speech-quality recording: only the WAV.
+        let mut audio = live(folder.path(), "14-1", Quality::Speech);
+        audio.append(stereo_48k(), &high(1.0, 2)).unwrap();
+        assert_eq!(audio.finish().unwrap().duration_ms, 1_000);
+        assert_eq!(files(folder.path()), ["13-1.wav", "14-1.wav"]);
+    }
+
+    #[test]
+    fn the_first_piece_fixes_the_format_and_every_piece_holds_whole_frames() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut audio = live(folder.path(), "15-1", Quality::High);
+        // Refused pieces fix nothing.
+        assert_eq!(
+            audio.append(stereo_48k(), &[1, 2, 3]).unwrap_err(),
+            INVALID_PCM
+        );
+        assert_eq!(audio.append(stereo_48k(), &[]).unwrap_err(), INVALID_PCM);
+        assert_eq!(
+            audio.append(PcmFormat::SPEECH, &[]).unwrap_err(),
+            INVALID_MONO_PCM
+        );
+        assert!(audio.converter.is_none() && audio.high.is_none());
+        audio.append(stereo_48k(), &high(0.5, 2)).unwrap();
+        for other in [
+            PcmFormat::SPEECH,
+            PcmFormat::new(48_000, 1).unwrap(),
+            PcmFormat::new(44_100, 2).unwrap(),
+        ] {
+            assert_eq!(
+                audio.append(other, &[0; 960]).unwrap_err(),
+                FORMAT_CHANGED,
+                "{other:?}"
+            );
+        }
+        assert_eq!(
+            audio.append(stereo_48k(), &[0; 961]).unwrap_err(),
+            INVALID_PCM
+        );
+        // Nothing refused reached either file.
+        assert_eq!(audio.finish().unwrap().duration_ms, 500);
+        let opus = folder.path().join("15-1.opus");
+        assert_eq!(compact_audio::open(&opus).unwrap().count(), 8_000);
+    }
+
+    #[test]
+    fn the_four_hour_limit_counts_speech_samples_before_anything_is_written() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut audio = live(folder.path(), "16-1", Quality::High);
+        // A one-second limit stands in for four hours.
+        audio.limit = 16_000;
+        // A 44.1 kHz stereo device: 0.6 s pieces.
+        let format = PcmFormat::new(44_100, 2).unwrap();
+        let piece = vec![1000i16; 2 * 26_460];
+        audio.append(format, &piece).unwrap();
+        audio.append(format, &piece).unwrap();
+        // 1.2 s counted: no more, and nothing of the refused piece is kept.
+        assert_eq!(audio.append(format, &piece).unwrap_err(), FOUR_HOURS);
+        assert_eq!(audio.append(format, &piece).unwrap_err(), FOUR_HOURS);
+        let outcome = audio.finish().unwrap();
+        assert_eq!(outcome.duration_ms, 1_200);
+        let opus = folder.path().join("16-1.opus");
+        assert_eq!(compact_audio::open(&opus).unwrap().count(), 19_200);
+
+        // At 16 kHz mono the limit is the recorder's, as before.
+        let mut audio = live(folder.path(), "17-1", Quality::Speech);
+        audio.limit = 16_000;
+        audio.append(PcmFormat::SPEECH, &[0; 16_000]).unwrap();
+        assert_eq!(
+            audio.append(PcmFormat::SPEECH, &[0; 10]).unwrap_err(),
+            FOUR_HOURS
+        );
+        audio.abandon();
+    }
+
+    #[test]
+    fn cancelling_removes_the_copy_and_abandoning_completes_it() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut audio = live(folder.path(), "18-1", Quality::High);
+        audio.append(stereo_48k(), &high(1.5, 2)).unwrap();
+        audio.cancel();
+        // The caller then removes the WAV and the record.
+        assert_eq!(files(folder.path()), ["18-1.wav"]);
+
+        // Replaced before it was finished (the window was reloaded): the
+        // WAV stays for a retry, and the copy is complete beside it, to take
+        // its place.
+        let mut audio = live(folder.path(), "19-1", Quality::High);
+        for piece in high(2.0, 2).chunks(2 * 24_000) {
+            audio.append(stereo_48k(), piece).unwrap();
+        }
+        audio.abandon();
+        assert_eq!(
+            files(folder.path()),
+            ["18-1.wav", "19-1.hq.opus", "19-1.wav"]
+        );
+        assert_eq!(
+            hound::WavReader::open(folder.path().join("19-1.wav"))
+                .unwrap()
+                .duration(),
+            2 * 16_000
+        );
+        assert!(compact_audio::compress(folder.path(), "19-1").unwrap() > 0);
+        assert_eq!(files(folder.path()), ["18-1.wav", "19-1.opus"]);
+        let opus = folder.path().join("19-1.opus");
+        assert_eq!(compact_audio::open(&opus).unwrap().count(), 2 * 16_000);
+    }
+
+    /// Records `sent` (48 kHz stereo) in speech quality, in half-second
+    /// pieces: what a high-quality recording whose copy fails must equal.
+    fn speech_quality_samples(folder: &Path, id: &str, sent: &[i16]) -> (Vec<i16>, Outcome) {
+        let mut audio = live(folder, id, Quality::Speech);
+        for piece in sent.chunks(2 * 24_000) {
+            audio.append(stereo_48k(), piece).unwrap();
+        }
+        let outcome = audio.finish().unwrap();
+        let path = folder.join(format!("{id}.wav"));
+        let samples = hound::WavReader::open(&path)
+            .unwrap()
+            .samples::<i16>()
+            .map(Result::unwrap)
+            .collect();
+        fs::remove_file(path).unwrap();
+        (samples, outcome)
+    }
+
+    fn wav_samples(path: &Path) -> Vec<i16> {
+        hound::WavReader::open(path)
+            .unwrap()
+            .samples::<i16>()
+            .map(Result::unwrap)
+            .collect()
+    }
+
+    /// A high-quality copy whose output breaks once `reader` is dropped: a
+    /// pipe nobody reads any more, as a full disk refuses every write. Its
+    /// headers are written already.
+    #[cfg(unix)]
+    fn breakable_copy() -> (compact_audio::OpusWriter<File>, std::io::PipeReader) {
+        let (reader, writer) = std::io::pipe().unwrap();
+        let file = File::from(std::os::fd::OwnedFd::from(writer));
+        let copy = compact_audio::OpusWriter::new(
+            file,
+            HIGH_RATE,
+            2,
+            HIGH_BITRATE_STEREO,
+            opus::Application::Audio,
+        )
+        .unwrap();
+        (copy, reader)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_copy_that_cannot_be_started_leaves_the_whole_recording_in_the_wav() {
+        let folder = tempfile::tempdir().unwrap();
+        let mut sent = high(4.0, 2);
+        sent.extend(vec![0; 2 * 48_000 * 6]);
+        sent.extend(high(2.0, 2));
+        let (expected, speech) = speech_quality_samples(folder.path(), "20-1", &sent);
+
+        // A full disk: the copy's first page cannot be written.
+        std::os::unix::fs::symlink("/dev/full", folder.path().join("21-1.hq.opus")).unwrap();
+        let (seen, sink) = collector();
+        let mut audio =
+            LiveAudio::begin(folder.path(), "21-1", Quality::High, fake_engine(), sink).unwrap();
+        for piece in sent.chunks(2 * 24_000) {
+            audio.append(stereo_48k(), piece).unwrap();
+        }
+        assert!(audio.high.is_none());
+        assert_eq!(audio.converter.as_ref().unwrap().high_channels(), None);
+        let outcome = audio.finish().unwrap();
+        // The recording and its text are whole, as in speech quality.
+        assert_eq!(outcome.duration_ms, 12_000);
+        assert_eq!(outcome.segments.len(), 2);
+        assert_eq!(outcome.segments, speech.segments);
+        assert_eq!(*seen.lock().unwrap(), outcome.segments);
+        // The WAV stays as the recording, every sample in it.
+        assert_eq!(files(folder.path()), ["21-1.wav"]);
+        assert_eq!(wav_samples(&folder.path().join("21-1.wav")), expected);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_copy_that_stops_being_written_leaves_the_whole_recording_in_the_wav() {
+        let folder = tempfile::tempdir().unwrap();
+        let sent = high(3.0, 2);
+        let (expected, speech) = speech_quality_samples(folder.path(), "22-0", &sent);
+
+        // The disk fills up a second into the recording.
+        let mut audio = live(folder.path(), "22-1", Quality::High);
+        let mut pieces = sent.chunks(2 * 24_000);
+        audio.append(stereo_48k(), pieces.next().unwrap()).unwrap();
+        let (copy, reader) = breakable_copy();
+        drop(reader);
+        audio.high = Some(copy);
+        for piece in pieces {
+            audio.append(stereo_48k(), piece).unwrap();
+        }
+        // The copy is gone, and no more of it is made.
+        assert!(audio.high.is_none());
+        assert_eq!(audio.converter.as_ref().unwrap().high_channels(), None);
+        assert_eq!(files(folder.path()), ["22-1.wav"]);
+        let outcome = audio.finish().unwrap();
+        assert_eq!(outcome.duration_ms, 3_000);
+        assert_eq!(outcome.segments, speech.segments);
+        assert_eq!(files(folder.path()), ["22-1.wav"]);
+        assert_eq!(wav_samples(&folder.path().join("22-1.wav")), expected);
+
+        // Or only once the recording ends: the copy cannot be ended.
+        let (expected, _) = speech_quality_samples(folder.path(), "23-0", &sent[..2 * 48_000]);
+        let mut audio = live(folder.path(), "23-1", Quality::High);
+        let mut pieces = sent.chunks(2 * 24_000);
+        audio.append(stereo_48k(), pieces.next().unwrap()).unwrap();
+        let (copy, reader) = breakable_copy();
+        audio.high = Some(copy);
+        // Less than a page: nothing of it is written before the end.
+        audio.append(stereo_48k(), pieces.next().unwrap()).unwrap();
+        drop(reader);
+        assert!(audio.high.is_some());
+        assert_eq!(audio.finish().unwrap().duration_ms, 1_000);
+        assert_eq!(files(folder.path()), ["22-1.wav", "23-1.wav"]);
+        assert_eq!(wav_samples(&folder.path().join("23-1.wav")), expected);
+
+        // Abandoned with a copy that cannot be ended: the WAV is left alone.
+        let mut audio = live(folder.path(), "24-1", Quality::High);
+        let mut pieces = sent.chunks(2 * 24_000);
+        audio.append(stereo_48k(), pieces.next().unwrap()).unwrap();
+        let (copy, reader) = breakable_copy();
+        audio.high = Some(copy);
+        drop(reader);
+        audio.abandon();
+        assert_eq!(files(folder.path()), ["22-1.wav", "23-1.wav", "24-1.wav"]);
+    }
+
+    #[test]
+    fn recording_quality_is_speech_unless_asked_for_high() {
+        assert_eq!(Quality::parse(None), Ok(Quality::Speech));
+        assert_eq!(Quality::parse(Some("speech")), Ok(Quality::Speech));
+        assert_eq!(Quality::parse(Some("high")), Ok(Quality::High));
+        for other in ["", "HIGH", "hq", "lossless"] {
+            assert!(Quality::parse(Some(other)).is_err(), "{other}");
+        }
     }
 
     #[test]

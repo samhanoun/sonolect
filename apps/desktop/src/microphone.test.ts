@@ -74,6 +74,52 @@ describe("microphone choice", () => {
     });
   });
 
+  it("asks for 48 kHz stereo in high quality, voice processing left on", () => {
+    assert.deepEqual(microphoneConstraints("", "high"), {
+      audio: { channelCount: { ideal: 2 }, sampleRate: { ideal: 48000 } },
+    });
+    assert.deepEqual(microphoneConstraints("abc", "high"), {
+      audio: {
+        deviceId: { exact: "abc" },
+        channelCount: { ideal: 2 },
+        sampleRate: { ideal: 48000 },
+      },
+    });
+    // Nothing turns echo cancellation, noise suppression or gain off.
+    const audio = microphoneConstraints("abc", "high")
+      .audio as MediaTrackConstraints;
+    for (const name of [
+      "echoCancellation",
+      "noiseSuppression",
+      "autoGainControl",
+    ] as const)
+      assert.equal(audio[name], undefined);
+    assert.deepEqual(microphoneConstraints("", "speech"), { audio: true });
+  });
+
+  it("keeps asking for high quality when it falls back to the default", async () => {
+    const asked: MediaStreamConstraints[] = [];
+    const opened = await openMicrophone(
+      "gone",
+      {
+        getUserMedia: async (constraints) => {
+          asked.push(constraints ?? {});
+          if (asked.length === 1)
+            throw Object.assign(new Error("gone"), {
+              name: "OverconstrainedError",
+            });
+          return {} as MediaStream;
+        },
+      },
+      "high",
+    );
+    assert.equal(opened.fellBack, true);
+    assert.deepEqual(asked, [
+      microphoneConstraints("gone", "high"),
+      microphoneConstraints("", "high"),
+    ]);
+  });
+
   it("remembers the choice and forgets it for the system default", () => {
     const storage = memoryStorage();
     assert.equal(loadMicDeviceId(storage), "");

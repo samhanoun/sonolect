@@ -72,3 +72,28 @@ Steps:
 - Screenshot or screen recording of recorder states: permission, recording, processing, done/error.
 - For API runs: request IDs/job IDs and audio MIME type/size.
 - For transcription runs: expected phrase and observed transcript.
+
+## High-quality recording pass (desktop app)
+
+CI covers the conversion maths (Rust unit tests) and the web side with a mocked desktop app. Use this pass in the packaged app on each platform, since only it shows what a real microphone, webview and playback device hand over.
+
+Prerequisites:
+
+- A packaged or `pnpm tauri dev` build, with the local speech model installed.
+- `ffprobe` (from ffmpeg) to read the saved files.
+- The captures folder: `com.sonolect.local/captures` in the user's local app-data directory.
+
+Steps:
+
+1. In Settings › Privacy & retention, choose `High quality (Opus, 48 kHz, stereo when the source has it)`. The Overview meter should read `48 kHz · stereo when available · on device`.
+2. Record a minute from the microphone in the Studio.
+   - While it records, the captures folder holds `{id}.wav` and `{id}.hq.opus`.
+   - Once it ends, only `{id}.opus` is left. `ffprobe {id}.opus` reports Opus at 48000 Hz; two channels on Windows with a stereo microphone, one on macOS and Linux (their webview reports no channel count).
+   - The transcript and its timings are as good as in speech quality.
+3. Choose `This computer's sound` in Settings › Microphone › Record from, play music with a clear stereo image, and record a minute with ten seconds of nothing playing in the middle.
+   - The saved `{id}.opus` is stereo at 48 kHz, and the quiet ten seconds are still there when played back. On Windows, try a playback device set to 44.1 kHz too.
+4. In the Library, press `Save audio` on both recordings. Each saves a `sonolect-recording-….opus` file that plays in another player. A recording made in speech quality saves a `.wav`.
+5. Start a long recording and end the app from the task manager. After relaunch, choose `Compress saved recordings` (or finish another recording): the leftover `{id}.hq.opus` becomes `{id}.opus`. The Library still plays the recording, from its WAV, which stays beside the Opus file because the crash cut the Opus file up to a second earlier; `Save audio` saves the Opus file. Pressing `Compress saved recordings` again says that every saved recording is already compressed, and answers at once.
+6. Dictation shortcuts, with Record from set to `This computer's sound`:
+   - With Sonolect in front, press `Ctrl+Shift+M` (`Cmd+Shift+M` on macOS): the dock says `Recording computer sound…`. Press it again to stop. Hold `Ctrl+Shift+V` (`Cmd+Shift+V` on macOS) for the same with hold-to-talk.
+   - With another app in front, the same shortcuts open the microphone, and the text is pasted into that app.

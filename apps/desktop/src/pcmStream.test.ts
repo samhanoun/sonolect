@@ -4,7 +4,10 @@ import {
   CAPTURE_PIECE_SAMPLES,
   PcmBatcher,
   PcmResampler,
+  capturePieceSamples,
   floatToPcm16,
+  interleave,
+  mixToMono,
   pcmBytes,
   pcmLevel,
 } from "./pcmStream";
@@ -116,5 +119,36 @@ describe("live recording audio", () => {
     const rest = batcher.flush()!;
     assert.equal(rest.length, 2);
     assert.equal(batcher.flush(), undefined);
+  });
+  it("sizes high-quality pieces as half a second of whole frames", () => {
+    assert.equal(capturePieceSamples(16000, 1), CAPTURE_PIECE_SAMPLES);
+    assert.equal(capturePieceSamples(48000, 2), 48000);
+    assert.equal(capturePieceSamples(44100, 2), 44100);
+    assert.equal(capturePieceSamples(44100, 1), 22050);
+    // An odd rate still ends each piece on a frame.
+    assert.equal(capturePieceSamples(22051, 2) % 2, 0);
+    // 96 kB a piece at 48 kHz stereo, far under the 2 MB a call may carry.
+    assert.equal(
+      pcmBytes(new Int16Array(capturePieceSamples(48000, 2))).length,
+      96000,
+    );
+  });
+
+  it("interleaves channels frame by frame and mixes them back to mono", () => {
+    const left = Float32Array.from([0.1, 0.2, 0.3]);
+    const right = Float32Array.from([-0.1, -0.2, -0.3, 9]);
+    const both = interleave([left, right]);
+    // A channel longer than the others is cut to whole frames.
+    assert.deepEqual(
+      [...both],
+      [...Float32Array.from([0.1, -0.1, 0.2, -0.2, 0.3, -0.3])],
+    );
+    assert.equal(interleave([left]), left);
+    assert.deepEqual([...mixToMono(both, 2)], [0, 0, 0]);
+    assert.deepEqual(
+      [...mixToMono(Float32Array.from([0.5, 0.25, 1, 0, 7]), 2)],
+      [0.375, 0.5],
+    );
+    assert.equal(mixToMono(left, 1), left);
   });
 });
