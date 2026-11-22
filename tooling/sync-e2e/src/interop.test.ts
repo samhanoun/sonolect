@@ -185,6 +185,14 @@ function assertServerBlind(
     )
     .join("\n");
   const log = server.logs.join("\n");
+  // The traffic is mostly base64url ciphertext, so a short word made of its
+  // letters (such as "Ana") turns up in it by chance in some runs. A text
+  // checked here is long enough, or holds a character base64url never uses.
+  for (const text of texts)
+    assert.ok(
+      text.length >= 6 || /[^A-Za-z0-9_-]/.test(text),
+      `"${text}" is too short to check: ciphertext may hold it by chance`,
+    );
   assert.ok(server.exchanges.length > 0, "the devices talked to the server");
   assert.ok(server.logs.length > 0, "the server logged its requests");
   for (const text of texts) {
@@ -303,7 +311,12 @@ describe("desktop and phone sync through the sync service", () => {
       language: "fr-FR",
       title: "Bakery",
       segments: [
-        { startMs: 0, endMs: 1_900, text: "Call the bakery", speaker: "Ana" },
+        {
+          startMs: 0,
+          endMs: 1_900,
+          text: "Call the bakery",
+          speaker: "Ana Lindqvist",
+        },
         {
           startMs: 1_900,
           endMs: 4_200,
@@ -353,7 +366,12 @@ describe("desktop and phone sync through the sync service", () => {
       durationMs: 4_200,
       origin: "desktop",
       segments: [
-        { startMs: 0, endMs: 1_900, text: "Call the bakery", speaker: "Ana" },
+        {
+          startMs: 0,
+          endMs: 1_900,
+          text: "Call the bakery",
+          speaker: "Ana Lindqvist",
+        },
         {
           startMs: 1_900,
           endMs: 4_200,
@@ -380,7 +398,7 @@ describe("desktop and phone sync through the sync service", () => {
     );
     assert.deepEqual(
       capture.segments.map((segment) => segment.speaker),
-      ["Ana", "Ben"],
+      ["Ana Lindqvist", "Ben"],
       "the segments the phone cannot show stay",
     );
     assert.equal(capture.hasAudio, true, "the desktop keeps its recording");
@@ -418,7 +436,7 @@ describe("desktop and phone sync through the sync service", () => {
       "Call the bakery",
       "Saturday",
       "Bakery",
-      "Ana",
+      "Ana Lindqvist",
     ]);
   });
 
@@ -761,7 +779,7 @@ describe("desktop and phone sync through the sync service", () => {
     await w.clock.advance(10_000);
     studioSave(desk, id, (list) =>
       list.map((segment, index) =>
-        index === 0 ? { ...segment, speaker: "Sam" } : segment,
+        index === 0 ? { ...segment, speaker: "Sam Okafor" } : segment,
       ),
     );
     await desk.sync();
@@ -778,7 +796,7 @@ describe("desktop and phone sync through the sync service", () => {
     assertServerBlind(w.server, desk.root(), [
       "um so buy milk",
       "Then call Ana",
-      "Sam",
+      "Sam Okafor",
     ]);
   });
 
