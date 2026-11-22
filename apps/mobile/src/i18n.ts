@@ -129,6 +129,8 @@ const en = {
       onlineEmpty: "The model sent back no text. Your note was not changed.",
       onlineTooLong:
         "This note is too long to send (over 12,000 characters). Nothing was sent.",
+      onlineNothingToSend:
+        "This note has no text left to send. Nothing was sent.",
       onlineFailed:
         "The provider request failed. Try again later. Your note was not changed.",
     },
@@ -593,6 +595,8 @@ const fr: Strings = {
         "Le modèle n'a renvoyé aucun texte. Votre note n'a pas changé.",
       onlineTooLong:
         "Cette note est trop longue pour être envoyée (plus de 12\u00a0000 caractères). Rien n'a été envoyé.",
+      onlineNothingToSend:
+        "Cette note n'a plus de texte à envoyer. Rien n'a été envoyé.",
       onlineFailed:
         "La requête au fournisseur a échoué. Réessayez plus tard. Votre note n'a pas changé.",
     },

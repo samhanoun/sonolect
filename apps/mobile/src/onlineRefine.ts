@@ -253,6 +253,18 @@ export function failureForStatus(status: number): OnlineFailure {
 }
 
 /**
+ * Why a text cannot be sent at all: nothing is left once it is trimmed, or
+ * it is over the limit. Undefined when it can be sent.
+ */
+export function onlineTextProblem(
+  text: string,
+): "empty" | "tooLong" | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return "empty";
+  return characterCount(trimmed) > MAX_ONLINE_CHARS ? "tooLong" : undefined;
+}
+
+/**
  * Sends one note to the provider. Never throws, and never puts the key or
  * the provider's error text in what it returns.
  */
@@ -266,10 +278,8 @@ export async function refineOnline(input: {
   timeoutMs?: number;
 }): Promise<OnlineResult> {
   const text = input.text.trim();
-  if (!text) return { status: "failed", reason: "empty" };
-  if (characterCount(text) > MAX_ONLINE_CHARS) {
-    return { status: "failed", reason: "tooLong" };
-  }
+  const problem = onlineTextProblem(text);
+  if (problem) return { status: "failed", reason: problem };
   // Checked again here, so no caller can put a bad model in the URL or a
   // line break in a header.
   if (

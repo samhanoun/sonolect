@@ -11,6 +11,7 @@ import type { OnlineEditing, OnlinePlan, OnlineProvider } from "./onlineRefine";
 import {
   isOnlineMode,
   normalizeOnlineEditing,
+  onlineTextProblem,
   planOnlineRefine,
   refineOnline,
 } from "./onlineRefine";
@@ -27,7 +28,37 @@ type PlanSettings = Pick<CompanionSettings, "privacyLevel"> & {
   onlineEditing?: unknown;
 };
 
-/** planOnlineRefine, with the key status of the chosen provider. */
+/**
+ * The text an online edit sends: the note cleaned on the phone, with the
+ * dictionary and the snippets applied, so the dictionary itself is never
+ * sent.
+ */
+export function onlineText(
+  turn: Pick<TranscriptTurn, "rawText" | "language">,
+  mode: RefinementMode,
+  dictionary: readonly DictionaryEntry[],
+  snippets: readonly Snippet[],
+): string {
+  return refineLocally(turn.rawText, mode, {
+    language: turn.language,
+    dictionary,
+    snippets,
+  });
+}
+
+export type OnlineEditPlan =
+  | OnlinePlan
+  /**
+   * The note cannot be sent at all: nothing is left to send, or it is too
+   * long. Nobody is asked and nothing is sent; the notice says why.
+   */
+  | { kind: "unsendable"; notice: OnlineNoticeKind };
+
+/**
+ * planOnlineRefine, with the key status of the chosen provider. Given the
+ * note's text (onlineText), a note that could never be sent is not asked
+ * for.
+ */
 export function planOnlineEdit(input: {
   mode: RefinementMode;
   settings: PlanSettings;
@@ -36,9 +67,10 @@ export function planOnlineEdit(input: {
   consentedNow: boolean;
   /** The note was made in Ephemeral: it is asked for like one. */
   ephemeralNote?: boolean | undefined;
-}): OnlinePlan {
+  text?: string | undefined;
+}): OnlineEditPlan {
   const editing = normalizeOnlineEditing(input.settings.onlineEditing);
-  return planOnlineRefine({
+  const plan = planOnlineRefine({
     mode: input.mode,
     settings: input.settings,
     hasKey: editing ? input.keySaved[editing.provider] : false,
@@ -46,6 +78,19 @@ export function planOnlineEdit(input: {
     consentedNow: input.consentedNow,
     ephemeralNote: input.ephemeralNote === true,
   });
+  if (
+    (plan.kind === "ask" || plan.kind === "send") &&
+    input.text !== undefined
+  ) {
+    const problem = onlineTextProblem(input.text);
+    if (problem === "empty") {
+      return { kind: "unsendable", notice: "onlineNothingToSend" };
+    }
+    if (problem === "tooLong") {
+      return { kind: "unsendable", notice: "onlineTooLong" };
+    }
+  }
+  return plan;
 }
 
 /** What the store keeps about the refinement in progress. */
@@ -140,24 +185,25 @@ export interface OnlineEditInput {
 export async function runOnlineEdit(
   input: OnlineEditInput,
 ): Promise<OnlineEditOutcome> {
+  const { turn, mode } = input;
+  // On the phone first: the dictionary and the snippets are applied here,
+  // so only the cleaned text is sent, never the dictionary itself. A note
+  // with nothing to send, or too long, is not asked for.
+  const text = onlineText(turn, mode, input.dictionary, input.snippets);
   const plan = planOnlineEdit({
     ...input,
+    text,
     consentedNow: consentCovers(input.consentedTo, input.settings),
   });
+  if (plan.kind === "unsendable") {
+    return { kind: "failed", notice: plan.notice };
+  }
   if (plan.kind === "ask") return { kind: "ask", editing: plan.editing };
-  if (plan.kind !== "send" || !isOnlineMode(input.mode)) {
+  if (plan.kind !== "send" || !isOnlineMode(mode)) {
     return { kind: "local" };
   }
   const { editing } = plan;
-  const { turn, mode } = input;
   input.onSend?.(editing);
-  // On the phone first: the dictionary and the snippets are applied here,
-  // so only the cleaned text is sent, never the dictionary itself.
-  const text = refineLocally(turn.rawText, mode, {
-    language: turn.language,
-    dictionary: input.dictionary,
-    snippets: input.snippets,
-  });
   let key: string | undefined;
   try {
     key = await input.readKey(editing.provider);

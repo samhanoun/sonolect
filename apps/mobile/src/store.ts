@@ -35,9 +35,9 @@ import {
   refineNoticeChange,
   replaceNotice,
 } from "./notices";
-import type { OnlineChoice } from "./onlineEdit";
-import { planOnlineEdit, runOnlineEdit } from "./onlineEdit";
-import type { OnlineEditing, OnlinePlan, OnlineProvider } from "./onlineRefine";
+import type { OnlineChoice, OnlineEditPlan } from "./onlineEdit";
+import { onlineText, planOnlineEdit, runOnlineEdit } from "./onlineEdit";
+import type { OnlineEditing, OnlineProvider } from "./onlineRefine";
 import {
   isOnlineEditingReady,
   normalizeOnlineEditing,
@@ -156,8 +156,11 @@ interface CompanionState {
     mode: RefinementMode,
     options?: { consentedTo?: OnlineChoice },
   ) => Promise<void>;
-  /** What a tap on a note's chip does: refine here, ask, or send. */
-  onlinePlan: (turnId: string, mode: RefinementMode) => OnlinePlan;
+  /**
+   * What a tap on a note's chip does: refine here, ask, or send. A note
+   * that could never be sent is not asked for: refine shows why.
+   */
+  onlinePlan: (turnId: string, mode: RefinementMode) => OnlineEditPlan;
   deleteTurn: (turnId: string) => Promise<void>;
   togglePin: (turnId: string) => Promise<void>;
   /**
@@ -1094,7 +1097,8 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     },
 
     onlinePlan: (turnId, mode) => {
-      const { settings, onlineKeySaved } = get();
+      const { settings, onlineKeySaved, dictionary, snippets } = get();
+      const turn = findTurn(turnId);
       return planOnlineEdit({
         mode,
         settings,
@@ -1102,6 +1106,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         web: Platform.OS === "web",
         consentedNow: false,
         ephemeralNote: ephemeralNotes.has(turnId),
+        text: turn ? onlineText(turn, mode, dictionary, snippets) : undefined,
       });
     },
 

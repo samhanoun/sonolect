@@ -326,16 +326,83 @@ describe("failures", () => {
     });
   });
 
-  it("sends nothing for a note over 12,000 characters", async () => {
+  it("sends nothing for a note over 12,000 characters, and does not ask", async () => {
     // Different words: the clean-up would merge repeated ones.
     const rawText = Array.from({ length: 2500 }, (_, i) => `w${i}`).join(" ");
     const long = { ...TURN, rawText };
-    const { input, calls } = setup({ turn: long, current: () => long });
-    assert.deepEqual(await runOnlineEdit(input), {
-      kind: "failed",
+    for (const consentedTo of [EDITING, undefined]) {
+      const { input, calls, keyReads, sends } = setup({
+        turn: long,
+        current: () => long,
+        consentedTo,
+      });
+      assert.deepEqual(await runOnlineEdit(input), {
+        kind: "failed",
+        notice: "onlineTooLong",
+      });
+      assert.equal(calls.length, 0);
+      assert.equal(keyReads.length, 0);
+      assert.equal(sends.length, 0);
+    }
+  });
+
+  it("does not ask for a note with nothing left to send", async () => {
+    // Saved as typed, but the clean-up removes every word.
+    const fillers = { ...TURN, rawText: "um uh", source: "typed" as const };
+    for (const consentedTo of [EDITING, undefined]) {
+      const { input, calls, keyReads, sends } = setup({
+        turn: fillers,
+        current: () => fillers,
+        consentedTo,
+      });
+      assert.deepEqual(await runOnlineEdit(input), {
+        kind: "failed",
+        notice: "onlineNothingToSend",
+      });
+      assert.equal(calls.length, 0);
+      assert.equal(keyReads.length, 0);
+      assert.equal(sends.length, 0);
+    }
+  });
+
+  it("plans no dialog for a note that could never be sent", () => {
+    const plan = (text: string | undefined, consentedNow = false) =>
+      planOnlineEdit({
+        mode: "rewrite",
+        settings: { privacyLevel: "local_first", onlineEditing: EDITING },
+        keySaved: { openrouter: true, opencode: false },
+        web: false,
+        consentedNow,
+        text,
+      });
+    assert.deepEqual(plan(""), {
+      kind: "unsendable",
+      notice: "onlineNothingToSend",
+    });
+    assert.deepEqual(plan("  \n "), {
+      kind: "unsendable",
+      notice: "onlineNothingToSend",
+    });
+    assert.deepEqual(plan("x".repeat(12_001), true), {
+      kind: "unsendable",
       notice: "onlineTooLong",
     });
-    assert.equal(calls.length, 0);
+    assert.equal(plan("x".repeat(12_000)).kind, "ask");
+    assert.equal(plan("Thursday works.").kind, "ask");
+    // Without the text, only the consent is planned.
+    assert.equal(plan(undefined).kind, "ask");
+    // Clean up stays on the phone, whatever its text.
+    assert.equal(
+      planOnlineEdit({
+        mode: "dictate",
+        settings: { privacyLevel: "local_first", onlineEditing: EDITING },
+        keySaved: { openrouter: true, opencode: false },
+        web: false,
+        consentedNow: false,
+        text: "",
+      }).kind,
+      "local",
+    );
   });
 
   it("asks to set up again when the key is gone at send time", async () => {

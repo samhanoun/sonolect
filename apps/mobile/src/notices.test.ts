@@ -410,7 +410,7 @@ describe("online editing notices", () => {
     "failed",
   ] as const;
 
-  it("has the ten kinds of the plan, all cleared like refineFailed", () => {
+  it("has the online kinds, all cleared like refineFailed", () => {
     assert.deepEqual(ONLINE_KINDS, [
       "onlineSetup",
       "onlineKeyRejected",
@@ -421,6 +421,7 @@ describe("online editing notices", () => {
       "onlineNetwork",
       "onlineEmpty",
       "onlineTooLong",
+      "onlineNothingToSend",
       "onlineFailed",
     ]);
     for (const kind of ONLINE_KINDS) {
