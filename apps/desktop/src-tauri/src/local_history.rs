@@ -329,18 +329,31 @@ pub fn list_local_captures(app: tauri::AppHandle) -> Result<Vec<Listed>, String>
     // The recording in progress joins the library once it is finished.
     list_directory(&directory(&app)?, super::streaming::live_id().as_deref())
 }
-/// Whether playback asks for Ogg: "ogg" or "wav", WAV when not given.
-fn prefers_ogg(format: Option<&str>) -> Result<bool, String> {
+/// How the audio of a recording is asked for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum AudioRead {
+    /// Every recording as WAV, for a webview that cannot play Ogg Opus.
+    Wav,
+    /// A compressed recording as its Ogg Opus file, for one that can.
+    Ogg,
+    /// The file the recording is kept in, to be saved elsewhere.
+    File,
+}
+/// "wav" (the default when not given), "ogg" or "file".
+fn audio_read(format: Option<&str>) -> Result<AudioRead, String> {
     match format {
-        None | Some("wav") => Ok(false),
-        Some("ogg") => Ok(true),
+        None | Some("wav") => Ok(AudioRead::Wav),
+        Some("ogg") => Ok(AudioRead::Ogg),
+        Some("file") => Ok(AudioRead::File),
         Some(_) => Err("Invalid audio format.".into()),
     }
 }
 /// The saved audio of one recording, as a raw binary response, so the studio
 /// can play it back and jump to a segment. With `format` "ogg", a compressed
 /// recording comes as its Ogg Opus file, for a webview that plays it; with
-/// "wav" (the default) every recording comes as WAV.
+/// "wav" (the default) every recording comes as WAV. With "file" it comes as
+/// it is kept, its Opus file when it has one, so "Save audio" can save it
+/// (a high-quality recording, say) without converting it.
 #[tauri::command]
 pub async fn read_local_capture_audio(
     app: tauri::AppHandle,
@@ -348,10 +361,15 @@ pub async fn read_local_capture_audio(
     format: Option<String>,
 ) -> Result<tauri::ipc::Response, String> {
     valid_id(&id)?;
-    let prefer_ogg = prefers_ogg(format.as_deref())?;
+    let read = audio_read(format.as_deref())?;
     tauri::async_runtime::spawn_blocking(move || {
-        super::compact_audio::read_for_playback(&directory(&app)?, &id, prefer_ogg)
-            .map(tauri::ipc::Response::new)
+        let directory = directory(&app)?;
+        match read {
+            AudioRead::Wav => super::compact_audio::read_for_playback(&directory, &id, false),
+            AudioRead::Ogg => super::compact_audio::read_for_playback(&directory, &id, true),
+            AudioRead::File => super::compact_audio::read_saved_file(&directory, &id),
+        }
+        .map(tauri::ipc::Response::new)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1000,13 +1018,14 @@ mod tests {
     }
 
     #[test]
-    fn playback_takes_ogg_or_wav_and_nothing_else() {
-        assert_eq!(prefers_ogg(None), Ok(false));
-        assert_eq!(prefers_ogg(Some("wav")), Ok(false));
-        assert_eq!(prefers_ogg(Some("ogg")), Ok(true));
-        for format in ["", "OGG", "opus", "mp3", "../wav"] {
+    fn audio_is_read_as_ogg_wav_or_its_file_and_nothing_else() {
+        assert_eq!(audio_read(None), Ok(AudioRead::Wav));
+        assert_eq!(audio_read(Some("wav")), Ok(AudioRead::Wav));
+        assert_eq!(audio_read(Some("ogg")), Ok(AudioRead::Ogg));
+        assert_eq!(audio_read(Some("file")), Ok(AudioRead::File));
+        for format in ["", "OGG", "opus", "mp3", "../wav", "FILE", "hq.opus"] {
             assert_eq!(
-                prefers_ogg(Some(format)),
+                audio_read(Some(format)),
                 Err("Invalid audio format.".to_string())
             );
         }

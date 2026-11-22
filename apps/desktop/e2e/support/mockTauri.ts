@@ -72,7 +72,11 @@ const toneOpus = readFileSync(
  *
  * Live recordings are imitated too: audio sent with `capture_append` is
  * counted, and every three seconds of it produces one segment of live text
- * ("Part 1.", "Part 2." and so on) as a `capture-partial` event.
+ * ("Part 1.", "Part 2." and so on) as a `capture-partial` event. A piece is
+ * 16 kHz mono unless its headers give another rate and channel count, as a
+ * high-quality recording's do; such a recording is kept as Opus once it ends.
+ * `read_local_capture_audio` with the format "file" sends what a recording
+ * is kept as: Ogg Opus once compressed, WAV before.
  *
  * With `recorderLimitMs`, the recorder is full after that much audio and
  * refuses more, as the real one does after four hours.
@@ -99,6 +103,9 @@ const toneOpus = readFileSync(
  * model has to be downloaded first. A command named in `hold` stops halfway
  * until `releaseNative` lets it finish; a held detection also ends when it
  * is cancelled.
+ *
+ * The dictation shortcuts register with the global-shortcut plugin as they
+ * do in the app; `pressShortcut` fires them.
  */
 export async function installMockTauri(
   page: Page,
@@ -182,7 +189,8 @@ export async function installMockTauri(
         Uint8Array.from(atob(base64), (char) => char.charCodeAt(0)).buffer;
       const audio = (id: unknown, format: unknown) => {
         format ??= "wav";
-        if (format !== "wav" && format !== "ogg") throw "Invalid audio format.";
+        if (format !== "wav" && format !== "ogg" && format !== "file")
+          throw "Invalid audio format.";
         if (format === "wav" || !compressed.has(id as string))
           return bytes(toneWav);
         // Ogg's signature and nothing a decoder can use.
@@ -200,7 +208,12 @@ export async function installMockTauri(
             callbacks.get(listener.handler)?.({ event, id, payload });
       };
       type Segment = { startMs: number; endMs: number; text: string };
-      let live: { id: string; bytes: number; segments: Segment[] } | undefined;
+      /** `bytes` counts the audio as 16 kHz mono 16-bit, 32 bytes a ms. */
+      let live:
+        | { id: string; bytes: number; segments: Segment[]; high: boolean }
+        | undefined;
+      /** The dictation shortcuts, by accelerator, as the app registered them. */
+      const shortcuts = new Map<string, { channel: number; next: number }>();
       const BYTES_PER_PART = 3 * 32000;
       const hear = (final: boolean) => {
         if (!live) return;
@@ -255,6 +268,14 @@ export async function installMockTauri(
         __sonolectE2eRelease: release,
         __sonolectE2eListening: (event: string) =>
           [...listeners.values()].some((listener) => listener.event === event),
+        __sonolectE2eShortcuts: () => [...shortcuts.keys()],
+        __sonolectE2ePressShortcut: (position: number, state: string) => {
+          const [accelerator, shortcut] = [...shortcuts.entries()][position]!;
+          callbacks.get(shortcut.channel)?.({
+            index: shortcut.next++,
+            message: { shortcut: accelerator, id: position, state },
+          });
+        },
         __TAURI_INTERNALS__: {
           metadata: {
             currentWindow: { label: "main" },
@@ -274,13 +295,21 @@ export async function installMockTauri(
           ) => {
             if (command === "capture_append") {
               const pcm = args as unknown as Uint8Array;
-              const capture = options?.headers?.["x-sonolect-capture"];
-              calls.push({ command, args: { capture, bytes: pcm.length } });
+              const headers = options?.headers ?? {};
+              const capture = headers["x-sonolect-capture"];
+              const rate = Number(headers["x-sonolect-rate"] ?? 16000);
+              const channels = Number(headers["x-sonolect-channels"] ?? 1);
+              calls.push({
+                command,
+                args: { capture, bytes: pcm.length, rate, channels },
+              });
               if (!live || live.id !== capture)
                 throw "This recording is no longer in progress.";
+              if (pcm.length % (2 * channels))
+                throw "Invalid 16-bit PCM audio or frame size.";
               if (recorderLimitMs && live.bytes >= recorderLimitMs * 32)
                 throw "The recording reached the four-hour limit.";
-              live.bytes += pcm.length;
+              live.bytes += (pcm.length / channels / rate) * 16000;
               hear(false);
               return Math.round(live.bytes / 32);
             }
@@ -304,6 +333,7 @@ export async function installMockTauri(
                   id: `1700000000001-${nextId++}`,
                   bytes: 0,
                   segments: [],
+                  high: args.quality === "high",
                 };
                 return live.id;
               case "capture_finish": {
@@ -313,6 +343,8 @@ export async function installMockTauri(
                 const finished = live;
                 live = undefined;
                 if (!finished.bytes) throw "No audio was recorded.";
+                // A high-quality recording ends as its 48 kHz Opus file.
+                if (finished.high) compressed.add(finished.id);
                 const text = finished.segments
                   .map((segment) => segment.text)
                   .join(" ");
@@ -353,6 +385,13 @@ export async function installMockTauri(
               case "stop_system_audio_capture":
                 clearInterval(systemFeed);
                 systemFeed = undefined;
+                return null;
+              case "plugin:global-shortcut|register":
+                for (const accelerator of args.shortcuts as string[])
+                  shortcuts.set(accelerator, {
+                    channel: (args.handler as { id: number }).id,
+                    next: 0,
+                  });
                 return null;
               case "insert_text_into_active_app":
                 return {
@@ -612,6 +651,63 @@ export async function installMockTauri(
       speakerTurns: options.speakerTurns ?? {},
       hold: options.hold ?? [],
     },
+  );
+}
+
+type ShortcutHooks = {
+  __sonolectE2eShortcuts: () => string[];
+  __sonolectE2ePressShortcut: (position: number, state: string) => void;
+};
+
+/**
+ * Presses or releases a dictation shortcut as the global-shortcut plugin
+ * reports it: "toggle" is the first one the app registers, "hold" the
+ * push-to-talk one. `focused` is what `document.hasFocus()` answers from
+ * then on: whether Sonolect is the app in front.
+ */
+export async function pressShortcut(
+  page: Page,
+  shortcut: "toggle" | "hold",
+  state: "Pressed" | "Released",
+  focused: boolean,
+) {
+  await page.waitForFunction(
+    () =>
+      (window as typeof window & ShortcutHooks).__sonolectE2eShortcuts()
+        .length >= 2,
+  );
+  await page.evaluate(
+    ({ position, state, focused }) => {
+      document.hasFocus = () => focused;
+      (window as typeof window & ShortcutHooks).__sonolectE2ePressShortcut(
+        position,
+        state,
+      );
+    },
+    { position: shortcut === "toggle" ? 0 : 1, state, focused },
+  );
+}
+
+/** Keeps the constraints of every microphone request from now on. */
+export function watchMicrophoneRequests(page: Page) {
+  return page.evaluate(() => {
+    const devices = navigator.mediaDevices;
+    const original = devices.getUserMedia.bind(devices);
+    const asked: unknown[] = [];
+    Object.assign(window, { __sonolectE2eMicrophoneRequests: asked });
+    devices.getUserMedia = (constraints) => {
+      asked.push(constraints);
+      return original(constraints);
+    };
+  });
+}
+
+/** The constraints of each microphone request since `watchMicrophoneRequests`. */
+export function microphoneRequests(page: Page) {
+  return page.evaluate(
+    () =>
+      (window as typeof window & { __sonolectE2eMicrophoneRequests: unknown[] })
+        .__sonolectE2eMicrophoneRequests,
   );
 }
 

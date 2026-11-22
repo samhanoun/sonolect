@@ -365,4 +365,25 @@ export const de: Partial<Record<LocaleKeys, string>> = {
     "Das Sprechermodell kann nicht geladen werden: {reason}",
   "native.speakerModelFailed":
     "Das Sprechermodell ist fehlgeschlagen: {reason}",
+  // High-quality recording
+  "studio.storage.format": "Aufnahmen speichern als",
+  "studio.storage.wav": "Sprachqualität (WAV, 16 kHz mono)",
+  "studio.storage.opus": "Sprachqualität, komprimiert (Opus, 10× kleiner)",
+  "studio.storage.hq": "Hohe Qualität (Opus, 48 kHz, Stereo bei Stereoquelle)",
+  "studio.storage.savedWav":
+    "Neue Aufnahmen werden als WAV in Sprachqualität gespeichert. Bereits komprimierte Aufnahmen bleiben komprimiert.",
+  "studio.storage.savedHq":
+    "Neue Aufnahmen werden mit 48 kHz gespeichert, in Stereo, wenn die Quelle Stereo ist. Importierte Dateien und ältere Aufnahmen werden in Sprachqualität komprimiert.",
+  "studio.signal.meta": "16 kHz · mono · auf dem Gerät",
+  "studio.signal.metaHigh": "48 kHz · Stereo, wenn verfügbar · auf dem Gerät",
+  "studio.library.saveAudio": "Audio speichern",
+  "studio.source.systemHint":
+    "Die Aufnahmetaste nimmt auf, was auf diesem Computer abgespielt wird, etwa ein Meeting oder ein Video. Das gilt auch für ein Diktat-Tastenkürzel, das gedrückt wird, während Sonolect im Vordergrund ist. Diktate in anderen Apps und die Blase nutzen immer das Mikrofon.",
+  "native.invalidPcmFormat": "Ungültige Abtastrate oder Kanalanzahl.",
+  "native.invalidPcmFrames":
+    "Ungültiges 16-Bit-PCM-Audio oder ungültige Framegröße.",
+  "native.pcmFormatChanged":
+    "Das Audioformat hat sich während der Aufnahme geändert.",
+  "native.invalidQuality": "Ungültige Aufnahmequalität.",
+  "native.cannotConvert": "Audio kann nicht umgewandelt werden: {reason}",
 };

@@ -2,6 +2,7 @@
  * The browser and desktop halves of a live recording: reading the microphone
  * as raw samples, and the native commands that record them.
  */
+import type { CaptureQuality } from "./captureStorage";
 import type { DesktopWhisperResult } from "./desktopWhisper";
 import {
   LiveCaptureSession,
@@ -11,13 +12,17 @@ import {
   type LiveCaptureSettings,
   type LiveCaptureTransport,
   type LivePartialEvent,
+  type PcmFormat,
 } from "./liveCapture";
 import { localizeNativeMessage } from "./nativeMessages";
+import { interleave } from "./pcmStream";
 import { nativeProviderCall } from "./providerSettings";
 import type { TranscriptSegment } from "./segmentEditor";
 
 export type PcmSource = {
   sampleRate: number;
+  /** Channels in each block, interleaved: 1, or 2 in high quality. */
+  channels?: number;
   /** "worklet" on the audio thread, or the older "processor" fallback. */
   kind: "worklet" | "processor";
   close: () => Promise<void>;
@@ -25,25 +30,48 @@ export type PcmSource = {
 
 const WORKLET_URL = "/pcm-capture.worklet.js";
 
-function createContext(): AudioContext {
+/**
+ * The context the microphone is read in: at 16 kHz for speech, which most
+ * webviews resample to themselves when asked, or at 48 kHz in high quality.
+ * A webview that refuses the rate gives its own, which the web layer (for
+ * speech) or the native side (in high quality) converts.
+ */
+function createContext(sampleRate: number): AudioContext {
   try {
-    // Most webviews resample the microphone themselves when asked.
-    return new AudioContext({ sampleRate: 16000 });
+    return new AudioContext({ sampleRate });
   } catch {
     return new AudioContext();
   }
 }
 
 /**
- * Reads a microphone stream as mono blocks of samples. `onBlock` gets each
- * block with the rate it was captured at.
+ * How many channels to record: two only in high quality, and only from a
+ * microphone that reports two. WebKit reports no channel count, so its
+ * microphones record mono; a node set to two channels would only copy a
+ * mono source, so it cannot tell either.
+ */
+export function captureChannels(
+  stream: MediaStream,
+  quality: CaptureQuality = "speech",
+): 1 | 2 {
+  if (quality !== "high") return 1;
+  const track = stream.getAudioTracks?.()[0];
+  return track?.getSettings?.().channelCount === 2 ? 2 : 1;
+}
+
+/**
+ * Reads a microphone stream as blocks of samples: mono, or in high quality
+ * the microphone's two channels interleaved when it has them. `onBlock` gets
+ * each block with the rate it was captured at and its channel count.
  */
 export async function openPcmSource(
   stream: MediaStream,
-  onBlock: (block: Float32Array, sampleRate: number) => void,
+  onBlock: (block: Float32Array, sampleRate: number, channels?: number) => void,
+  quality: CaptureQuality = "speech",
 ): Promise<PcmSource> {
-  const context = createContext();
+  const context = createContext(quality === "high" ? 48000 : 16000);
   const sampleRate = context.sampleRate;
+  const channels = captureChannels(stream, quality);
   const source = context.createMediaStreamSource(stream);
   // Silent path to the output, so every webview keeps pulling audio through.
   const sink = context.createGain();
@@ -57,18 +85,27 @@ export async function openPcmSource(
     const worklet = new AudioWorkletNode(context, "pcm-capture", {
       numberOfInputs: 1,
       numberOfOutputs: 1,
-      channelCount: 1,
+      channelCount: channels,
       channelCountMode: "explicit",
+      processorOptions: { channels },
     });
     worklet.port.onmessage = (event: MessageEvent<Float32Array>) =>
-      onBlock(event.data, sampleRate);
+      onBlock(event.data, sampleRate, channels);
     node = worklet;
     kind = "worklet";
   } catch {
     // Webviews without audio worklets still have the script processor.
-    const processor = context.createScriptProcessor(4096, 1, 1);
+    const processor = context.createScriptProcessor(4096, channels, channels);
     processor.onaudioprocess = (event) =>
-      onBlock(event.inputBuffer.getChannelData(0).slice(), sampleRate);
+      onBlock(
+        interleave(
+          Array.from({ length: channels }, (_, index) =>
+            event.inputBuffer.getChannelData(index).slice(),
+          ),
+        ),
+        sampleRate,
+        channels,
+      );
     node = processor;
     kind = "processor";
   }
@@ -82,6 +119,7 @@ export async function openPcmSource(
 
   return {
     sampleRate,
+    channels,
     kind,
     close: async () => {
       source.disconnect();
@@ -94,6 +132,26 @@ export async function openPcmSource(
   };
 }
 
+/**
+ * The headers of one piece: the recording it belongs to and, for a
+ * high-quality recording, its rate and channels. A piece without them is
+ * 16 kHz mono, as the native side has always taken it.
+ */
+export function captureAppendHeaders(
+  captureId: string,
+  format?: PcmFormat,
+): Record<string, string> {
+  return {
+    "x-sonolect-capture": captureId,
+    ...(format
+      ? {
+          "x-sonolect-rate": String(format.rate),
+          "x-sonolect-channels": String(format.channels),
+        }
+      : {}),
+  };
+}
+
 /** The desktop app's recorder commands. */
 export const nativeLiveCapture: LiveCaptureTransport = {
   begin: (settings: LiveCaptureSettings) =>
@@ -102,11 +160,14 @@ export const nativeLiveCapture: LiveCaptureTransport = {
       modelPath: settings.modelPath?.trim() || undefined,
       provider: settings.provider,
       model: settings.model,
+      quality: settings.quality,
     }),
-  append: (captureId, pcm) =>
-    nativeProviderCall<number>("capture_append", pcm, {
-      "x-sonolect-capture": captureId,
-    }),
+  append: (captureId, pcm, format) =>
+    nativeProviderCall<number>(
+      "capture_append",
+      pcm,
+      captureAppendHeaders(captureId, format),
+    ),
   finish: (captureId) =>
     nativeProviderCall<LiveCaptureNativeResult>("capture_finish", {
       id: captureId,
@@ -161,10 +222,14 @@ export async function recordLive(
   });
   let source: PcmSource;
   try {
-    source = await open(stream, (block, sampleRate) => {
-      heard();
-      session.push(block, sampleRate);
-    });
+    source = await open(
+      stream,
+      (block, sampleRate, channels) => {
+        heard();
+        session.push(block, sampleRate, channels);
+      },
+      settings.quality,
+    );
   } catch {
     await session.cancel().catch(() => undefined);
     return undefined;

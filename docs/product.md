@@ -27,10 +27,12 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 ### Voice Capture
 
 - System and microphone audio capture with device selection. On desktop, Settings › Microphone picks the input and tests its level without recording.
-- This computer's sound as the source of a recording on desktop (a meeting, a video): Settings › Microphone › Record from. On Windows it needs nothing else, since the app records the default playback device through WASAPI loopback. On Linux it needs PulseAudio or PipeWire with `pactl` and `parec`; on macOS it needs the BlackHole audio driver and `ffmpeg`. The choice is only offered where it can work. Dictation with the hotkeys or the bubble always uses the microphone.
+- This computer's sound as the source of a recording on desktop (a meeting, a video): Settings › Microphone › Record from. On Windows it needs nothing else, since the app records the default playback device through WASAPI loopback. On Linux it needs PulseAudio or PipeWire with `pactl` and `parec`; on macOS it needs the BlackHole audio driver and `ffmpeg`. The choice is only offered where it can work. A dictation shortcut pressed while Sonolect is in front starts a Studio recording, which follows Record from. Dictation into other apps and the bubble always use the microphone: what is pasted there is your own words.
 - Real-time waveform visualisation, driven by the microphone level
 - Recordings of up to four hours on desktop. The audio is written to disk while you speak, so nothing is lost if the app stops, and it is transcribed at each pause.
-- Recordings are stored at 16 kHz mono, the format the speech engine works with, as WAV or as Ogg Opus at about a tenth of the size (Settings › Privacy & retention). Compressed recordings play back from the Opus file itself, or as WAV where the system cannot play Opus, and can be transcribed again.
+- Recordings are stored at 16 kHz mono, the format the speech engine works with, as WAV or as Ogg Opus at about a tenth of the size (Settings › Privacy & retention › Save recordings as). Compressed recordings play back from the Opus file itself, or as WAV where the system cannot play Opus, and can be transcribed again.
+- High quality, the third choice there, keeps live recordings (microphone and computer sound) as 48 kHz Ogg Opus, in stereo when the source has it: 96 kbit/s in stereo, 64 kbit/s in mono, about 175 MB for four hours of stereo. The speech engine still gets 16 kHz mono, written beside it as a WAV that is deleted when the recording ends. Should the 48 kHz copy fail to be written (a full disk, say), the recording goes on and is kept in speech quality. Microphone voice processing stays on. Imported files stay in speech quality. Online speech models still receive only 16 kHz mono; the high-quality audio never leaves the device.
+- Save audio, on each recording in the Library, downloads the file the recording is kept as (its Opus file, or its WAV), the way a transcript is exported. It is read from the device; nothing is uploaded. A note that came through sync has no audio here, so it has no Save audio.
 
 ### Dictate Anywhere
 
@@ -77,6 +79,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 
 - Plain text, Markdown, JSON
 - Subtitle formats: SRT, VTT
+- A recording's audio, as the Opus or WAV file it is kept as (desktop Library › Save audio)
 - Clipboard copy with formatting preserved
 - Future: PDF, DOCX, direct integrations
 
