@@ -462,6 +462,32 @@ describe("single-note writes (sync)", () => {
   });
 });
 
+describe("sanitizeTurn segments", () => {
+  it("keeps a dictation's timings and drops broken ones", () => {
+    const segments = [
+      { startMs: 0, endMs: 900, text: "raw", approx: true as const },
+      { startMs: 1_000, endMs: 1_800, text: "1" },
+    ];
+    assert.deepEqual(
+      sanitizeTurn({ ...note(1), segments }, NOW)?.segments,
+      segments,
+    );
+    const result = sanitizeTurn(
+      {
+        ...note(1),
+        segments: [{ startMs: 5, endMs: 1, text: "x" }, "y", null],
+      },
+      NOW,
+    );
+    assert.ok(result);
+    assert.equal("segments" in result, false);
+    assert.equal(
+      "segments" in (sanitizeTurn({ ...note(1), segments: "x" }, NOW) ?? {}),
+      false,
+    );
+  });
+});
+
 describe("v0.1 sample transcripts", () => {
   it("are the three sentences v0.1 saved", () => {
     assert.equal(V01_SAMPLE_TRANSCRIPTS.length, 3);

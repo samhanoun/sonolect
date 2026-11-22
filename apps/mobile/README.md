@@ -60,6 +60,18 @@ Notes sync between the user's own devices through `packages/sync-core`, with
 no account: a random 32-byte key, shared by QR code or a typed code. The
 server stores only ciphertext. Recordings don't sync (the phone keeps none).
 
+- **Segments**: a dictation sends its segments with it, so the desktop gets
+  when each part was said and its studio can save the note's subtitles. A
+  segment the phone's clock timed carries `approx: true`, which sync-core
+  and the desktop keep like any field they do not know. The desktop's
+  studio marks the parts it timed by estimate the same way. The phone shows
+  a synced note's segments (without speakers) for its _Subtitles_ when they
+  all fit its limits (2,000 segments, 200,000 characters, six hours), and
+  none otherwise. A note of 0 ms, such as a typed note, or one whose
+  segments all last 0 ms, shows none either. The phone never changes a
+  synced note's segments: a refine changes the refined text only, and
+  another device's segments go back as they came.
+
 - **Off unless the build sets a server**: `EXPO_PUBLIC_SONOLECT_SYNC_URL`
   (`src/features.ts`, checked by `config/release.cjs`). It must be https;
   development builds may also use `http://127.0.0.1`, `http://localhost` or,
@@ -99,8 +111,13 @@ This build runs entirely on the phone. The switch is `API_FEATURES_ENABLED`
 in `src/features.ts`, and it is `false`.
 
 - **Works**: on-device dictation, the library on the phone, local clean-up,
-  Summary, Tasks, the Reader, export (Markdown, plain text or JSON) and
-  automatic deletion of old notes (Settings, _Keep notes for_).
+  Summary, Tasks, the Reader, export (Markdown, plain text or JSON),
+  subtitles of a dictated note (SRT or WebVTT, timed by the recognizer where
+  it reports word times and by the app's clock otherwise; the WebVTT file
+  says when the times are approximate; the clean-up runs over the whole
+  dictation, so a sentence or a dictionary phrase that goes on into the next
+  cue reads as it does in the note), Copy with the note's paragraphs and lists kept, and automatic
+  deletion of old notes (Settings, _Keep notes for_).
 - **Hidden**: the API's plaintext sync, _Rewrite_ and _Reply_ through the
   API, audio upload, and
   the Settings API section (URL, token, connection test). The library shows
@@ -203,9 +220,10 @@ involved, and the provider bills the user's own account.
   it. Picking another provider turns the switch off again.
 - **What is sent.** The text of that one note, after the phone has applied
   the dictionary and snippets, with a fixed instruction for the mode and
-  the dictation language. Never the audio, other notes or the dictionary
-  itself. Notes over 12,000 characters, or with no text left once cleaned
-  up, are not sent, and the app does not ask for them.
+  the dictation language. Never the audio, the times of a dictation's
+  parts, other notes or the dictionary itself. Notes over 12,000
+  characters, or with no text left once cleaned up, are not sent, and the
+  app does not ask for them.
 - **The key** is kept in SecureStore (iOS Keychain or Android Keystore)
   with `WHEN_UNLOCKED_THIS_DEVICE_ONLY`, one item per provider
   (`sonolect.mobile.providerKey.openrouter` and `.opencode`). It stays on
@@ -222,13 +240,15 @@ involved, and the provider bills the user's own account.
   Nothing goes out at launch.
 - **Results and failures.** The result replaces the note's text and keeps
   the original, so _Clean up_ brings it back. With sync on, the edited note
-  syncs to the user's other devices like any other edit. A rejected key,
-  missing credits, a rate limit, an unknown model, a timeout (60 seconds) or
-  no network shows a notice, and the note does not change. If the note's
-  text changes while the provider answers (an edit on this phone, or a
-  newer version from another device), the answer is not used: the newer
-  text stays, and a notice says so. Redirects are refused, and the
-  provider's error text is never shown.
+  syncs to the user's other devices like any other edit. A dictation keeps
+  its segments as they are. They still say the original words, so its
+  _Subtitles_ show what was said, and they sync with the original, not
+  with the model's text. A rejected key, missing credits, a rate limit, an
+  unknown model, a timeout (60 seconds) or no network shows a notice, and
+  the note does not change. If the note's text changes while the provider
+  answers (an edit on this phone, or a newer version from another device),
+  the answer is not used: the newer text stays, and a notice says so.
+  Redirects are refused, and the provider's error text is never shown.
 - **Code**: `src/onlineRefine.ts` (endpoints, prompts and checks that mirror
   `apps/desktop/src-tauri/src/online.rs`), `src/onlineEdit.ts` (consent
   plan and one send, tested with a mocked fetch), `src/providerKeys.ts`
@@ -245,9 +265,11 @@ pnpm --filter @sonolect/mobile exec expo run:android   # or run:ios on macOS
 ```
 
 Browser preview (uses the Web Speech API where the browser has it; Export
-downloads the file, since most desktop browsers have no share sheet, and in
-such a browser a note's Share button becomes Download and saves the note as a
-text file):
+downloads the file. A note's Share button opens the browser's share dialog
+where there is one. Where there is none, as in Firefox, Chrome on Linux or a
+page served over plain http, it reads Download and saves the note as a text
+file, and so does a browser that refuses to open its dialog, such as in a
+frame without `allow="web-share"`):
 
 ```bash
 pnpm --filter @sonolect/mobile web

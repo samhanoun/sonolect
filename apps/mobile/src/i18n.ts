@@ -5,6 +5,7 @@ import type {
   UiLanguage,
 } from "./domain";
 import type { ExportFormat } from "./library";
+import type { SubtitleFormat } from "./subtitles";
 
 const en = {
   tabs: {
@@ -208,6 +209,16 @@ const en = {
       text: "Plain text",
       json: "JSON",
     } satisfies Record<ExportFormat, string>,
+    subtitles: "Subtitles",
+    subtitlesAs: "Save subtitles as",
+    subtitleFormats: { srt: "SRT", vtt: "WebVTT" } satisfies Record<
+      SubtitleFormat,
+      string
+    >,
+    subtitlesTitle: "Save subtitles",
+    subtitlesFailed: "Couldn't save the subtitles.",
+    subtitlesApprox:
+      "Timings are approximate: the phone timed the words as they arrived.",
     sync: { local: "LOCAL", queued: "QUEUED", synced: "SYNCED" },
     original: "Original",
     typed: "TYPED",
@@ -677,6 +688,13 @@ const fr: Strings = {
       text: "Texte brut",
       json: "JSON",
     },
+    subtitles: "Sous-titres",
+    subtitlesAs: "Enregistrer les sous-titres en",
+    subtitleFormats: { srt: "SRT", vtt: "WebVTT" },
+    subtitlesTitle: "Enregistrer les sous-titres",
+    subtitlesFailed: "Impossible d'enregistrer les sous-titres.",
+    subtitlesApprox:
+      "Temps approximatifs : le téléphone a daté les mots à leur arrivée.",
     sync: { local: "LOCAL", queued: "EN ATTENTE", synced: "SYNCHRONISÉ" },
     original: "Original",
     typed: "SAISI",

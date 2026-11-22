@@ -37,6 +37,7 @@ import { SegmentEditor, useCapturePlayer } from "./StudioSegments";
 import { SpeakerModelSettings } from "./StudioSpeakers";
 import {
   formatTimestamp,
+  segmentsToSave,
   singleCaptureId,
   type SavedCaptureSegment,
 } from "../segmentEditor";
@@ -598,14 +599,7 @@ export function StudioTranscribe({
         ...(opened ? { base: { hlc: opened.hlc } } : {}),
         id: libraryCaptureId,
         transcript: state.transcript,
-        segments: state.transcriptSegments
-          .filter((segment) => segment.text.trim())
-          .map((segment) => ({
-            startMs: Math.round(segment.startMs),
-            endMs: Math.round(Math.max(segment.startMs, segment.endMs)),
-            text: segment.text.trim(),
-            ...(segment.speaker ? { speaker: segment.speaker } : {}),
-          })),
+        segments: segmentsToSave(state.transcriptSegments),
       });
       state.setOpenedVersion(libraryCaptureId, saved?.hlc ?? null);
       setMessage(

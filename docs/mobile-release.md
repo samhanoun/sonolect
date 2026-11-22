@@ -384,7 +384,10 @@ URL in the build (see [Note sync](#note-sync)).
     _Local first_ or _Ephemeral_ it happens only after the user agrees, for
     one dictation or with _Use the system speech service_ turned on in
     Settings.
-- **Notes, dictionary and snippets** stay on the phone (AsyncStorage).
+- **Notes, dictionary and snippets** stay on the phone (AsyncStorage). A
+  dictated note keeps when each part was said (text and times, no audio),
+  for its subtitles. With sync on, those times go with the note, end-to-end
+  encrypted like its text (see [Note sync](#note-sync)).
   Android backups are off (`allowBackup: false`). _Ephemeral_ saves nothing.
   _Clear history_ and _Erase all data_ delete them. _Keep notes for_
   (forever by default; 1, 7, 30 or 90 days) deletes older notes at launch
@@ -400,10 +403,11 @@ URL in the build (see [Note sync](#note-sync)).
   each tap asks before sending; the user can turn on _Send without asking
   each time_, which _Ephemeral_ ignores. What goes out is the text of that
   one note, after the dictionary was applied on the phone, straight from
-  the phone to that provider over HTTPS. Never the audio, other notes or
-  the dictionary. The developer receives none of it. The key is kept in
-  the iOS Keychain or Android Keystore on this phone only, and _Erase all
-  data_ deletes it. Loading the model list sends no key and no note.
+  the phone to that provider over HTTPS. Never the audio, the times of a
+  dictation's parts, other notes or the dictionary. The developer receives
+  none of it. The key is kept in the iOS Keychain or Android Keystore on
+  this phone only, and _Erase all data_ deletes it. Loading the model list
+  sends no key and no note.
 - **Permissions**: microphone (`RECORD_AUDIO` on Android), and on iOS
   microphone and speech recognition, with English and French prompts.
 
@@ -418,7 +422,8 @@ nothing to the sync server. Sync adds no permission.
   owner picked ([sync-setup.md](sync-setup.md)). Only over HTTPS.
 - **Sent end-to-end encrypted, unreadable by the server and the developer**:
   every note's text and its other fields (title, language, mode, times,
-  duration, pinned, segments, and fields other devices added), plus a
+  duration, pinned, segments with when each part was said, and fields other
+  devices added), plus a
   random per-install device id inside each note's clock. Each note is
   sealed on the phone with XChaCha20-Poly1305 under a key that exists only
   on the user's devices. Dictionary entries, snippets and settings do not

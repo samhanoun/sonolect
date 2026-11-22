@@ -1,8 +1,9 @@
 import * as assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { CompanionSettings, TranscriptTurn } from "./domain";
+import type { CompanionSettings, NoteSegment, TranscriptTurn } from "./domain";
 import { DEFAULT_SETTINGS } from "./domain";
+import { segmentsSayText } from "./noteSegments";
 import type { OnlineEditInput } from "./onlineEdit";
 import {
   consentCovers,
@@ -13,7 +14,9 @@ import {
 import type { OnlineEditing } from "./onlineRefine";
 import type { SecureItemStore } from "./providerKeys";
 import { createProviderKeyStore } from "./providerKeys";
-import { refineLocally } from "./refine";
+import { cleanParts, cleanTranscript, refineLocally } from "./refine";
+import { subtitleCues } from "./subtitles";
+import { turnToNote } from "./sync/noteMapping";
 
 const KEY = "test-key-not-real-0000";
 
@@ -281,6 +284,61 @@ describe("after consent", () => {
     });
     const outcome = await runOnlineEdit(input);
     assert.equal(outcome.kind === "applied" && outcome.turn.pinned, true);
+  });
+});
+
+describe("a dictation's segments after Rewrite or Reply", () => {
+  /** When each part of TURN was said, as the capture loop records it. */
+  const SEGMENTS: NoteSegment[] = [
+    { startMs: 300, endMs: 1_500, text: "um so tell sam lect" },
+    { startMs: 1_900, endMs: 3_400, text: "thursday works", approx: true },
+  ];
+  const DICTATION: TranscriptTurn = { ...TURN, segments: SEGMENTS };
+  const MODEL_TEXT = "Please let Sonolect know that Thursday works for us.";
+
+  it("keeps them with the words said: they sync with the transcript, never as the model's text", async () => {
+    for (const mode of ["rewrite", "reply"] as const) {
+      const { input, calls } = setup({
+        turn: DICTATION,
+        current: () => DICTATION,
+        respond: () => reply(MODEL_TEXT),
+      });
+      const outcome = await runOnlineEdit({ ...input, mode });
+      assert.equal(outcome.kind, "applied", mode);
+      if (outcome.kind !== "applied") return;
+      // The times stay on the phone: only the note's text is sent.
+      assert.doesNotMatch(String(calls[0]?.init.body), /startMs|endMs|approx/);
+      // The model's text is the refined text; what was said is unchanged.
+      assert.equal(outcome.turn.refinedText, MODEL_TEXT, mode);
+      assert.equal(outcome.turn.rawText, TURN.rawText, mode);
+      assert.deepEqual(outcome.turn.segments, SEGMENTS, mode);
+
+      // Sync sends the segments with the transcript they say, as before,
+      // and the model's text as the refined text they do not say.
+      const note = turnToNote(outcome.turn, null);
+      assert.deepEqual(note.segments, SEGMENTS, mode);
+      assert.equal(note.rawText, TURN.rawText, mode);
+      assert.equal(note.refinedText, MODEL_TEXT, mode);
+      assert.equal(segmentsSayText(SEGMENTS, note.rawText), true, mode);
+      assert.equal(segmentsSayText(SEGMENTS, MODEL_TEXT), false, mode);
+
+      // The subtitles say what was said, cleaned up as the original is,
+      // not the model's text.
+      const context = { language: "en-US", dictionary: DICTIONARY };
+      const cues = subtitleCues(outcome.turn.segments ?? [], (texts) =>
+        cleanParts(texts, context),
+      );
+      assert.deepEqual(
+        cues.map((cue) => cue.text),
+        ["So tell Sonolect", "thursday works."],
+        mode,
+      );
+      assert.equal(
+        cues.map((cue) => cue.text).join(" "),
+        cleanTranscript(TURN.rawText, context),
+        mode,
+      );
+    }
   });
 });
 

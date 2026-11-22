@@ -12,6 +12,7 @@ import {
   resyncSegments,
   segmentAtTime,
   segmentsFromCapture,
+  segmentsToSave,
   segmentsToText,
   singleCaptureId,
   speakerColorIndex,
@@ -112,6 +113,67 @@ describe("segments of a saved recording", () => {
       segmentsFromCapture({ id: "19-1", durationMs: 500, transcript: null }),
       [],
     );
+  });
+});
+
+describe("a studio save", () => {
+  it("sends the segments with words in whole ms, and keeps the estimate mark", () => {
+    const typed = segmentsFromCapture({
+      id: "21-1",
+      durationMs: 0,
+      transcript: "Buy milk. Call Ana.",
+    });
+    assert.deepEqual(segmentsToSave(typed), [
+      { startMs: 0, endMs: 0, text: "Buy milk.", approx: true },
+      { startMs: 0, endMs: 0, text: "Call Ana.", approx: true },
+    ]);
+    assert.deepEqual(segmentsToSave(recorded()), [
+      { startMs: 0, endMs: 2000, text: "Good morning.", speaker: "Ana" },
+      { startMs: 2400, endMs: 5000, text: "Shall we start?" },
+      { startMs: 6000, endMs: 9000, text: "Yes, let us begin." },
+    ]);
+    const [first] = recorded();
+    assert.deepEqual(
+      segmentsToSave([
+        { ...first!, startMs: 10.4, endMs: 5, text: " Hi " },
+        { ...first!, id: "blank", text: "  " },
+      ]),
+      [{ startMs: 10, endMs: 10, text: "Hi", speaker: "Ana" }],
+    );
+  });
+
+  it("keeps the estimate mark on parts that speaker detection named", () => {
+    // A recording opened without segments: the studio spreads its text over
+    // its 10 s, then detection names who speaks when.
+    const estimated = segmentsFromCapture({
+      id: "22-1",
+      durationMs: 10_000,
+      transcript: "Hello there.\n\nHi, how are you?",
+    });
+    const named = applySpeakerTurns(
+      estimated,
+      [
+        { startMs: 0, endMs: 4_000, speaker: 1 },
+        { startMs: 4_000, endMs: 10_000, speaker: 2 },
+      ],
+      (speaker) => `Speaker ${speaker}`,
+    );
+    assert.deepEqual(segmentsToSave(named), [
+      {
+        startMs: 0,
+        endMs: 4286,
+        text: "Hello there.",
+        speaker: "Speaker 1",
+        approx: true,
+      },
+      {
+        startMs: 4286,
+        endMs: 10_000,
+        text: "Hi, how are you?",
+        speaker: "Speaker 2",
+        approx: true,
+      },
+    ]);
   });
 });
 

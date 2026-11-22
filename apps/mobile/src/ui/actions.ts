@@ -3,7 +3,15 @@ import { Alert, Linking, Platform, Share } from "react-native";
 
 import type { Strings } from "../i18n";
 import { EXPORT_FILE_TYPES, noteFileName } from "../library";
-import { shareTarget, type ShareTarget } from "../shareTarget";
+import { noteClipboard } from "../noteClipboard";
+import {
+  afterShareFailure,
+  isShareDismissal,
+  shareTarget,
+  type ShareTarget,
+} from "../shareTarget";
+
+export { isShareDismissal };
 
 /**
  * Copy and share for the Capture and Library screens. A failure is said
@@ -41,13 +49,46 @@ export async function copyText(text: string, t: Strings): Promise<boolean> {
   return false;
 }
 
-/** The browser's share dialog rejects with AbortError when dismissed. */
-export function isShareDismissal(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { name?: unknown }).name === "AbortError"
-  );
+/**
+ * Copies a note with its shape (HTML: paragraphs, the Tasks list as a list)
+ * and as plain text; false, after telling the user, when it could not. A
+ * clipboard that takes no HTML gets the plain text.
+ *
+ * expo-clipboard 58.0.4 would derive the plain text from the HTML (Android
+ * drops list bullets, the web loses line breaks): the web writes both here,
+ * and patches/expo-clipboard@58.0.4.patch adds `plainText` on Android and
+ * iOS.
+ */
+export async function copyNote(text: string, t: Strings): Promise<boolean> {
+  const { html } = noteClipboard(text);
+  if (html) {
+    try {
+      if (Platform.OS === "web") {
+        if (
+          typeof ClipboardItem !== "undefined" &&
+          typeof navigator !== "undefined" &&
+          typeof navigator.clipboard?.write === "function"
+        ) {
+          await navigator.clipboard.write([
+            new ClipboardItem({
+              "text/html": new Blob([html], { type: "text/html" }),
+              "text/plain": new Blob([text], { type: "text/plain" }),
+            }),
+          ]);
+          return true;
+        }
+      } else {
+        const copied = await Clipboard.setStringAsync(html, {
+          inputFormat: Clipboard.StringFormat.HTML,
+          plainText: text,
+        });
+        if (copied) return true;
+      }
+    } catch {
+      // The plain text below.
+    }
+  }
+  return copyText(text, t);
 }
 
 /** Saves text as a file from a browser (web only). */
@@ -79,9 +120,26 @@ export function currentShareTarget(): ShareTarget {
   );
 }
 
+/** Saves a note as a text file named after createdAt (web only). */
+function downloadNote(text: string, t: Strings, createdAt?: string): boolean {
+  try {
+    const date = createdAt ? new Date(createdAt) : new Date();
+    downloadInBrowser(
+      text,
+      noteFileName(Number.isNaN(date.getTime()) ? new Date() : date),
+      EXPORT_FILE_TYPES.text.mimeType,
+    );
+    return true;
+  } catch {
+    showFailure(t.capture.downloadFailed);
+    return false;
+  }
+}
+
 /**
  * Shares a note's text; false when it could not. In a browser without a
- * share dialog the note is saved as a text file named after createdAt.
+ * share dialog, or one that refuses to open it, the note is saved as a
+ * text file named after createdAt.
  */
 export async function shareText(
   text: string,
@@ -89,24 +147,20 @@ export async function shareText(
   createdAt?: string,
 ): Promise<boolean> {
   if (currentShareTarget() === "download") {
-    try {
-      const date = createdAt ? new Date(createdAt) : new Date();
-      downloadInBrowser(
-        text,
-        noteFileName(Number.isNaN(date.getTime()) ? new Date() : date),
-        EXPORT_FILE_TYPES.text.mimeType,
-      );
-      return true;
-    } catch {
-      showFailure(t.capture.downloadFailed);
-      return false;
-    }
+    return downloadNote(text, t, createdAt);
   }
   try {
     await Share.share({ message: text });
     return true;
   } catch (error) {
-    if (!isShareDismissal(error)) showFailure(t.capture.shareFailed);
-    return false;
+    switch (afterShareFailure(Platform.OS, error)) {
+      case "dismissed":
+        return false;
+      case "download":
+        return downloadNote(text, t, createdAt);
+      case "alert":
+        showFailure(t.capture.shareFailed);
+        return false;
+    }
   }
 }

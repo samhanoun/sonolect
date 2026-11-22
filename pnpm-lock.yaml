@@ -31,6 +31,9 @@ overrides:
   react-native-drawer-layout>react-native-gesture-handler: '-'
 
 patchedDependencies:
+  expo-clipboard@58.0.4:
+    hash: kzwoj73z67i7hutzrgwiokus2i
+    path: patches/expo-clipboard@58.0.4.patch
   expo-speech-recognition@58.0.1:
     hash: ikdqb42sxqk7nzaw2gze3tn2d4
     path: patches/expo-speech-recognition@58.0.1.patch
@@ -150,7 +153,7 @@ importers:
         version: 58.0.6(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
       expo-clipboard:
         specifier: ~58.0.4
-        version: 58.0.4(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
+        version: 58.0.4(patch_hash=kzwoj73z67i7hutzrgwiokus2i)(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
       expo-constants:
         specifier: ~58.0.15
         version: 58.0.15(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(typescript@7.0.2)
@@ -6943,7 +6946,7 @@ snapshots:
       react: 19.3.0
       react-native: 0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0)
 
-  expo-clipboard@58.0.4(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0):
+  expo-clipboard@58.0.4(patch_hash=kzwoj73z67i7hutzrgwiokus2i)(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0):
     dependencies:
       expo: 58.0.23(@babel/core@7.29.13)(@expo/dom-webview@58.0.2)(@expo/metro-runtime@58.0.17)(expo-router@58.0.30)(react-dom@19.3.0(react@19.3.0))(react-native-web@0.21.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.13)(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)(typescript@7.0.2)
       react: 19.3.0

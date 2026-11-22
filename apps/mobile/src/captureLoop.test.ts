@@ -772,4 +772,120 @@ describe("createCaptureLoop", () => {
     h.loop.ended();
     assert.equal(h.ends[0]?.durationMs, 3_500);
   });
+
+  it("times each session's words for subtitles, across restarts", () => {
+    const h = harness();
+    h.clock.set(1_000);
+    h.loop.begin();
+    h.loop.audioStarted(1_040);
+    h.loop.started();
+    h.clock.set(1_600);
+    h.loop.result("hello", false);
+    h.clock.set(2_400);
+    h.loop.result("hello world", true, [
+      { startTimeMillis: 400, endTimeMillis: 700, segment: "hello" },
+      { startTimeMillis: 750, endTimeMillis: 1_200, segment: "world" },
+    ]);
+    h.loop.ended();
+    h.clock.tick(RESTART_DELAY_MS);
+    h.loop.audioStarted(h.clock.now() + 30);
+    h.loop.started();
+    h.clock.tick(900);
+    // This session ends without a final result: its interim text stays.
+    h.loop.result("again", false);
+    h.clock.tick(500);
+    h.loop.stop();
+    h.loop.ended();
+    const [end] = h.ends;
+    assert.equal(end?.text, "hello world again");
+    assert.deepEqual(end?.segments, [
+      { startMs: 400, endMs: 1_200, text: "hello world" },
+      {
+        // Heard 900 ms into the second session, counted from the first
+        // session's audio start (1_040).
+        startMs: 2_400 + RESTART_DELAY_MS + 900 - 1_040,
+        endMs: 2_400 + RESTART_DELAY_MS + 1_400 - 1_040,
+        text: "again",
+        approx: true,
+      },
+    ]);
+  });
+
+  it("keeps the interim text of a session that ends without a final", () => {
+    const h = harness();
+    h.clock.set(1_000);
+    h.loop.begin();
+    h.loop.started();
+    h.clock.set(1_800);
+    h.loop.result("buy milk", false);
+    h.clock.set(2_500);
+    // The session ends with interim text only, and restarts.
+    h.loop.ended();
+    h.clock.tick(RESTART_DELAY_MS);
+    h.loop.started();
+    h.clock.tick(700);
+    h.loop.result("and bread", false);
+    h.clock.tick(600);
+    h.loop.result("and bread", true);
+    h.loop.stop();
+    h.loop.ended();
+    const [end] = h.ends;
+    assert.equal(end?.text, "buy milk and bread");
+    assert.deepEqual(end?.segments, [
+      { startMs: 800, endMs: 1_500, text: "buy milk", approx: true },
+      {
+        startMs: 1_500 + RESTART_DELAY_MS + 700,
+        endMs: 1_500 + RESTART_DELAY_MS + 1_300,
+        text: "and bread",
+        approx: true,
+      },
+    ]);
+  });
+
+  it("ignores audio and speech starts between sessions", () => {
+    const h = harness();
+    h.clock.set(1_000);
+    h.loop.begin();
+    h.loop.audioStarted(1_040);
+    h.loop.started();
+    h.clock.set(3_000);
+    // A session without words ends, and restarts after the delay.
+    h.loop.ended();
+    // Late events of the session that ended: time 0 stays 1_040.
+    h.loop.audioStarted(3_100);
+    h.loop.speechStarted();
+    h.clock.tick(RESTART_DELAY_MS);
+    // The next session sends no 'audiostart'.
+    h.loop.started();
+    h.clock.tick(800);
+    h.loop.result("hello", false);
+    h.clock.tick(400);
+    h.loop.result("hello", true);
+    h.loop.stop();
+    h.loop.ended();
+    assert.deepEqual(h.ends[0]?.segments, [
+      {
+        startMs: 3_000 + RESTART_DELAY_MS + 800 - 1_040,
+        endMs: 3_000 + RESTART_DELAY_MS + 1_200 - 1_040,
+        text: "hello",
+        approx: true,
+      },
+    ]);
+  });
+
+  it("ignores timings before the start and after the end", () => {
+    const h = harness({ restartOnEnd: false });
+    h.loop.audioStarted(5);
+    h.loop.speechStarted();
+    h.loop.begin();
+    h.loop.started();
+    h.clock.set(800);
+    h.loop.result("only", true);
+    h.loop.ended();
+    h.loop.audioStarted(9_000);
+    h.loop.result("late", true);
+    assert.deepEqual(h.ends[0]?.segments, [
+      { startMs: 800, endMs: 800, text: "only", approx: true },
+    ]);
+  });
 });
