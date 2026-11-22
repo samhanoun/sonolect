@@ -96,7 +96,9 @@ From PowerShell, run `./scripts/build-local.ps1` (or add `-Release` for an optim
 For a repeatable engine check, run:
 
 ```powershell
-./build/'Sonolect Local'/Sonolect.exe --transcribe-file ./local-test/speech.wav ./local-test/ggml-base.bin en
+./build/'Sonolect Local'/Sonolect.exe --transcribe-file ./local-test/speech.wav ./local-test/ggml-base.bin en | Write-Output
 ```
+
+A release build is a windowed app, so PowerShell waits for it, and sets `$LASTEXITCODE`, only when its output is piped as above. The command-line modes write to the terminal they were started from.
 
 Source provenance is recorded in `PROVENANCE.md`. The original audited repositories remain unchanged.

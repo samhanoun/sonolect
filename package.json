@@ -12,6 +12,7 @@
     "test": "turbo test",
     "test:release-readiness": "node --test scripts/release-readiness.test.mjs",
     "test:audit-gate": "node --test scripts/audit-gate.test.mjs",
+    "test:design-context": "node --test scripts/design-context.test.mjs",
     "release:dry-run": "pnpm test:release-readiness",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

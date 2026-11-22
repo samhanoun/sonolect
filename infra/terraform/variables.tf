@@ -126,7 +126,7 @@ variable "vertex_location" {
 }
 
 variable "gemini_model" {
-  description = "Gemini model of the API's polish requests (SONOLECT_GEMINI_MODEL). Google retires models on fixed dates: keep this on one with no announced shutdown date, the same as DEFAULT_GEMINI_MODEL in services/api/src/ai.ts. Null means the default."
+  description = "Gemini model of the API's polish requests (SONOLECT_GEMINI_MODEL). The default, gemini-2.5-flash, was retired on Vertex AI on October 16, 2026, so polish needs a current model and a vertex_location that serves it (see docs/api.md). Keep it the same as DEFAULT_GEMINI_MODEL in services/api/src/ai.ts. Null means the default."
   type        = string
   default     = "gemini-2.5-flash"
   nullable    = false
@@ -160,6 +160,17 @@ variable "api_max_instances" {
   description = "API Cloud Run max instance count."
   type        = number
   default     = 10
+}
+
+variable "api_concurrency" {
+  description = "Requests one API instance serves at once. /v1/transcribe buffers bodies of up to 10 MiB, so 20 keeps a 512Mi instance clear of running out of memory; raise it with api_memory."
+  type        = number
+  default     = 20
+
+  validation {
+    condition     = var.api_concurrency >= 1 && var.api_concurrency <= 1000
+    error_message = "api_concurrency must be between 1 and 1000."
+  }
 }
 
 variable "worker_cpu" {

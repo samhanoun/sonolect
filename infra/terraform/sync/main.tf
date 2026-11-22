@@ -1,7 +1,7 @@
 # The end-to-end encrypted note sync service on its own: Firestore, a
 # runtime service account, the service-token secret and a public Cloud Run
 # service. It is a standalone root, apart from ../ (the full platform, which
-# also creates Cloud SQL and needs a private VPC that sync does not use).
+# can also create Cloud SQL, and that needs a private VPC sync does not use).
 # docs/sync-setup.md is the runbook.
 
 terraform {

@@ -370,6 +370,9 @@ jobs:
       - name: Test the audit gate rules
         run: pnpm test:audit-gate
 
+      - name: Test the design-context script
+        run: pnpm test:design-context
+
       - name: Release readiness dry-run validation
         run: pnpm release:dry-run
 
@@ -532,6 +535,16 @@ jobs:
             echo "::group::terraform validate infra/terraform/${root}"
             terraform -chdir="${root}" init -backend=false -input=false
             terraform -chdir="${root}" validate -no-color
+            echo "::endgroup::"
+          done
+
+      # Plan-level tests with mocked providers: no Google account needed.
+      - name: Terraform test
+        run: |
+          set -euo pipefail
+          for root in . sync; do
+            echo "::group::terraform test infra/terraform/${root}"
+            terraform -chdir="${root}" test -no-color
             echo "::endgroup::"
           done
 

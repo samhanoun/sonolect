@@ -36,7 +36,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 
 ### Dictate Anywhere
 
-- **Desktop:** a floating dictation bubble, a small always-on-top glass pill that never takes focus. The global hotkeys (Ctrl+Shift+M to toggle, Ctrl+Shift+V to hold) dictate into whatever app is in front, and the polished text is pasted there when it's done. Esc cancels a dictation. A recording started in the Studio shows on the pill too, where it can be stopped but never discarded, and Esc stays with the app you are in. Settings › Dictation bubble shows it always, only while dictating, or never.
+- **Desktop:** a floating dictation bubble, a small always-on-top glass pill that never takes focus. The global hotkeys (Ctrl+Shift+M to toggle, Ctrl+Shift+V to hold; Cmd instead of Ctrl on macOS) dictate into whatever app is in front, and the polished text is pasted there when it's done. Esc cancels a dictation. A recording started in the Studio shows on the pill too, where it can be stopped but never discarded, and Esc stays with the app you are in. Settings › Dictation bubble shows it always, only while dictating, or never.
 - **Android:** the Sonolect voice keyboard, an input method with one big mic that types into any app. It recognizes speech on the phone, and uses the system speech service only where the app's privacy settings allow it without asking.
 - **iOS:** Quick dictation (`sonolect://dictate`) opens straight into listening and copies the polished text for pasting. iOS keyboards can't use the microphone, so this is the closest equivalent. It can be bound to the Action button or Back Tap through Shortcuts.
 
@@ -63,7 +63,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 ### Privacy Controls
 
 - **No telemetry by default** — opt-in analytics only
-- Configurable audio retention (auto-delete after N days or manual purge)
+- Configurable audio retention (auto-delete after N days or manual purge). Choosing a shorter period asks first when it would delete recordings right away.
 - One-click "Delete all my data" action
 - All processing local unless the user turns on a cloud feature: note sync, which sends only end-to-end encrypted notes, or online editing with their own provider key, which asks before each note is sent unless the user turns on Send without asking (never in Ephemeral)
 
@@ -116,7 +116,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 - **Monorepo**: pnpm workspaces + Turborepo
 - **Frontend**: Vite, React 18, Zustand, TailwindCSS
 - **Backend services** (Phase 3+): Fastify on Cloud Run
-- **Infrastructure**: Terraform → GCP (Firestore, Cloud SQL, Cloud Storage, Pub/Sub)
+- **Infrastructure**: Terraform → GCP (Firestore, Cloud SQL when enabled, Cloud Storage, Pub/Sub)
 - **Shared packages**: `@sonolect/types`, `@sonolect/validation`, `@sonolect/config`, `@sonolect/sdk`, `@sonolect/sync-core`, `@sonolect/ui`
 
 ---

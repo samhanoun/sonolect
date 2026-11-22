@@ -54,6 +54,7 @@ locals {
       memory         = var.api_memory
       container_port = 8080
       max_instances  = var.api_max_instances
+      concurrency    = var.api_concurrency
     }
     worker = {
       image          = var.worker_image
@@ -61,6 +62,7 @@ locals {
       memory         = var.worker_memory
       container_port = 8080
       max_instances  = var.worker_max_instances
+      concurrency    = 80
     }
   }
 
@@ -377,8 +379,9 @@ resource "google_cloud_run_v2_service" "services" {
   labels              = local.labels
 
   template {
-    service_account = google_service_account.runtime[each.key].email
-    timeout         = "300s"
+    service_account                  = google_service_account.runtime[each.key].email
+    timeout                          = "300s"
+    max_instance_request_concurrency = each.value.concurrency
 
     scaling {
       min_instance_count = var.cloud_run_min_instances

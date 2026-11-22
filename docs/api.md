@@ -134,9 +134,13 @@ threat model.
 - **`GET …/changes`** returns records with `seq > since` in seq order, each
   `{rid, rev, seq, deleted, ct}`, at most 200 records and 4 MiB of
   ciphertext per page (a page always takes its first record). `next` is the
-  cursor for the next page, `head` the vault's latest seq. A `since` above
-  `head` answers 410 `cursor_reset`; one older than purged tombstones answers
-  410 `cursor_expired`. Both mean: start again from 0.
+  cursor for the next page, `head` the vault's latest seq, and `purgedSeq` how far deleted records'
+  tombstones have been purged. A `since` above `head` answers 410
+  `cursor_reset` (start again from 0). A `since` below `purgedSeq` is still
+  served: the device may have missed deletes, so after a finished pull from a
+  saved cursor below `purgedSeq` it reads the vault again from 0. On the last
+  page (`hasMore` false) a device moves its cursor up to `purgedSeq`. Older
+  servers answered 410 `cursor_expired` instead, which devices still accept.
 - **`POST …/records`** is a compare-and-swap per write: `baseRev` is the
   revision the device last saw, 0 for a new record. Results are
   `{rid, status: "ok", rev, seq}`, `{rid, status: "conflict", current}`
