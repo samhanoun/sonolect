@@ -1,3 +1,6 @@
+import type { NoteSegment } from "./domain";
+import type { EnginePart } from "./noteSegments";
+import { SegmentRecorder } from "./noteSegments";
 import type { NoticeKind } from "./notices";
 import type { RecognitionPlatform } from "./speechPolicy";
 import {
@@ -121,6 +124,8 @@ export interface LoopEnd {
   audioUri?: string;
   /** Every recording the sessions reported, uploaded or not. */
   recordings: string[];
+  /** When each part of the text was said (noteSegments.ts). */
+  segments: NoteSegment[];
   /** A notice of the loop's own, such as 'maxDuration'. */
   notice?: NoticeKind;
 }
@@ -157,8 +162,19 @@ export interface LoopOptions {
 export interface CaptureLoop {
   /** Starts the first session; false, after onError, when it throws. */
   begin(): boolean;
-  /** Native 'result': the best transcript of the current session. */
-  result(transcript: string, isFinal: boolean): void;
+  /**
+   * Native 'result': the best transcript of the current session, with its
+   * segment timestamps when the recognizer reports them.
+   */
+  result(
+    transcript: string,
+    isFinal: boolean,
+    parts?: readonly EnginePart[],
+  ): void;
+  /** Native 'audiostart': the epoch time the session's audio started. */
+  audioStarted(timestamp: unknown): void;
+  /** Native 'speechstart'. */
+  speechStarted(): void;
   /** Native 'error': an expo-speech-recognition error code. */
   error(code: string): void;
   /** Native 'start': the session is listening. */
@@ -187,6 +203,7 @@ export function createCaptureLoop(
   clock: LoopClock = systemClock,
 ): CaptureLoop {
   const accumulator = new TranscriptAccumulator();
+  const timings = new SegmentRecorder();
   const recordings: string[] = [];
   /** Recordings of the current route: each session's, in order. */
   let routeRecordings: string[] = [];
@@ -220,7 +237,9 @@ export function createCaptureLoop(
     if (phase === "closed") return;
     close();
     const [onlyUri] = routeRecordings;
+    timings.commitInterim(clock.now());
     handlers.onEnd({
+      segments: timings.list(),
       text: accumulator.commitInterim(),
       durationMs: clock.now() - startedAt,
       ...(routeRecordings.length === 1 && onlyUri ? { audioUri: onlyUri } : {}),
@@ -234,6 +253,7 @@ export function createCaptureLoop(
     phase = "starting";
     sessionHadText = false;
     sessionError = null;
+    timings.sessionStarted(clock.now());
     try {
       recognizer.start(onDevice);
       return true;
@@ -296,10 +316,11 @@ export function createCaptureLoop(
       return false;
     },
 
-    result(transcript, isFinal) {
+    result(transcript, isFinal, parts) {
       // A session that ended sends nothing more; ignore anything stale.
       if (phase !== "starting" && phase !== "running") return;
       const text = accumulator.push(transcript, isFinal);
+      timings.result(transcript, isFinal, clock.now(), parts);
       if (transcript.trim()) {
         sessionHadText = true;
         lastTextAt = clock.now();
@@ -341,6 +362,18 @@ export function createCaptureLoop(
       markRunning();
     },
 
+    audioStarted(timestamp) {
+      if (phase === "starting" || phase === "running") {
+        timings.audioStarted(timestamp);
+      }
+    },
+
+    speechStarted() {
+      if (phase === "starting" || phase === "running") {
+        timings.speechStarted(clock.now());
+      }
+    },
+
     audioEnd(uri) {
       if (phase === "idle" || phase === "closed" || !uri) return;
       // A fixed file name is reused: it then holds the last session only.
@@ -378,6 +411,7 @@ export function createCaptureLoop(
       switch (step.action) {
         case "restart":
           accumulator.commitInterim();
+          timings.commitInterim(now);
           scheduleRestart(false);
           return;
         case "finish":

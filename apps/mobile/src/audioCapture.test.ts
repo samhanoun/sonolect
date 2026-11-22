@@ -212,6 +212,49 @@ describe("mobile audio capture/upload", () => {
     assert.equal(turn.source, "microphone");
   });
 
+  it("keeps the dictation's timings on a note made from the phone's text", async () => {
+    const segments = [{ startMs: 0, endMs: 700, text: "call Sam" }];
+    const local = await stopCaptureWithAudio({
+      settings: { ...DEFAULT_SETTINGS },
+      recognizedText: "call Sam",
+      segments,
+    });
+    assert.deepEqual(local?.segments, segments);
+    const none = await stopCaptureWithAudio({
+      settings: { ...DEFAULT_SETTINGS },
+      recognizedText: "call Sam",
+      segments: [],
+    });
+    assert.ok(none);
+    assert.equal("segments" in none, false);
+  });
+
+  it("drops the phone's timings when the API transcript replaces its text", async () => {
+    const turn = await stopCaptureWithAudio({
+      settings: uploadSettings,
+      recognizedText: "phone words",
+      audio: wavAudio(),
+      segments: [{ startMs: 0, endMs: 700, text: "phone words" }],
+      uploadAudio: async () => ({
+        status: "completed",
+        turn: {
+          id: "api",
+          rawText: "API words",
+          refinedText: "API words.",
+          mode: "dictate",
+          language: "en-US",
+          privacyMode: false,
+          createdAt: "2026-11-20T08:00:00.000Z",
+          durationMs: 700,
+          source: "microphone",
+          syncState: "synced",
+        },
+      }),
+    });
+    assert.equal(turn?.refinedText, "API words.");
+    assert.equal(turn?.segments, undefined);
+  });
+
   it("does not upload audio when privacy is ephemeral or history saving is disabled", async () => {
     for (const settings of [
       { ...uploadSettings, privacyLevel: "ephemeral" as const },

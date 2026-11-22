@@ -1,6 +1,7 @@
 import type {
   CompanionSettings,
   DictionaryEntry,
+  NoteSegment,
   Snippet,
   TranscriptTurn,
 } from "./domain";
@@ -30,6 +31,8 @@ export type StopCaptureWithAudioOptions = {
   recognizedText?: string | undefined;
   /** Audio recorded during the capture, if the platform persisted it. */
   audio?: CapturedAudioPayload | undefined;
+  /** When each part of recognizedText was said (noteSegments.ts). */
+  segments?: readonly NoteSegment[] | undefined;
   dictionary?: readonly DictionaryEntry[];
   snippets?: readonly Snippet[];
   uploadAudio?: (
@@ -60,6 +63,7 @@ export function buildTurn({
   syncState,
   now = Date.now,
   durationMs,
+  segments,
 }: {
   settings: CaptureSettings;
   rawText: string;
@@ -69,6 +73,7 @@ export function buildTurn({
   syncState?: TranscriptTurn["syncState"];
   now?: () => number;
   durationMs?: number;
+  segments?: readonly NoteSegment[] | undefined;
 }): TranscriptTurn {
   return {
     id: createId("turn"),
@@ -81,6 +86,7 @@ export function buildTurn({
     durationMs: Math.max(0, durationMs ?? now() - startedAtMs),
     source,
     syncState: syncState ?? defaultSyncState(settings),
+    ...(segments && segments.length > 0 ? { segments: [...segments] } : {}),
   };
 }
 
@@ -99,6 +105,7 @@ export async function stopCaptureWithAudio({
   dictionary = [],
   snippets = [],
   uploadAudio,
+  segments,
   now = Date.now,
 }: StopCaptureWithAudioOptions): Promise<TranscriptTurn | undefined> {
   const startedAtMs = captureStartedAt ? Date.parse(captureStartedAt) : now();
@@ -158,6 +165,7 @@ export async function stopCaptureWithAudio({
     startedAtMs,
     source: "microphone",
     now,
+    segments,
     ...(audio ? { durationMs: audio.durationMs } : {}),
   });
 }

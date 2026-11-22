@@ -772,4 +772,58 @@ describe("createCaptureLoop", () => {
     h.loop.ended();
     assert.equal(h.ends[0]?.durationMs, 3_500);
   });
+
+  it("times each session's words for subtitles, across restarts", () => {
+    const h = harness();
+    h.clock.set(1_000);
+    h.loop.begin();
+    h.loop.audioStarted(1_040);
+    h.loop.started();
+    h.clock.set(1_600);
+    h.loop.result("hello", false);
+    h.clock.set(2_400);
+    h.loop.result("hello world", true, [
+      { startTimeMillis: 400, endTimeMillis: 700, segment: "hello" },
+      { startTimeMillis: 750, endTimeMillis: 1_200, segment: "world" },
+    ]);
+    h.loop.ended();
+    h.clock.tick(RESTART_DELAY_MS);
+    h.loop.audioStarted(h.clock.now() + 30);
+    h.loop.started();
+    h.clock.tick(900);
+    // This session ends without a final result: its interim text stays.
+    h.loop.result("again", false);
+    h.clock.tick(500);
+    h.loop.stop();
+    h.loop.ended();
+    const [end] = h.ends;
+    assert.equal(end?.text, "hello world again");
+    assert.deepEqual(end?.segments, [
+      { startMs: 400, endMs: 1_200, text: "hello world" },
+      {
+        // Heard 900 ms into the second session, counted from the first
+        // session's audio start (1_040).
+        startMs: 2_400 + RESTART_DELAY_MS + 900 - 1_040,
+        endMs: 2_400 + RESTART_DELAY_MS + 1_400 - 1_040,
+        text: "again",
+        approx: true,
+      },
+    ]);
+  });
+
+  it("ignores timings between sessions and after the end", () => {
+    const h = harness({ restartOnEnd: false });
+    h.loop.audioStarted(5);
+    h.loop.speechStarted();
+    h.loop.begin();
+    h.loop.started();
+    h.clock.set(800);
+    h.loop.result("only", true);
+    h.loop.ended();
+    h.loop.audioStarted(9_000);
+    h.loop.result("late", true);
+    assert.deepEqual(h.ends[0]?.segments, [
+      { startMs: 800, endMs: 800, text: "only", approx: true },
+    ]);
+  });
 });

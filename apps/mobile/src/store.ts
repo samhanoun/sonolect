@@ -601,7 +601,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
             });
           }
         },
-        onEnd: async ({ text, audio, notice: endNotice }) => {
+        onEnd: async ({ text, audio, notice: endNotice, segments }) => {
           ended = true;
           if (activeSession === session) activeSession = null;
           // Before the check below: this dictation's hold ends with it, even
@@ -634,6 +634,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
             },
             recognizedText: text,
             audio,
+            segments,
             dictionary: state.dictionary,
             snippets: state.snippets,
           });

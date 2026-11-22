@@ -20,6 +20,22 @@ export type DictationLanguage = (typeof DICTATION_LANGUAGES)[number];
 
 export type UiLanguage = "en" | "fr";
 
+/**
+ * One stretch of a dictation: what the recognizer heard and when. Times are
+ * milliseconds from the start of the dictation's first recognizer session.
+ */
+export interface NoteSegment {
+  startMs: number;
+  endMs: number;
+  /** As heard, before clean-up, like rawText. */
+  text: string;
+  /**
+   * The app timed it when the words arrived; the recognizer gave no usable
+   * times.
+   */
+  approx?: true;
+}
+
 export interface TranscriptTurn {
   id: string;
   rawText: string;
@@ -42,6 +58,11 @@ export interface TranscriptTurn {
   hlc?: Hlc;
   /** A conflict copy made by sync: the id of the note it was copied from. */
   conflictOf?: string;
+  /**
+   * When each part was said, for subtitles. Dictations from this version on;
+   * typed notes and older notes have none.
+   */
+  segments?: NoteSegment[];
 }
 
 export interface CaptureSession {
