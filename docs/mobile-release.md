@@ -403,10 +403,11 @@ URL in the build (see [Note sync](#note-sync)).
   each tap asks before sending; the user can turn on _Send without asking
   each time_, which _Ephemeral_ ignores. What goes out is the text of that
   one note, after the dictionary was applied on the phone, straight from
-  the phone to that provider over HTTPS. Never the audio, other notes or
-  the dictionary. The developer receives none of it. The key is kept in
-  the iOS Keychain or Android Keystore on this phone only, and _Erase all
-  data_ deletes it. Loading the model list sends no key and no note.
+  the phone to that provider over HTTPS. Never the audio, the times of a
+  dictation's parts, other notes or the dictionary. The developer receives
+  none of it. The key is kept in the iOS Keychain or Android Keystore on
+  this phone only, and _Erase all data_ deletes it. Loading the model list
+  sends no key and no note.
 - **Permissions**: microphone (`RECORD_AUDIO` on Android), and on iOS
   microphone and speech recognition, with English and French prompts.
 

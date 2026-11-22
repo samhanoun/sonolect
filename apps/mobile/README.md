@@ -218,9 +218,10 @@ involved, and the provider bills the user's own account.
   it. Picking another provider turns the switch off again.
 - **What is sent.** The text of that one note, after the phone has applied
   the dictionary and snippets, with a fixed instruction for the mode and
-  the dictation language. Never the audio, other notes or the dictionary
-  itself. Notes over 12,000 characters, or with no text left once cleaned
-  up, are not sent, and the app does not ask for them.
+  the dictation language. Never the audio, the times of a dictation's
+  parts, other notes or the dictionary itself. Notes over 12,000
+  characters, or with no text left once cleaned up, are not sent, and the
+  app does not ask for them.
 - **The key** is kept in SecureStore (iOS Keychain or Android Keystore)
   with `WHEN_UNLOCKED_THIS_DEVICE_ONLY`, one item per provider
   (`sonolect.mobile.providerKey.openrouter` and `.opencode`). It stays on
@@ -237,13 +238,15 @@ involved, and the provider bills the user's own account.
   Nothing goes out at launch.
 - **Results and failures.** The result replaces the note's text and keeps
   the original, so _Clean up_ brings it back. With sync on, the edited note
-  syncs to the user's other devices like any other edit. A rejected key,
-  missing credits, a rate limit, an unknown model, a timeout (60 seconds) or
-  no network shows a notice, and the note does not change. If the note's
-  text changes while the provider answers (an edit on this phone, or a
-  newer version from another device), the answer is not used: the newer
-  text stays, and a notice says so. Redirects are refused, and the
-  provider's error text is never shown.
+  syncs to the user's other devices like any other edit. A dictation keeps
+  its segments as they are. They still say the original words, so its
+  _Subtitles_ show what was said, and they sync with the original, not
+  with the model's text. A rejected key, missing credits, a rate limit, an
+  unknown model, a timeout (60 seconds) or no network shows a notice, and
+  the note does not change. If the note's text changes while the provider
+  answers (an edit on this phone, or a newer version from another device),
+  the answer is not used: the newer text stays, and a notice says so.
+  Redirects are refused, and the provider's error text is never shown.
 - **Code**: `src/onlineRefine.ts` (endpoints, prompts and checks that mirror
   `apps/desktop/src-tauri/src/online.rs`), `src/onlineEdit.ts` (consent
   plan and one send, tested with a mocked fetch), `src/providerKeys.ts`
