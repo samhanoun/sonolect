@@ -245,7 +245,11 @@ export class SegmentRecorder {
     ) {
       return null;
     }
-    if (endMs - startMs <= MAX_CUE_MS) {
+    // The cues say the result's own words, so the segments say what the
+    // note says; the recognizer's words only give their times. When the two
+    // do not line up word for word, the result stays one segment.
+    const said = text.split(/\s+/).filter(Boolean);
+    if (endMs - startMs <= MAX_CUE_MS || said.length !== words.length) {
       const last = words.at(-1)!;
       return [
         {
@@ -255,17 +259,21 @@ export class SegmentRecorder {
         },
       ];
     }
-    return cuesFromWords(words, offset);
+    return cuesFromWords(
+      words.map((word, index) => ({ ...word, segment: said[index]! })),
+      offset,
+    );
   }
 
+  /** Whole milliseconds, as every device stores them (the desktop's are u64). */
   private push(segment: NoteSegment): void {
     if (this.segments.length >= MAX_SEGMENTS) return;
     const lastEnd = this.segments.at(-1)?.endMs ?? 0;
-    const startMs = Math.max(segment.startMs, lastEnd);
+    const startMs = Math.max(Math.round(segment.startMs), lastEnd);
     this.segments.push({
       ...segment,
       startMs,
-      endMs: Math.max(segment.endMs, startMs),
+      endMs: Math.max(Math.round(segment.endMs), startMs),
     });
   }
 }
@@ -273,7 +281,7 @@ export class SegmentRecorder {
 /**
  * The segments of a stored note, or undefined when there are none worth
  * keeping. Unknown fields are dropped (security-6); a broken entry is
- * dropped, never the note.
+ * dropped, never the note. Times are kept in whole milliseconds.
  */
 export function sanitizeSegments(
   value: unknown,
@@ -300,12 +308,55 @@ export function sanitizeSegments(
     total += text.length;
     if (total > maxTextLength) break;
     segments.push({
-      startMs,
-      endMs,
+      startMs: Math.round(startMs),
+      endMs: Math.round(endMs),
       text,
       ...(approx === true ? { approx: true as const } : {}),
     });
   }
   segments.sort((left, right) => left.startMs - right.startMs);
   return segments.length > 0 ? segments : undefined;
+}
+
+const hasWords = (item: unknown): boolean =>
+  typeof item === "object" &&
+  item !== null &&
+  typeof (item as { text?: unknown }).text === "string" &&
+  (item as { text: string }).text.trim() !== "";
+
+/**
+ * The segments the phone shows for a note that came through sync: all of
+ * them, or none when the phone's limits (sanitizeSegments: 2 000 segments,
+ * the text limit, six hours) would drop one that has words. Subtitles of
+ * part of a note would be wrong. The note keeps every segment for sync
+ * either way (sync/noteMapping.ts).
+ */
+export function segmentsToShow(
+  value: unknown,
+  maxTextLength: number,
+): NoteSegment[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const segments = sanitizeSegments(value, maxTextLength);
+  return segments && segments.length === value.filter(hasWords).length
+    ? segments
+    : undefined;
+}
+
+/**
+ * Whether segments say the words of a text, whatever the spacing, as the
+ * desktop compares a studio edit with the saved transcript (same_words in
+ * local_history.rs). The desktop's studio shows a note's segments as its
+ * text, so a note sends only segments that say its words.
+ */
+export function segmentsSayText(
+  segments: readonly NoteSegment[],
+  text: string,
+): boolean {
+  const words = (value: string) => value.split(/\s+/).filter(Boolean);
+  const said = segments.flatMap((segment) => words(segment.text));
+  const written = words(text);
+  return (
+    said.length === written.length &&
+    said.every((word, index) => word === written[index])
+  );
 }

@@ -4,8 +4,11 @@ import { describe, it } from "node:test";
 import {
   MAX_CUE_MS,
   MAX_SEGMENTS,
+  MAX_SEGMENT_MS,
   SegmentRecorder,
   sanitizeSegments,
+  segmentsSayText,
+  segmentsToShow,
   type EnginePart,
 } from "./noteSegments";
 import { TranscriptAccumulator } from "./speechPolicy";
@@ -195,6 +198,65 @@ describe("SegmentRecorder", () => {
     });
   });
 
+  it("keeps whole milliseconds when the recognizer's times have fractions", () => {
+    // iOS reports seconds as doubles; times x 1000 keep their fractions.
+    const r = new SegmentRecorder();
+    r.sessionStarted(T0);
+    r.audioStarted(T0);
+    r.result("call", false, T0 + 900);
+    r.result("call Sam", true, T0 + 1_900, [
+      word(500.4, 800.2, "call"),
+      word(850.5, 1_300.6, "Sam"),
+    ]);
+    assert.deepEqual(r.list(), [
+      { startMs: 500, endMs: 1_301, text: "call Sam" },
+    ]);
+  });
+
+  it("splits a long result with the result's own words", () => {
+    // The recognizer's word list may spell words otherwise than its
+    // transcript (case, punctuation): the cues say what the note says.
+    const r = new SegmentRecorder();
+    r.sessionStarted(T0);
+    r.audioStarted(T0);
+    r.result("we", false, T0 + 700);
+    const text = "We start now. Then, we ship.";
+    r.result(text, true, T0 + 10_000, [
+      word(500, 800, "we"),
+      word(850, 1_200, "start"),
+      word(1_250, 1_700, "now"),
+      word(4_000, 4_400, "then"),
+      word(4_450, 4_900, "we"),
+      word(8_950, 9_400, "ship"),
+    ]);
+    const cues = r.list();
+    assert.deepEqual(
+      cues.map((cue) => [cue.startMs, cue.endMs, cue.text]),
+      [
+        [500, 1_700, "We start now."],
+        [4_000, 4_900, "Then, we"],
+        [8_950, 9_400, "ship."],
+      ],
+    );
+    assert.equal(segmentsSayText(cues, text), true);
+  });
+
+  it("keeps a long result whole when its words do not line up with the recognizer's", () => {
+    const r = new SegmentRecorder();
+    r.sessionStarted(T0);
+    r.audioStarted(T0);
+    r.result("see", false, T0 + 700);
+    const text = "See you in New York tomorrow";
+    r.result(text, true, T0 + 10_000, [
+      word(500, 800, "see"),
+      word(850, 1_200, "you"),
+      word(1_250, 1_500, "in"),
+      word(4_000, 4_900, "New York"),
+      word(8_950, 9_400, "tomorrow"),
+    ]);
+    assert.deepEqual(r.list(), [{ startMs: 500, endMs: 9_400, text }]);
+  });
+
   it("never lets a segment start before the previous one ends", () => {
     const r = new SegmentRecorder();
     r.sessionStarted(T0);
@@ -259,5 +321,67 @@ describe("sanitizeSegments", () => {
     }));
     assert.equal(sanitizeSegments(many, 1_000_000)?.length, MAX_SEGMENTS);
     assert.equal(sanitizeSegments(many, 3)?.length, 3);
+  });
+});
+
+describe("segments of a note that came through sync", () => {
+  const desktop = [
+    { startMs: 0, endMs: 1_200, text: "first", speaker: "A" },
+    { startMs: 1_200, endMs: 3_000, text: "speaker said hello" },
+  ];
+
+  it("shows every segment that fits, without the fields the phone does not use", () => {
+    assert.deepEqual(segmentsToShow(desktop, 1_000), [
+      { startMs: 0, endMs: 1_200, text: "first" },
+      { startMs: 1_200, endMs: 3_000, text: "speaker said hello" },
+    ]);
+    // An empty segment says nothing: leaving it out loses no words.
+    assert.equal(
+      segmentsToShow(
+        [...desktop, { startMs: 3_000, endMs: 3_100, text: " " }],
+        1_000,
+      )?.length,
+      2,
+    );
+    assert.equal(segmentsToShow(undefined, 1_000), undefined);
+    assert.equal(segmentsToShow([], 1_000), undefined);
+  });
+
+  it("shows none when the phone's limits would cut one with words", () => {
+    const many = Array.from({ length: MAX_SEGMENTS + 1 }, (_, i) => ({
+      startMs: i * 10,
+      endMs: i * 10 + 5,
+      text: "w",
+    }));
+    assert.equal(segmentsToShow(many, 1_000_000), undefined);
+    assert.equal(segmentsToShow(desktop, 10), undefined, "past the text limit");
+    assert.equal(
+      segmentsToShow(
+        [
+          ...desktop,
+          {
+            startMs: MAX_SEGMENT_MS,
+            endMs: MAX_SEGMENT_MS + 1_000,
+            text: "eleven hours in",
+          },
+        ],
+        1_000,
+      ),
+      undefined,
+      "past six hours",
+    );
+  });
+
+  it("tells whether segments say a text's words, whatever the spacing", () => {
+    const segments = [
+      { startMs: 0, endMs: 1, text: "Buy milk." },
+      { startMs: 1, endMs: 2, text: " Then  call Ana" },
+    ];
+    assert.equal(segmentsSayText(segments, "Buy milk. Then call Ana"), true);
+    assert.equal(segmentsSayText(segments, "Buy milk.\n\nThen call Ana"), true);
+    assert.equal(segmentsSayText(segments, "Buy milk. Then call Ben"), false);
+    assert.equal(segmentsSayText(segments, "Buy milk. Then call"), false);
+    assert.equal(segmentsSayText(segments, "buy milk. Then call Ana"), false);
+    assert.equal(segmentsSayText([], ""), true);
   });
 });
