@@ -37,7 +37,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// A request with a body gets this many bytes a second on top of
 /// REQUEST_TIMEOUT (about 256 kbit/s): its deadline covers sending the body,
 /// so a full batch of notes still uploads over a slow link.
-const UPLOAD_BYTES_PER_SECOND: u64 = 32 * 1024;
+pub(crate) const UPLOAD_BYTES_PER_SECOND: u64 = 32 * 1024;
 const MAX_REQUEST_BYTES: usize = 5 * 1024 * 1024;
 /// The largest answer read. A full page of changes holds up to 4 MiB of
 /// ciphertext, counted decoded (sync-core's SYNC_LIMITS.maxPageBytes), and
@@ -586,9 +586,7 @@ fn io_failed(_: std::io::Error) -> String {
 fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let mut temp = path.as_os_str().to_owned();
     temp.push(".tmp");
-    let temp = PathBuf::from(temp);
-    fs::write(&temp, bytes).map_err(io_failed)?;
-    fs::rename(&temp, path).map_err(io_failed)
+    super::local_history::replace_file(&PathBuf::from(temp), path, bytes).map_err(io_failed)
 }
 
 fn load_state(sync: &Path) -> Result<BTreeMap<String, String>, String> {

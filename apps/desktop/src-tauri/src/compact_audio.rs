@@ -652,12 +652,40 @@ pub fn read_for_playback(directory: &Path, id: &str, prefer_ogg: bool) -> Result
 
 /// A recording's audio as it is kept, to be saved elsewhere: its Opus file
 /// when it has one (a high-quality one, say), otherwise its WAV with every
-/// sample counted.
+/// sample counted. An Opus file kept beside a WAV that holds more of the
+/// recording (a copy a crash cut short, see `compress`) is not saved: the
+/// WAV is, as it is what plays.
 pub fn read_saved_file(directory: &Path, id: &str) -> Result<Vec<u8>, String> {
-    if let Ok(bytes) = fs::read(directory.join(format!("{id}.opus"))) {
-        return Ok(bytes);
+    let opus = directory.join(format!("{id}.opus"));
+    let wav = directory.join(format!("{id}.wav"));
+    if opus.is_file() && (!wav.is_file() || holds_the_wav(&opus, &wav)) {
+        if let Ok(bytes) = fs::read(&opus) {
+            return Ok(bytes);
+        }
     }
     read_for_playback(directory, id, true)
+}
+
+/// One frame of rounding between two files of the same audio.
+fn shorter(in_opus: u64, in_wav: u64) -> bool {
+    in_opus + (FRAME as u64) < in_wav
+}
+
+/// Whether the Opus file holds all of the audio of the WAV beside it, by
+/// its last page, or by decoding it when that page does not tell. A WAV
+/// that cannot be read holds nothing to compare.
+fn holds_the_wav(opus: &Path, wav: &Path) -> bool {
+    let Ok(in_wav) = read_wav(wav).map(|reader| u64::from(reader.duration())) else {
+        return true;
+    };
+    let in_opus = match opus_length(opus) {
+        Some(length) => length,
+        None => match open(opus) {
+            Ok(samples) => samples.take_while(Result::is_ok).count() as u64,
+            Err(_) => return false,
+        },
+    };
+    !shorter(in_opus, in_wav)
 }
 
 fn compressed_for_playback(path: &Path, prefer_ogg: bool) -> Result<Vec<u8>, String> {
@@ -714,9 +742,7 @@ pub fn compress(directory: &Path, id: &str) -> Result<u64, String> {
     if opus.is_file() {
         let in_wav = u64::from(reader.duration());
         drop(reader);
-        // One frame of rounding between two files of the same audio.
-        let shorter = |in_opus: u64| in_opus + (FRAME as u64) < in_wav;
-        if opus_length(&opus).is_some_and(shorter) {
+        if opus_length(&opus).is_some_and(|in_opus| shorter(in_opus, in_wav)) {
             return Ok(0);
         }
         let mut in_opus = 0u64;
@@ -724,7 +750,7 @@ pub fn compress(directory: &Path, id: &str) -> Result<u64, String> {
             sample?;
             in_opus += 1;
         }
-        if shorter(in_opus) {
+        if shorter(in_opus, in_wav) {
             return Err("The compressed audio is shorter than the recording.".into());
         }
         fs::remove_file(&wav).map_err(io_error)?;
@@ -1703,6 +1729,19 @@ mod tests {
             read_saved_file(dir, "802-1").unwrap() == fs::read(dir.join("802-1.opus")).unwrap()
         );
         assert_eq!(read_saved_file(dir, "803-1").unwrap_err(), GONE);
+        // A copy a crash cut short, kept beside the WAV that has all of the
+        // recording: the WAV is saved, as it is what plays.
+        let whole = crate::streaming::wav_bytes(&sweeps(16_000, 1, 16_000 * 3));
+        high_copy(&dir.join("804-1.hq.opus"), 48_000 * 3, false);
+        fs::write(dir.join("804-1.wav"), &whole).unwrap();
+        assert_eq!(compress(dir, "804-1").unwrap(), 0);
+        assert!(dir.join("804-1.opus").is_file());
+        assert!(read_saved_file(dir, "804-1").unwrap() == whole);
+        // So is the WAV beside an Opus file that cannot be read.
+        let cut = fs::read(dir.join("804-1.opus")).unwrap();
+        fs::write(dir.join("805-1.opus"), &cut[..20]).unwrap();
+        fs::write(dir.join("805-1.wav"), &whole).unwrap();
+        assert!(read_saved_file(dir, "805-1").unwrap() == whole);
     }
 
     #[test]

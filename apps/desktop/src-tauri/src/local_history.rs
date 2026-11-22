@@ -7,7 +7,9 @@ use super::sync::Hlc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::{
+    collections::{HashMap, VecDeque},
     fs,
+    io::Write,
     path::{Path, PathBuf},
     sync::{Mutex, MutexGuard},
     time::{SystemTime, UNIX_EPOCH},
@@ -130,18 +132,28 @@ fn reserved_name(id: &str) -> bool {
             && name.as_bytes()[3].is_ascii_digit())
 }
 
+/// Writes `bytes` to `temp`, then puts it in the place of `path`. The bytes
+/// are on the disk before the rename, so a crash or a power cut leaves the
+/// old file or the new one, never an empty or half-written one.
+pub(super) fn replace_file(temp: &Path, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = fs::File::create(temp)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    drop(file);
+    // Rename replaces atomically on supported desktop filesystems.
+    fs::rename(temp, path)
+}
+
 /// Writes a record whole or not at all.
 fn store(directory: &Path, capture: &Capture) -> Result<(), String> {
     let path = directory.join(format!("{}.json", capture.id));
     let temp = directory.join(format!("{}.json.tmp", capture.id));
-    fs::write(
-        &temp,
-        serde_json::to_vec(capture).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    // Rename replaces atomically on supported desktop filesystems.
-    fs::rename(temp, path).map_err(|e| e.to_string())
+    let bytes = serde_json::to_vec(capture).map_err(|e| e.to_string())?;
+    replace_file(&temp, &path, &bytes).map_err(|e| e.to_string())
 }
+
+/// What a change to a recording answers once the user has deleted it.
+pub(super) const NOT_IN_LIBRARY: &str = "This recording is no longer in your library.";
 
 /// Sent to the webview after a note changes on this device while sync is on,
 /// so the change reaches the other devices soon.
@@ -164,20 +176,55 @@ pub(super) fn write_record(app: &tauri::AppHandle, capture: &mut Capture) -> Res
     Ok(())
 }
 
+/// Saves a recording made on this device once it is transcribed, unless the
+/// user deleted it meanwhile (see `Library::save_if_kept`). Returns whether
+/// it was saved.
+pub(super) fn write_record_if_kept(
+    app: &tauri::AppHandle,
+    capture: &mut Capture,
+) -> Result<bool, String> {
+    let library = Library::open(app)?;
+    let kept = library.save_if_kept(capture)?;
+    if kept {
+        changed_here(app, &library);
+    }
+    Ok(kept)
+}
+
 impl Library {
+    /// Saves a recording made on this device whose record was saved before
+    /// it was transcribed, unless that record is gone: the user deleted the
+    /// note, or all their data, while it was transcribed. A deleted note
+    /// does not come back, and its delete still reaches the other devices.
+    /// Returns whether it was saved.
+    fn save_if_kept(&self, capture: &mut Capture) -> Result<bool, String> {
+        let _records = lock();
+        let path = self.captures.join(format!("{}.json", capture.id));
+        // Only a record known to be gone counts as deleted.
+        if matches!(path.try_exists(), Ok(false)) {
+            return Ok(false);
+        }
+        self.save_local(capture)?;
+        Ok(true)
+    }
+
     /// Changes a saved record, read again under the lock so that a synced
     /// change that arrived meanwhile (a long transcription, say) is kept.
-    /// Returns whether the note changed: a change to the local-only error
-    /// alone (a Retry that failed) is saved as it is, with no new version,
-    /// so it neither reaches the other devices nor wins over their edits.
+    /// A record that is gone is made by `missing`, or stays gone when that
+    /// gives none: the answer is then `None`. Otherwise it says whether the
+    /// note changed: a change to the local-only error alone (a Retry that
+    /// failed) is saved as it is, with no new version, so it neither reaches
+    /// the other devices nor wins over their edits.
     fn change<T>(
         &self,
         id: &str,
-        missing: impl FnOnce() -> Capture,
+        missing: impl FnOnce() -> Option<Capture>,
         change: impl FnOnce(&mut Capture) -> T,
-    ) -> Result<(T, bool), String> {
+    ) -> Result<Option<(T, bool)>, String> {
         let _records = lock();
-        let mut record = read_record(&self.captures, id).unwrap_or_else(missing);
+        let Some(mut record) = read_record(&self.captures, id).or_else(missing) else {
+            return Ok(None);
+        };
         let before = record.clone();
         let outcome = change(&mut record);
         let changed = Capture {
@@ -190,7 +237,7 @@ impl Library {
         } else {
             store(&self.captures, &record)?;
         }
-        Ok((outcome, changed))
+        Ok(Some((outcome, changed)))
     }
 }
 
@@ -198,15 +245,17 @@ impl Library {
 pub(super) fn change_record<T>(
     app: &tauri::AppHandle,
     id: &str,
-    missing: impl FnOnce() -> Capture,
+    missing: impl FnOnce() -> Option<Capture>,
     change: impl FnOnce(&mut Capture) -> T,
-) -> Result<T, String> {
+) -> Result<Option<T>, String> {
     let library = Library::open(app)?;
-    let (outcome, changed) = library.change(id, missing, change)?;
+    let Some((outcome, changed)) = library.change(id, missing, change)? else {
+        return Ok(None);
+    };
     if changed {
         changed_here(app, &library);
     }
-    Ok(outcome)
+    Ok(Some(outcome))
 }
 
 /// The saved record of one recording, when it exists and can be read.
@@ -257,40 +306,65 @@ pub fn process_with(
     id: Option<String>,
     transcribe: impl FnOnce(super::WhisperPayload) -> Result<super::WhisperResult, String>,
 ) -> Result<super::WhisperResult, String> {
-    if payload.audio_bytes.is_empty() || payload.audio_bytes.len() > 5_800_044 {
-        return Err("Invalid recording size.".into());
-    }
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?;
-    let id = id.unwrap_or_else(|| format!("{}-{}", now.as_nanos(), std::process::id()));
-    valid_id(&id)?;
-    let _hold = super::compact_audio::hold(&id);
-    let wav = directory(app)?.join(format!("{id}.wav"));
-    fs::write(wav, &payload.audio_bytes).map_err(|e| format!("Cannot save recording: {e}"))?;
-    let mut record = Capture {
-        id,
-        created_at_ms: now.as_millis() as u64,
-        duration_ms: payload.duration_ms,
-        transcript: None,
-        error: Some("Processing was interrupted. Retry this recording.".into()),
-        language: payload.language.clone(),
-        ..Default::default()
-    };
-    write_record(app, &mut record)?;
-    let mut result = transcribe(payload);
-    match &mut result {
-        Ok(output) => {
-            output.capture_id = Some(record.id.clone());
-            record.transcript = Some(output.text.clone());
-            record.error = None;
-            record.language = output.language.clone();
-            record.segments = output.segments.clone();
+    let library = Library::open(app)?;
+    library.record_and_transcribe(payload, id, transcribe, || changed_here(app, &library))
+}
+
+impl Library {
+    /// Saves a recording, marked for retry, then transcribes it and saves
+    /// what came of it. `saved` runs after each save. A note the user
+    /// deletes while it is transcribed stays deleted: its text is still
+    /// answered, without a saved recording to point to.
+    fn record_and_transcribe(
+        &self,
+        payload: super::WhisperPayload,
+        id: Option<String>,
+        transcribe: impl FnOnce(super::WhisperPayload) -> Result<super::WhisperResult, String>,
+        saved: impl Fn(),
+    ) -> Result<super::WhisperResult, String> {
+        if payload.audio_bytes.is_empty() || payload.audio_bytes.len() > 5_800_044 {
+            return Err("Invalid recording size.".into());
         }
-        Err(error) => record.error = Some(error.clone()),
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| e.to_string())?;
+        let id = id.unwrap_or_else(|| format!("{}-{}", now.as_nanos(), std::process::id()));
+        valid_id(&id)?;
+        let _hold = super::compact_audio::hold(&id);
+        let wav = self.captures.join(format!("{id}.wav"));
+        fs::write(wav, &payload.audio_bytes).map_err(|e| format!("Cannot save recording: {e}"))?;
+        let mut record = Capture {
+            id,
+            created_at_ms: now.as_millis() as u64,
+            duration_ms: payload.duration_ms,
+            transcript: None,
+            error: Some("Processing was interrupted. Retry this recording.".into()),
+            language: payload.language.clone(),
+            ..Default::default()
+        };
+        {
+            let _records = lock();
+            self.save_local(&mut record)?;
+        }
+        saved();
+        let mut result = transcribe(payload);
+        match &mut result {
+            Ok(output) => {
+                record.transcript = Some(output.text.clone());
+                record.error = None;
+                record.language = output.language.clone();
+                record.segments = output.segments.clone();
+            }
+            Err(error) => record.error = Some(error.clone()),
+        }
+        if self.save_if_kept(&mut record)? {
+            saved();
+            if let Ok(output) = &mut result {
+                output.capture_id = Some(record.id.clone());
+            }
+        }
+        result
     }
-    write_record(app, &mut record)?;
-    result
 }
 /// A recording as the library lists it.
 #[derive(Debug, Serialize)]
@@ -324,7 +398,9 @@ fn list_directory(directory: &Path, live: Option<&str>) -> Result<Vec<Listed>, S
     Ok(captures)
 }
 
-#[tauri::command]
+/// Off the main thread, as every command here that reads or writes the
+/// saved records: a large library takes a while to read.
+#[tauri::command(async)]
 pub fn list_local_captures(app: tauri::AppHandle) -> Result<Vec<Listed>, String> {
     // The recording in progress joins the library once it is finished.
     list_directory(&directory(&app)?, super::streaming::live_id().as_deref())
@@ -461,14 +537,22 @@ fn conflict_copy_id(id: &str, loser: &Hlc) -> String {
 /// not know (another version's, kept as `extra`) come back from the saved
 /// segment with the same timings.
 fn keep_segment_extras(saved: &[super::WhisperSegment], edited: &mut [super::WhisperSegment]) {
-    let mut used = vec![false; saved.len()];
+    // The saved segments with each timing, in order: each edited segment
+    // takes the first one not taken yet.
+    let mut timed: HashMap<(u64, u64), VecDeque<usize>> = HashMap::new();
+    for (index, old) in saved.iter().enumerate() {
+        timed
+            .entry((old.start_ms, old.end_ms))
+            .or_default()
+            .push_back(index);
+    }
     for segment in edited {
-        let Some(index) = saved.iter().enumerate().position(|(index, old)| {
-            !used[index] && old.start_ms == segment.start_ms && old.end_ms == segment.end_ms
-        }) else {
+        let Some(index) = timed
+            .get_mut(&(segment.start_ms, segment.end_ms))
+            .and_then(VecDeque::pop_front)
+        else {
             continue;
         };
-        used[index] = true;
         for (key, value) in &saved[index].extra {
             segment
                 .extra
@@ -501,8 +585,7 @@ fn update_record(
 ) -> Result<EditSaved, String> {
     let (transcript, mut segments) = validated_edit(transcript, segments)?;
     let _records = lock();
-    let mut record =
-        read_record(&library.captures, id).ok_or("This recording is no longer in your library.")?;
+    let mut record = read_record(&library.captures, id).ok_or(NOT_IN_LIBRARY)?;
     let now = super::sync::now_ms();
     let conflict_copy = match base {
         Some(base) if base.hlc != record.hlc => {
@@ -544,7 +627,7 @@ fn update_record(
 }
 
 /// Saves the transcript and segments edited in the studio back to a recording.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_local_capture(
     app: tauri::AppHandle,
     id: String,
@@ -573,7 +656,7 @@ impl Library {
 }
 
 /// Deletes a recording at the user's request.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_local_capture(app: tauri::AppHandle, id: String) -> Result<(), String> {
     valid_id(&id)?;
     let library = Library::open(&app)?;
@@ -586,7 +669,7 @@ pub fn delete_local_capture(app: tauri::AppHandle, id: String) -> Result<(), Str
 /// recorded more than that many days ago and not pinned (the retention
 /// setting). Returns how many recordings were removed. Neither is a delete
 /// for sync: the other devices keep their copies.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn purge_local_captures(
     app: tauri::AppHandle,
     older_than_days: Option<u32>,
@@ -1723,6 +1806,25 @@ mod tests {
     }
 
     #[test]
+    fn segments_with_the_same_timings_keep_their_fields_in_order() {
+        let known = |confidence: f64| {
+            let mut known = segment(0, 900, "Hello.", None);
+            known
+                .extra
+                .insert("confidence".into(), serde_json::json!(confidence));
+            known
+        };
+        let saved = [known(0.9), segment(900, 1000, "Hi.", None), known(0.5)];
+        let mut edited = vec![segment(0, 900, "Hello.", None); 3];
+        keep_segment_extras(&saved, &mut edited);
+        let confidence = |segment: &WhisperSegment| segment.extra.get("confidence").cloned();
+        assert_eq!(confidence(&edited[0]), Some(serde_json::json!(0.9)));
+        assert_eq!(confidence(&edited[1]), Some(serde_json::json!(0.5)));
+        // Each saved segment is taken once.
+        assert_eq!(confidence(&edited[2]), None);
+    }
+
+    #[test]
     fn a_retry_that_fails_gives_the_note_no_new_version() {
         let folder = tempfile::tempdir().unwrap();
         let notes = synced_library(folder.path());
@@ -1738,6 +1840,7 @@ mod tests {
             .change("3-1", missing, |record| {
                 record.error = Some("The model is missing.".into())
             })
+            .unwrap()
             .unwrap();
         assert!(!changed);
         let failed = read_record(&notes.captures, "3-1").unwrap();
@@ -1750,11 +1853,129 @@ mod tests {
                 record.error = None;
                 record.transcript = Some("transcribed again".into());
             })
+            .unwrap()
             .unwrap();
         assert!(changed);
         let done = read_record(&notes.captures, "3-1").unwrap();
         assert_eq!(done.hlc.unwrap().d, "desk");
         assert_ne!(done.updated_at_ms, Some(7));
+    }
+
+    fn payload() -> crate::WhisperPayload {
+        crate::WhisperPayload {
+            audio_bytes: crate::streaming::wav_bytes(&[0; 1_600]),
+            mime_type: "audio/wav".into(),
+            duration_ms: 100,
+            language: None,
+            model_path: None,
+        }
+    }
+
+    fn transcribed(text: &str) -> crate::WhisperResult {
+        crate::WhisperResult {
+            text: text.into(),
+            segments: vec![segment(0, 100, text, None)],
+            language: Some("en".into()),
+            capture_id: None,
+        }
+    }
+
+    #[test]
+    fn a_note_deleted_while_it_is_transcribed_stays_deleted() {
+        let folder = tempfile::tempdir().unwrap();
+        let notes = synced_library(folder.path());
+        let sync = notes.sync.clone().unwrap();
+        sync_on(&sync, "desk");
+        let saves = std::cell::Cell::new(0);
+        let saved = || saves.set(saves.get() + 1);
+        // Kept: saved before and after, and the answer names it.
+        let done = notes
+            .record_and_transcribe(
+                payload(),
+                Some("61-1".into()),
+                |_| Ok(transcribed("kept")),
+                saved,
+            )
+            .unwrap();
+        assert_eq!(done.capture_id.as_deref(), Some("61-1"));
+        assert_eq!(saves.get(), 2);
+        let kept = read_record(&notes.captures, "61-1").unwrap();
+        assert_eq!(kept.transcript.as_deref(), Some("kept"));
+        assert_eq!(kept.error, None);
+        assert_eq!(files_of(&notes.captures, "61-1"), ["61-1.json", "61-1.wav"]);
+
+        // Deleted from the library while it is transcribed: the text is
+        // still answered, but the note does not come back.
+        saves.set(0);
+        let done = notes
+            .record_and_transcribe(
+                payload(),
+                Some("62-1".into()),
+                |_| {
+                    assert!(read_record(&notes.captures, "62-1").is_some());
+                    notes.delete_by_user("62-1").unwrap();
+                    Ok(transcribed("deleted meanwhile"))
+                },
+                saved,
+            )
+            .unwrap();
+        assert_eq!(done.text, "deleted meanwhile");
+        assert_eq!(done.capture_id, None);
+        assert_eq!(saves.get(), 1);
+        assert!(files_of(&notes.captures, "62-1").is_empty());
+        // Its delete still reaches the other devices.
+        let deletes: Value =
+            serde_json::from_slice(&fs::read(sync.join("deletes.json")).unwrap()).unwrap();
+        assert!(deletes["62-1"]["deletedAt"].is_object());
+
+        // Nor does one whose transcription failed after the delete.
+        let failed = notes.record_and_transcribe(
+            payload(),
+            Some("63-1".into()),
+            |_| {
+                notes.delete_by_user("63-1").unwrap();
+                Err("The model is missing.".into())
+            },
+            || {},
+        );
+        assert_eq!(failed.unwrap_err(), "The model is missing.");
+        assert!(files_of(&notes.captures, "63-1").is_empty());
+    }
+
+    #[test]
+    fn a_retry_does_not_bring_back_a_note_deleted_meanwhile() {
+        let folder = tempfile::tempdir().unwrap();
+        let notes = synced_library(folder.path());
+        sync_on(notes.sync.as_ref().unwrap(), "desk");
+        record(&notes.captures, "64-1", 5);
+        // The Retry began with the note there; the user deleted it since.
+        let had_record = read_record(&notes.captures, "64-1").is_some();
+        notes.delete_by_user("64-1").unwrap();
+        let rebuilt = || (!had_record).then(Capture::default);
+        let retried = notes
+            .change("64-1", rebuilt, |record| {
+                record.transcript = Some("transcribed again".into())
+            })
+            .unwrap();
+        assert_eq!(retried, None);
+        assert!(files_of(&notes.captures, "64-1").is_empty());
+        // Audio whose record could not be read gets a new one.
+        fs::write(notes.captures.join("65-1.wav"), b"RIFF").unwrap();
+        let fresh = || {
+            Some(Capture {
+                id: "65-1".into(),
+                ..Default::default()
+            })
+        };
+        let ((), changed) = notes
+            .change("65-1", fresh, |record| {
+                record.transcript = Some("found".into())
+            })
+            .unwrap()
+            .unwrap();
+        assert!(changed);
+        let found = read_record(&notes.captures, "65-1").unwrap();
+        assert_eq!(found.transcript.as_deref(), Some("found"));
     }
 
     #[test]
