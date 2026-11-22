@@ -234,6 +234,7 @@ test.describe("Sonolect dictation in the browser preview", () => {
     await dock.getByRole("button", { name: "Dismiss" }).click();
     await expect(dock).toHaveCount(0);
     await page.getByLabel("Processing mode").selectOption("cloud");
+    await expect(page.getByText(PREVIEW_NOTICE)).toBeVisible();
     await page.keyboard.press("Control+Shift+M");
     await expect(dock).toContainText(
       "The browser preview cannot transcribe speech.",

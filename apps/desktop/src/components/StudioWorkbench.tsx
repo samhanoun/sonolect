@@ -652,9 +652,16 @@ export function StudioTranscribe({
           onChange={(event) => void importAudio(event.target.files?.[0])}
         />
       </div>
-      {!isTauriRuntime() && (
-        <p className="studio-notice">{t("studio.transcribe.previewNotice")}</p>
-      )}
+      {/* Not in the one developer setup where the preview transcribes. */}
+      {!isTauriRuntime() &&
+        !previewCanTranscribe({
+          privacyLevel: state.privacyLevel,
+          sttProvider: preferences.stt.provider,
+        }) && (
+          <p className="studio-notice">
+            {t("studio.transcribe.previewNotice")}
+          </p>
+        )}
       <div className="studio-editor-layout">
         <section className="studio-card studio-editor">
           <div className="studio-section-heading">

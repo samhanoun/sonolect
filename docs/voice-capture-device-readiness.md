@@ -36,7 +36,7 @@ Steps:
 One developer setup does transcribe, through a Sonolect API:
 
 1. Start Vite with `VITE_SONOLECT_API_URL=http://127.0.0.1:<api-port>`.
-2. Set Processing mode to `Cloud enabled` and keep `Local Whisper` as the speech model.
+2. Set Processing mode to `Cloud enabled` and keep `Local Whisper` as the speech model. The Transcribe page then no longer shows the browser preview notice.
 3. Record. On Stop, the preview sends the audio to `POST /v1/transcribe` on that API and the text to `POST /v1/polish`. If `/v1/transcribe` fails or returns no text, it falls back to `POST /audio/jobs` and `POST /audio/jobs/{id}/audio`.
 
 With an online speech model, or in `Local only`, the preview refuses before it records, as above. If Processing mode changes to `Local only` while a recording runs, the preview drops that recording and says so.
