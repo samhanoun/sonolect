@@ -3,6 +3,7 @@ import { strict as assert } from "node:assert";
 import {
   DEFAULT_PUSH_TO_TALK_SHORTCUT,
   DEFAULT_TOGGLE_SHORTCUT,
+  isMacPlatform,
   isTauriRuntime,
   normalizeShortcutAccelerator,
 } from "./desktopNative";
@@ -23,5 +24,11 @@ describe("desktop native integration helpers", () => {
   it("detects packaged Tauri runtime without assuming browser tests are native", () => {
     assert.equal(isTauriRuntime({}), false);
     assert.equal(isTauriRuntime({ __TAURI_INTERNALS__: {} }), true);
+  });
+
+  it("knows macOS, where the shortcuts use Cmd", () => {
+    assert.equal(isMacPlatform({ platform: "MacIntel" }), true);
+    assert.equal(isMacPlatform({ platform: "Win32" }), false);
+    assert.equal(isMacPlatform({ platform: "Linux x86_64" }), false);
   });
 });

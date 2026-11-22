@@ -21,7 +21,12 @@ import {
   subscribeMicLevel,
   useDesktopStore,
 } from "../store/appStore";
-import { isTauriRuntime } from "../desktopNative";
+import {
+  DEFAULT_PUSH_TO_TALK_SHORTCUT,
+  DEFAULT_TOGGLE_SHORTCUT,
+  isMacPlatform,
+  isTauriRuntime,
+} from "../desktopNative";
 import {
   nativeProviderCall,
   setProviderMode,
@@ -57,7 +62,11 @@ import { transcribeAudioFile } from "../liveCaptureNative";
 import { downloadFile, readCaptureAudioFile } from "../captureAudioFile";
 import { STT_LANGUAGES } from "../sttLanguages";
 import { loadBubbleVisibility, saveBubbleVisibility } from "../bubbleBridge";
-import type { BubbleVisibility } from "../dictationBubble";
+import {
+  compactAccelerator,
+  displayAccelerator,
+  type BubbleVisibility,
+} from "../dictationBubble";
 import {
   exportTranscript,
   type TranscriptExportFormat,
@@ -65,6 +74,7 @@ import {
 import {
   RETENTION_DAY_CHOICES,
   applyCaptureRetention,
+  countExpiredCaptures,
   deleteAllLocalData,
   loadCaptureRetentionDays,
   retentionLabel,
@@ -320,7 +330,9 @@ export function StudioOverview({ captures }: { captures: SavedCapture[] }) {
             {recordingState === "recording"
               ? t("studio.dictation.stop")
               : t("studio.dictation.start")}
-            <kbd>Ctrl ⇧ M</kbd>
+            <kbd>
+              {compactAccelerator(DEFAULT_TOGGLE_SHORTCUT, isMacPlatform())}
+            </kbd>
           </button>
         </div>
         <SignalMeter live={recordingState === "recording"} />
@@ -428,8 +440,11 @@ export function StudioTranscribe({
     customInstruction ?? t("studio.transcribe.defaultInstruction");
   const allowCloud = () => useDesktopStore.getState().privacyLevel === "cloud";
   // The app's recorder holds one recording at a time: a file is not imported
-  // while it records, and nothing is recorded while it takes a file.
+  // while it records or takes another file, and nothing is recorded while it
+  // takes a file. An import goes on when the page is left, so whether one
+  // runs is asked of the store, not of this page.
   const capturing = isCapturing(state.recordingState);
+  const importing = isTauriRuntime() && state.importingAudio;
   const importAudio = async (file?: File) => {
     if (!file) return;
     const native = isTauriRuntime();
@@ -445,9 +460,15 @@ export function StudioTranscribe({
       if (input.current) input.current.value = "";
       return;
     }
-    if (native && isCapturing(useDesktopStore.getState().recordingState))
-      return;
-    if (native) useDesktopStore.setState({ importingAudio: true });
+    if (native) {
+      const { recordingState, importingAudio } = useDesktopStore.getState();
+      // The notice under the editor already says an import is running.
+      if (isCapturing(recordingState) || importingAudio) {
+        if (input.current) input.current.value = "";
+        return;
+      }
+      useDesktopStore.setState({ importingAudio: true });
+    }
     setBusy(true);
     setMessage("");
     try {
@@ -641,7 +662,7 @@ export function StudioTranscribe({
         <button
           className="studio-button secondary"
           onClick={() => input.current?.click()}
-          disabled={busy || (capturing && isTauriRuntime())}
+          disabled={busy || importing || (capturing && isTauriRuntime())}
         >
           <Upload size={16} />
           {t("studio.transcribe.import")}
@@ -694,6 +715,7 @@ export function StudioTranscribe({
           </div>
           {view === "text" ? (
             <textarea
+              data-transcript-editor
               aria-label={t("studio.transcribe.editorLabel")}
               placeholder={t("studio.transcribe.placeholder")}
               value={state.transcript}
@@ -788,10 +810,17 @@ export function StudioTranscribe({
                 <p>{state.liveTranscript}</p>
               </div>
             )}
-          {(message || player.error || state.voiceError) && (
+          {(message ||
+            player.error ||
+            state.voiceError ||
+            (importing && !busy)) && (
             <StatusNotice
               text={
-                message || player.error || t.message(state.voiceError || "")
+                message ||
+                player.error ||
+                (state.voiceError
+                  ? t.message(state.voiceError)
+                  : t("studio.transcribe.importRunning"))
               }
             />
           )}
@@ -1093,7 +1122,19 @@ export function StudioLibrary({
     }
   };
   const remove = async (id: string) => {
-    if (!window.confirm(t("studio.library.confirmDelete"))) return;
+    // While sync is on (or still starting), a delete goes to every device.
+    const sync = getSyncController()?.getView();
+    const everywhere = sync?.available === true && sync.phase !== "off";
+    if (
+      !window.confirm(
+        t(
+          everywhere
+            ? "studio.library.confirmDeleteEverywhere"
+            : "studio.library.confirmDelete",
+        ),
+      )
+    )
+      return;
     try {
       await nativeProviderCall("delete_local_capture", { id });
       await refresh();
@@ -1437,7 +1478,12 @@ function dictationLanguageLabel(
     : `${language.nativeName} (${translated})`;
 }
 
-function PrivacyControls() {
+/** `onLibraryChanged` reloads the library list once recordings were deleted. */
+function PrivacyControls({
+  onLibraryChanged,
+}: {
+  onLibraryChanged?: (() => unknown) | undefined;
+}) {
   const recordingState = useDesktopStore((s) => s.recordingState);
   const t = useT();
   const [retention, setRetention] = useState<RetentionDays>(() =>
@@ -1450,7 +1496,38 @@ function PrivacyControls() {
     recordingState === "recording" ||
     recordingState === "uploading" ||
     recordingState === "requesting-permission";
+  // One question at a time: on Windows each arrow key on the closed list
+  // is a change.
+  const askingRetention = useRef(false);
   const changeRetention = async (days: RetentionDays) => {
+    if (askingRetention.current) return;
+    if (native && days !== 0) {
+      // A period shorter than the recordings deletes them now, for good, so
+      // it is asked first. Declined, the list keeps the old choice.
+      askingRetention.current = true;
+      try {
+        let expired: number | undefined;
+        try {
+          expired = countExpiredCaptures(await listSavedCaptures(), days);
+        } catch {
+          expired = undefined;
+        }
+        const period = retentionLabel(days);
+        if (
+          expired !== 0 &&
+          !window.confirm(
+            expired === undefined
+              ? t("studio.privacy.confirmRetentionUnknown", { period })
+              : t.count("studio.privacy.confirmRetention", expired, {
+                  period,
+                }),
+          )
+        )
+          return;
+      } finally {
+        askingRetention.current = false;
+      }
+    }
     setRetention(days);
     saveCaptureRetentionDays(days);
     if (!native || days === 0) {
@@ -1463,6 +1540,7 @@ function PrivacyControls() {
     }
     try {
       const removed = await applyCaptureRetention(nativeProviderCall, days);
+      if (removed) void onLibraryChanged?.();
       setMessage(
         removed
           ? t.count("studio.privacy.savedDeleted", removed, {
@@ -1631,9 +1709,22 @@ function PrivacyControls() {
   );
 }
 
-export function StudioSettings() {
+export function StudioSettings({
+  onLibraryChanged,
+}: {
+  onLibraryChanged?: () => unknown;
+} = {}) {
   const state = useDesktopStore();
   const t = useT();
+  // The shortcuts are CommandOrControl: Cmd on macOS, Ctrl elsewhere.
+  const mac = isMacPlatform();
+  const keyNames = { Shift: t("studio.keys.shift") };
+  const toggleKeys = displayAccelerator(DEFAULT_TOGGLE_SHORTCUT, mac, keyNames);
+  const holdKeys = displayAccelerator(
+    DEFAULT_PUSH_TO_TALK_SHORTCUT,
+    mac,
+    keyNames,
+  );
   const [bubbleVisibility, setBubbleVisibility] =
     useState<BubbleVisibility>(loadBubbleVisibility);
   const [model, setModel] = useState<{ ready: boolean; path: string }>(),
@@ -1796,8 +1887,8 @@ export function StudioSettings() {
         <h3 id="bubble-settings">{t("studio.settings.bubbleTitle")}</h3>
         <p className="studio-muted">
           {t("studio.settings.bubbleHint", {
-            toggle: `Ctrl + ${t("studio.keys.shift")} + M`,
-            hold: `Ctrl + ${t("studio.keys.shift")} + V`,
+            toggle: toggleKeys,
+            hold: holdKeys,
             cancel: t("studio.keys.esc"),
           })}
         </p>
@@ -1821,16 +1912,16 @@ export function StudioSettings() {
       </section>
       <MicrophoneSettings />
       <StudioSync />
-      <PrivacyControls />
+      <PrivacyControls onLibraryChanged={onLibraryChanged} />
       <section className="studio-card">
         <h3>{t("studio.settings.shortcutsTitle")}</h3>
         <div className="studio-workflow-row">
           <span>{t("studio.settings.shortcutToggle")}</span>
-          <kbd>Ctrl + {t("studio.keys.shift")} + M</kbd>
+          <kbd>{toggleKeys}</kbd>
         </div>
         <div className="studio-workflow-row">
           <span>{t("studio.settings.shortcutHold")}</span>
-          <kbd>Ctrl + {t("studio.keys.shift")} + V</kbd>
+          <kbd>{holdKeys}</kbd>
         </div>
         <div className="studio-workflow-row">
           <span>{t("studio.settings.shortcutCancel")}</span>
@@ -1838,7 +1929,7 @@ export function StudioSettings() {
         </div>
         <div className="studio-workflow-row">
           <span>{t("studio.settings.shortcutNav")}</span>
-          <kbd>Ctrl + K</kbd>
+          <kbd>{displayAccelerator("CommandOrControl+K", mac)}</kbd>
         </div>
         <p className="studio-muted">{t("studio.settings.storageHint")}</p>
       </section>

@@ -16,6 +16,7 @@ import {
   segmentsToText,
   singleCaptureId,
   speakerColorIndex,
+  speakerColors,
   speakerNames,
   splitTranscriptSegment,
   textToSegments,
@@ -372,6 +373,21 @@ describe("reordering, merging and speakers", () => {
     assert.equal(speakerColorIndex(list, "Ben"), 1);
     assert.equal(speakerColorIndex(list, undefined), undefined);
     assert.equal(speakerColorIndex(list, "Nobody"), undefined);
+  });
+
+  it("works out every speaker's colour at once, as one row would", () => {
+    const [a, b, c] = recorded();
+    const names = ["Ana", "Ben", "Cy", "Dee", "Eve", "Fay", "Gus"];
+    const list = names.map((name, index) =>
+      assignSpeakerLabel([a!, b!, c!][index % 3]!, ` ${name} `),
+    );
+    const colors = speakerColors(list);
+    assert.deepEqual([...colors.keys()], names);
+    for (const name of names)
+      assert.equal(colors.get(name), speakerColorIndex(list, name));
+    // Seven speakers share six colours: the seventh takes the first again.
+    assert.equal(colors.get("Gus"), 0);
+    assert.equal(speakerColors([]).size, 0);
   });
 
   it("has no single recording for a transcript built from several", () => {

@@ -57,13 +57,28 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** A letter, mark, digit or underscore in any script: part of a word. */
+const WORD_CHARACTER = "[\\p{L}\\p{M}\\p{N}_]";
+
+/**
+ * Replaces each entry where it stands as a whole word. Unlike `\b`, which
+ * knows only ASCII letters, a word may start or end with an accented letter
+ * ("café", "Éric") or a symbol ("C++"). The character before is matched
+ * rather than looked behind, which older WebKit cannot do.
+ */
 export function applyDictionary(
   text: string,
   entries: DictionaryEntry[],
 ): string {
   return entries.reduce((current, entry) => {
-    const pattern = new RegExp(`\\b${escapeRegex(entry.spoken)}\\b`, "gi");
-    return current.replace(pattern, () => entry.replacement);
+    const pattern = new RegExp(
+      `(^|[^\\p{L}\\p{M}\\p{N}_])${escapeRegex(entry.spoken)}(?!${WORD_CHARACTER})`,
+      "giu",
+    );
+    return current.replace(
+      pattern,
+      (_match, before: string) => `${before}${entry.replacement}`,
+    );
   }, text);
 }
 

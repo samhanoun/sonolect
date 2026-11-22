@@ -18,7 +18,12 @@ import {
 import { useDesktopStore, type ViewId } from "../store/appStore";
 import { useProviderStore, setProviderMode } from "../providerSettings";
 import { useT, type LocaleKeys } from "../i18n";
-import { isTauriRuntime } from "../desktopNative";
+import {
+  DEFAULT_TOGGLE_SHORTCUT,
+  isMacPlatform,
+  isTauriRuntime,
+} from "../desktopNative";
+import { compactAccelerator } from "../dictationBubble";
 import { formatTimestamp } from "../lib/format";
 import StudioModels from "./StudioModels";
 import {
@@ -284,8 +289,8 @@ export default function StudioShell() {
     dictionary: <StudioVocabulary />,
     snippets: <StudioVocabulary snippets />,
     models: <StudioModels />,
-    settings: <StudioSettings />,
-    onboarding: <StudioSettings />,
+    settings: <StudioSettings onLibraryChanged={refresh} />,
+    onboarding: <StudioSettings onLibraryChanged={refresh} />,
   };
   return (
     <div className="studio-shell">
@@ -306,7 +311,9 @@ export default function StudioShell() {
           {recordingState === "recording"
             ? t("studio.dictation.stop")
             : t("studio.dictation.new")}
-          <kbd>Ctrl ⇧ M</kbd>
+          <kbd>
+            {compactAccelerator(DEFAULT_TOGGLE_SHORTCUT, isMacPlatform())}
+          </kbd>
         </button>
         {navigationGroups.map((group) => (
           <div className="studio-nav-group" key={group.id}>
@@ -378,7 +385,9 @@ export default function StudioShell() {
               aria-label={t("studio.topbar.search")}
             >
               <Search size={17} />
-              <kbd>Ctrl K</kbd>
+              <kbd>
+                {compactAccelerator("CommandOrControl+K", isMacPlatform())}
+              </kbd>
             </button>
           </div>
         </header>

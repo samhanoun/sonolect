@@ -8,6 +8,7 @@ import {
   bubblePhaseFor,
   bubbleSizeFor,
   canCancel,
+  compactAccelerator,
   displayAccelerator,
   formatElapsed,
   isBubbleAction,
@@ -127,6 +128,17 @@ describe("dictation bubble phases", () => {
         t,
       ),
       "Copié. Appuyez sur Ctrl+V pour coller.",
+    );
+    // On macOS the paste key is Cmd+V.
+    assert.equal(
+      bubbleDetailFor(
+        "copied",
+        { kind: "copied", text: "a", reason: "r" },
+        undefined,
+        t,
+        displayAccelerator("CommandOrControl+V", true),
+      ),
+      "Copié. Appuyez sur ⌘V pour coller.",
     );
     assert.equal(
       bubbleDetailFor("error", undefined, "error.micPermissionDenied", t),
@@ -270,6 +282,10 @@ describe("dictation bubble meter and labels", () => {
       displayAccelerator("CommandOrControl+Shift+M", true, { Shift: "Maj" }),
       "⌘⇧M",
     );
+    // The short form for small key caps.
+    assert.equal(compactAccelerator("CommandOrControl+Shift+M"), "Ctrl ⇧ M");
+    assert.equal(compactAccelerator("CommandOrControl+Shift+M", true), "⌘⇧M");
+    assert.equal(compactAccelerator("CommandOrControl+K"), "Ctrl K");
   });
 });
 

@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { saveTranscriptDraft, clearTranscriptDraft } from "./persistence";
+import { transcriptUndoAction } from "./transcriptUndo";
 import {
   isTauriRuntime,
   registerNativeDictationShortcuts,
@@ -35,6 +36,7 @@ function App() {
   const selectedSegmentIds = useDesktopStore(
     (state) => state.selectedSegmentIds,
   );
+  const openedVersion = useDesktopStore((state) => state.openedVersion);
   const undoTranscriptEdit = useDesktopStore(
     (state) => state.undoTranscriptEdit,
   );
@@ -52,14 +54,15 @@ function App() {
         event.preventDefault();
         setCommandOpen(true);
       }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+      // Another field (the dictionary, the search) keeps its own undo.
+      const undo = transcriptUndoAction(
+        event,
+        useDesktopStore.getState().activeView === "transcribe",
+      );
+      if (undo) {
         event.preventDefault();
-        if (event.shiftKey) redoTranscriptEdit();
+        if (undo === "redo") redoTranscriptEdit();
         else undoTranscriptEdit();
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "y") {
-        event.preventDefault();
-        redoTranscriptEdit();
       }
       // Hands-free toggle: ⌘⇧M — press to start, press to stop
       if (
@@ -160,8 +163,15 @@ function App() {
       transcriptSegments,
       selectedSegmentIds,
       savedAt: new Date().toISOString(),
+      openedVersion,
     });
-  }, [activeSessionId, transcript, transcriptSegments, selectedSegmentIds]);
+  }, [
+    activeSessionId,
+    transcript,
+    transcriptSegments,
+    selectedSegmentIds,
+    openedVersion,
+  ]);
 
   return <StudioShell />;
 }

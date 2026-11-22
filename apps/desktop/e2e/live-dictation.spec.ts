@@ -3,6 +3,7 @@ import {
   emitNativeEvent,
   installMockTauri,
   nativeCalls,
+  releaseNative,
 } from "./support/mockTauri";
 
 function nav(page: Page, name: string) {
@@ -122,6 +123,82 @@ test.describe("dictation with the app's recorder", () => {
     await expect(page.getByLabel("Transcript editor")).toHaveValue("");
     await nav(page, "Library").click();
     await expect(page.getByText("Part 1.")).toHaveCount(0);
+  });
+
+  test("cancelling while it transcribes deletes the recording once it is saved", async ({
+    page,
+  }) => {
+    await installMockTauri(page, [], { hold: ["capture_finish"] });
+    await page.goto("/");
+    await emitNativeEvent(page, BUBBLE_ACTION, "toggle");
+    const dock = page.locator(".studio-recording-dock");
+    await expect(dock).toContainText("Listening…");
+    await expect
+      .poll(() => recordedBytes(page), { timeout: 15_000 })
+      .toBeGreaterThan(3 * 32000);
+    await emitNativeEvent(page, BUBBLE_ACTION, "finish");
+    // The native side is finishing and transcribing it: cancel now.
+    await expect
+      .poll(async () => (await nativeCalls(page, "capture_finish")).length)
+      .toBe(1);
+    await emitNativeEvent(page, BUBBLE_ACTION, "cancel");
+    await expect(dock).toHaveCount(0);
+
+    // The native side saves it anyway; the app then deletes it.
+    await releaseNative(page, "capture_finish");
+    const [finish] = await nativeCalls(page, "capture_finish");
+    const { id } = finish!.args as { id: string };
+    await expect
+      .poll(async () =>
+        (await nativeCalls(page, "delete_local_capture")).map(
+          (call) => call.args,
+        ),
+      )
+      .toEqual([{ id }]);
+    expect(await nativeCalls(page, "insert_text_into_active_app")).toEqual([]);
+    await nav(page, "Transcribe").click();
+    await expect(page.getByLabel("Transcript editor")).toHaveValue("");
+    await nav(page, "Library").click();
+    await expect(page.getByText("Part 1.")).toHaveCount(0);
+  });
+
+  test("cancelling the short path while it transcribes deletes its recording too", async ({
+    page,
+  }) => {
+    await installMockTauri(page, [], {
+      recorder: false,
+      transcribeAudio: "Short note.",
+      hold: ["transcribe_audio"],
+    });
+    await page.goto("/");
+    await emitNativeEvent(page, BUBBLE_ACTION, "toggle");
+    const dock = page.locator(".studio-recording-dock");
+    await expect(dock).toContainText("Listening…");
+    // The recorder could not start: the browser records it instead.
+    expect(await nativeCalls(page, "capture_begin")).toHaveLength(1);
+    await page.waitForTimeout(500);
+    await emitNativeEvent(page, BUBBLE_ACTION, "finish");
+    // The recording went to the speech model: cancel now.
+    await expect
+      .poll(async () => (await nativeCalls(page, "transcribe_audio")).length)
+      .toBe(1);
+    await emitNativeEvent(page, BUBBLE_ACTION, "cancel");
+    await expect(dock).toHaveCount(0);
+
+    // The native side saves it anyway; the app then deletes it.
+    await releaseNative(page, "transcribe_audio");
+    await expect
+      .poll(async () =>
+        (await nativeCalls(page, "delete_local_capture")).map(
+          (call) => (call.args as { id: string }).id,
+        ),
+      )
+      .toEqual([expect.stringMatching(/^1700000000002-/)]);
+    expect(await nativeCalls(page, "insert_text_into_active_app")).toEqual([]);
+    await nav(page, "Transcribe").click();
+    await expect(page.getByLabel("Transcript editor")).toHaveValue("");
+    await nav(page, "Library").click();
+    await expect(page.getByText("Short note.")).toHaveCount(0);
   });
 
   test("without a speech model the short path explains what is missing", async ({

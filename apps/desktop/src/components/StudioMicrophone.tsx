@@ -25,6 +25,9 @@ const TEST_MS = 15_000;
 /** How much of the level is left after each block of audio (about 60 ms). */
 const LEVEL_DECAY = 0.8;
 
+/** A running test. It has no stream yet while the microphone opens. */
+type MicTest = { stream?: MediaStream; source?: PcmSource };
+
 /**
  * Settings card for the microphone: which one records, and a level meter to
  * check that it hears you before a dictation depends on it.
@@ -50,11 +53,10 @@ export function MicrophoneSettings() {
   }, []);
   const [microphones, setMicrophones] = useState<Microphone[]>([]);
   const [testing, setTesting] = useState(false);
+  const [opening, setOpening] = useState(false);
   const [level, setLevel] = useState(0);
   const [message, setMessage] = useState("");
-  const test = useRef<{ stream: MediaStream; source?: PcmSource } | undefined>(
-    undefined,
-  );
+  const test = useRef<MicTest | undefined>(undefined);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const held = useRef(0);
 
@@ -71,11 +73,12 @@ export function MicrophoneSettings() {
     const current = test.current;
     test.current = undefined;
     setTesting(false);
+    setOpening(false);
     held.current = 0;
     setLevel(0);
     if (!current) return;
     await current.source?.close().catch(() => undefined);
-    current.stream.getTracks().forEach((track) => track.stop());
+    current.stream?.getTracks().forEach((track) => track.stop());
   }, []);
 
   useEffect(() => {
@@ -95,11 +98,21 @@ export function MicrophoneSettings() {
   }, [busy, stopTest]);
 
   const startTest = async () => {
+    // One test at a time, also while the microphone is still opening.
+    if (test.current) return;
+    const current: MicTest = {};
+    test.current = current;
+    setOpening(true);
     setMessage("");
     try {
       const { stream, fellBack } = await openMicrophone(micDeviceId);
-      const current: { stream: MediaStream; source?: PcmSource } = { stream };
-      test.current = current;
+      if (test.current !== current) {
+        // Stopped while it opened: the page closed or a dictation started.
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      current.stream = stream;
+      setOpening(false);
       setTesting(true);
       if (fellBack) setMessage(t("studio.mic.fellBack"));
       // Names are only given once access is allowed: list again.
@@ -113,11 +126,14 @@ export function MicrophoneSettings() {
       });
       if (test.current !== current) {
         await source.close().catch(() => undefined);
+        stream.getTracks().forEach((track) => track.stop());
         return;
       }
       current.source = source;
       timer.current = setTimeout(() => void stopTest(), TEST_MS);
     } catch {
+      // Stopped meanwhile: stopTest already let the microphone go.
+      if (test.current !== current) return;
       await stopTest();
       setMessage(t("error.micPermissionDenied"));
     }
@@ -193,7 +209,7 @@ export function MicrophoneSettings() {
       <div className="studio-mic-test">
         <button
           className="studio-button secondary"
-          disabled={busy}
+          disabled={busy || opening}
           onClick={() => void (testing ? stopTest() : startTest())}
         >
           <Mic size={15} />

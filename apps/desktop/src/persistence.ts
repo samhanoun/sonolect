@@ -18,13 +18,36 @@ export const SETTINGS_KEYS = {
   transcriptDraft: `${KEY_PREFIX}transcriptDraft`,
 } as const;
 
+/** The saved recording a draft was opened from, at the version it had then. */
+export type DraftOpenedVersion = {
+  id: string;
+  hlc: { t: number; c: number; d: string } | null;
+};
+
 export type TranscriptDraft = {
   activeSessionId: string | null;
   transcript: string;
   transcriptSegments: TranscriptSegment[];
   selectedSegmentIds: string[];
   savedAt: string;
+  /**
+   * Kept so that a save after a restart still keeps a version that sync
+   * wrote meanwhile, as a conflict copy.
+   */
+  openedVersion?: DraftOpenedVersion | null;
 };
+
+function parseOpenedVersion(value: unknown): DraftOpenedVersion | null {
+  if (!value || typeof value !== "object") return null;
+  const { id, hlc } = value as { id?: unknown; hlc?: unknown };
+  if (typeof id !== "string" || !id) return null;
+  if (hlc === null) return { id, hlc: null };
+  if (!hlc || typeof hlc !== "object") return null;
+  const { t, c, d } = hlc as { t?: unknown; c?: unknown; d?: unknown };
+  return typeof t === "number" && typeof c === "number" && typeof d === "string"
+    ? { id, hlc: { t, c, d } }
+    : null;
+}
 
 function isLocalStorageAvailable(): boolean {
   try {
@@ -81,6 +104,7 @@ export function loadTranscriptDraft(): TranscriptDraft | null {
     ) {
       return null;
     }
+    const openedVersion = parseOpenedVersion(draft.openedVersion);
     return {
       activeSessionId:
         typeof draft.activeSessionId === "string"
@@ -92,6 +116,7 @@ export function loadTranscriptDraft(): TranscriptDraft | null {
         (id): id is string => typeof id === "string",
       ),
       savedAt: draft.savedAt,
+      ...(openedVersion ? { openedVersion } : {}),
     };
   } catch {
     return null;

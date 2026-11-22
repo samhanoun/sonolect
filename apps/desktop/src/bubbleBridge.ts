@@ -26,7 +26,11 @@ import {
   type BubbleState,
   type BubbleVisibility,
 } from "./dictationBubble";
-import { DEFAULT_TOGGLE_SHORTCUT, isTauriRuntime } from "./desktopNative";
+import {
+  DEFAULT_TOGGLE_SHORTCUT,
+  isMacPlatform,
+  isTauriRuntime,
+} from "./desktopNative";
 import { getLocale, getT, useI18nStore } from "./i18n";
 import { subscribeMicLevel, useDesktopStore } from "./store/appStore";
 
@@ -56,10 +60,6 @@ const FINISHED: ReadonlySet<BubblePhase> = new Set([
   "error",
 ]);
 const LEVEL_FRAME_MS = 45;
-
-function isMac(): boolean {
-  return /Mac/i.test(globalThis.navigator?.platform ?? "");
-}
 
 /**
  * Keeps the bubble window in sync with the store, from the main window.
@@ -136,8 +136,14 @@ export function startDictationBubbleBridge(): () => void {
       const state: BubbleState = {
         phase,
         startedAt: phase === "listening" ? startedAt : null,
-        detail: bubbleDetailFor(phase, st.dictationOutcome, st.voiceError, t),
-        hotkey: displayAccelerator(DEFAULT_TOGGLE_SHORTCUT, isMac(), {
+        detail: bubbleDetailFor(
+          phase,
+          st.dictationOutcome,
+          st.voiceError,
+          t,
+          displayAccelerator("CommandOrControl+V", isMacPlatform()),
+        ),
+        hotkey: displayAccelerator(DEFAULT_TOGGLE_SHORTCUT, isMacPlatform(), {
           Shift: t("studio.keys.shift"),
         }),
         locale: getLocale(),

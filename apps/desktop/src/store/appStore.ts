@@ -83,6 +83,7 @@ import {
   type DictationSource,
 } from "../dictationBubble";
 import {
+  nativeProviderCall,
   useProviderStore,
   transcribeUsingProvider,
   setProviderMode,
@@ -300,6 +301,19 @@ let discardCapture = false;
 let captureGeneration = 0;
 let meterContext: AudioContext | undefined;
 
+/**
+ * A dictation cancelled while it was being transcribed. The native side
+ * saves the recording all the same once it is done, so it is deleted then,
+ * as the Library deletes one. A note that never reached the sync server
+ * leaves nothing there; one that did goes from the other devices too.
+ */
+function discardCancelledCapture(captureId: string | undefined) {
+  if (!captureId) return;
+  void nativeProviderCall("delete_local_capture", { id: captureId }).catch(
+    () => undefined,
+  );
+}
+
 type LevelListener = (level: number) => void;
 const levelListeners = new Set<LevelListener>();
 
@@ -383,9 +397,10 @@ async function deliverDictation(text: string): Promise<DictationOutcome> {
 
 /**
  * Puts a finished capture into the transcript and, for a bubble or hotkey
- * dictation, pastes its polished text into the app in front.
+ * dictation, pastes its polished text into the app in front. Exported for
+ * its tests.
  */
-async function completeCapture(
+export async function completeCapture(
   api: TranscriptJobResult,
   metadata: VoiceCaptureMetadata,
   objectUrl: string,
@@ -397,6 +412,8 @@ async function completeCapture(
     completedAt,
     api,
   };
+  // Sent to a transcription job: no text yet, only the message saying so.
+  const pending = api.status === "submitted";
   useDesktopStore.setState((state) => {
     const nextBaseState = {
       recordingState:
@@ -404,8 +421,10 @@ async function completeCapture(
       voiceCapture: capture,
       liveTranscript: "",
       // A recording that stopped by itself is kept: its note says why.
-      voiceError: api.status === "offline" ? api.message : stallNotice,
+      voiceError:
+        api.status === "offline" || pending ? api.message : stallNotice,
     };
+    if (pending) return nextBaseState;
     const savedSegments = api.captureId
       ? segmentsFromCapture({
           id: api.captureId,
@@ -449,6 +468,16 @@ async function completeCapture(
   });
   const { dictationSource } = useDesktopStore.getState();
   if (dictationSource === "app" || api.status === "offline") return;
+  if (pending) {
+    // Nothing to paste: the bubble says why instead.
+    useDesktopStore.setState({
+      dictationOutcome: {
+        kind: "error",
+        message: api.message || getT()("voice.sentForTranscription"),
+      },
+    });
+    return;
+  }
   const spoken =
     api.transcript?.trim() ||
     (api.segments ?? []).map((segment) => segment.text).join(" ");
@@ -531,12 +560,31 @@ function polishedForState(
   });
 }
 
+/** Whether `a` is the recording `b` names, at the same version. */
+function sameVersion(
+  a: OpenedVersion | null | undefined,
+  b: OpenedVersion,
+): boolean {
+  if (a?.id !== b.id) return false;
+  if (a.hlc === null || b.hlc === null) return a.hlc === b.hlc;
+  return a.hlc.t === b.hlc.t && a.hlc.c === b.hlc.c && a.hlc.d === b.hlc.d;
+}
+
 const restoredDraft = loadTranscriptDraft();
+// The version the draft's recording was opened at, kept as it was then: a
+// version sync wrote since is then kept as a conflict copy by a save.
+const restoredVersion: OpenedVersion | null =
+  restoredDraft?.openedVersion &&
+  restoredDraft.openedVersion.id ===
+    singleCaptureId(restoredDraft.transcriptSegments)
+    ? restoredDraft.openedVersion
+    : null;
 const initialTranscriptSnapshot: TranscriptUndoSnapshot = restoredDraft
   ? {
       transcript: restoredDraft.transcript,
       transcriptSegments: restoredDraft.transcriptSegments,
       selectedSegmentIds: restoredDraft.selectedSegmentIds,
+      openedVersion: restoredVersion,
     }
   : { transcript: "", transcriptSegments: [], selectedSegmentIds: [] };
 const transcriptUndoStack = createTranscriptUndoStack(
@@ -601,29 +649,33 @@ function undoFlags() {
   };
 }
 
-function snapshotFromState(
-  state: Pick<
-    DesktopState,
-    "transcript" | "transcriptSegments" | "selectedSegmentIds"
-  >,
-): TranscriptUndoSnapshot {
+type UndoableState = Pick<
+  DesktopState,
+  "transcript" | "transcriptSegments" | "selectedSegmentIds" | "openedVersion"
+>;
+
+function snapshotFromState(state: UndoableState): TranscriptUndoSnapshot {
   return {
     transcript: state.transcript,
     transcriptSegments: state.transcriptSegments,
     selectedSegmentIds: state.selectedSegmentIds,
+    openedVersion: state.openedVersion,
   };
 }
 
+/**
+ * Makes `next` an undo step after `previous`. It keeps the version the
+ * editor had opened, unless it opens another one (`openedVersion`): undo
+ * and redo bring that version back with the text.
+ */
 function withUndoSnapshot(
-  previous: Pick<
-    DesktopState,
-    "transcript" | "transcriptSegments" | "selectedSegmentIds"
-  >,
-  next: TranscriptUndoSnapshot,
+  previous: UndoableState,
+  next: Omit<TranscriptUndoSnapshot, "openedVersion">,
+  openedVersion: OpenedVersion | null = previous.openedVersion,
 ) {
   transcriptUndoStack.push(snapshotFromState(previous));
-  transcriptUndoStack.push(next);
-  return { ...next, ...undoFlags() };
+  transcriptUndoStack.push({ ...next, openedVersion });
+  return { ...next, openedVersion, ...undoFlags() };
 }
 
 function stopActiveStream() {
@@ -657,7 +709,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
   activeSessionId: restoredDraft?.activeSessionId ?? null,
   transcript: initialTranscriptSnapshot.transcript,
   transcriptSegments: initialTranscriptSnapshot.transcriptSegments,
-  openedVersion: null,
+  openedVersion: restoredVersion,
   selectedSegmentIds: initialTranscriptSnapshot.selectedSegmentIds,
   canUndoTranscript: false,
   canRedoTranscript: false,
@@ -1002,7 +1054,10 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
             : {}),
         })
           .then(async (api) => {
-            if (generation !== captureGeneration) return;
+            if (generation !== captureGeneration) {
+              discardCancelledCapture(api.captureId);
+              return;
+            }
             await completeCapture(api, metadata, URL.createObjectURL(blob));
           })
           .catch((error: unknown) => {
@@ -1048,7 +1103,10 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       set({ recordingState: "uploading" });
       void finishing
         .then(async (result) => {
-          if (generation !== captureGeneration) return;
+          if (generation !== captureGeneration) {
+            discardCancelledCapture(result.captureId ?? live.captureId);
+            return;
+          }
           const durationMs = result.durationMs || elapsedMs;
           await completeCapture(
             {
@@ -1065,7 +1123,12 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
           );
         })
         .catch((error: unknown) => {
-          if (generation !== captureGeneration) return;
+          // A recording that could not be transcribed is kept for a retry,
+          // unless the dictation was cancelled.
+          if (generation !== captureGeneration) {
+            discardCancelledCapture(live.captureId);
+            return;
+          }
           const message =
             error instanceof Error ? error.message : String(error);
           set({
@@ -1110,9 +1173,10 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       return;
     }
     if (recordingState === "uploading") {
+      // The result is dropped, and the recording deleted once it is saved.
       captureGeneration += 1;
       cloudAbort?.abort();
-      set({ recordingState: "idle" });
+      set({ recordingState: "idle", liveTranscript: "" });
       return;
     }
     get().stopVoiceCapture();
@@ -1174,6 +1238,8 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       const next = {
         ...syncTranscriptText(fallback.transcript),
         selectedSegmentIds: [],
+        // Text that is no saved recording: no version to save against.
+        openedVersion: null,
       };
       transcriptUndoStack.reset(next);
       set({
@@ -1197,6 +1263,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
         const next = {
           ...syncTranscriptText(detail.transcript),
           selectedSegmentIds: [],
+          openedVersion: null,
         };
         transcriptUndoStack.reset(next);
         set((state) => ({
@@ -1222,7 +1289,11 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     }
   },
   setActiveSession: (sessionId, transcript) => {
-    const next = { ...syncTranscriptText(transcript), selectedSegmentIds: [] };
+    const next = {
+      ...syncTranscriptText(transcript),
+      selectedSegmentIds: [],
+      openedVersion: null,
+    };
     transcriptUndoStack.reset(next);
     set({
       activeSessionId: sessionId,
@@ -1240,6 +1311,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       transcript: "",
       transcriptSegments: [],
       selectedSegmentIds: [],
+      openedVersion: null,
     };
     transcriptUndoStack.reset(next);
     clearTranscriptDraft();
@@ -1392,6 +1464,8 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     set((state) => ({
       ...snapshot,
       ...undoFlags(),
+      // Undo can go back past opening a recording, or another version of it.
+      openedVersion: snapshot.openedVersion ?? null,
       polishedPreview: polishedForState({
         ...state,
         transcript: snapshot.transcript,
@@ -1404,6 +1478,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     set((state) => ({
       ...snapshot,
       ...undoFlags(),
+      openedVersion: snapshot.openedVersion ?? null,
       polishedPreview: polishedForState({
         ...state,
         transcript: snapshot.transcript,
@@ -1580,16 +1655,38 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
       );
     }),
   clearSegmentSelection: () => set({ selectedSegmentIds: [] }),
-  setOpenedVersion: (id, hlc) => set({ openedVersion: { id, hlc } }),
+  setOpenedVersion: (id, hlc) =>
+    set((state) => {
+      const opened = { id, hlc };
+      const was = state.openedVersion?.id === id ? state.openedVersion : null;
+      // The editor itself took the recording from `was` to this version: it
+      // saved it, or read the version of one it did not know. The text that
+      // undo and redo bring back from `was` is based on this version now.
+      // A version that sync wrote and the editor opened is not: a save of
+      // text from before it still keeps it as a conflict copy.
+      transcriptUndoStack.rewrite((snapshot) =>
+        (
+          was
+            ? sameVersion(snapshot.openedVersion, was)
+            : snapshot.openedVersion?.id !== id &&
+              singleCaptureId(snapshot.transcriptSegments) === id
+        )
+          ? { ...snapshot, openedVersion: opened }
+          : snapshot,
+      );
+      return { openedVersion: opened };
+    }),
   openCapture: (capture) =>
     set((state) => {
       const next = syncSegments(segmentsFromCapture(capture), []);
       return {
-        ...withUndoSnapshot(state, next),
-        openedVersion:
+        ...withUndoSnapshot(
+          state,
+          next,
           capture.hlc === undefined
             ? null
             : { id: capture.id, hlc: capture.hlc },
+        ),
         activeSessionId: null,
         polishedPreview: polishedForState({
           ...state,

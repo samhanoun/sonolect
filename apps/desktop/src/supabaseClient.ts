@@ -5,13 +5,24 @@ import {
   type Session,
 } from "@supabase/supabase-js";
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? "";
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? "";
+let client: SupabaseClient | undefined;
 
-export const supabase: SupabaseClient = createClient(
-  SUPABASE_URL,
-  SUPABASE_ANON_KEY,
-);
+/**
+ * The Supabase client, made on first use. A build without the two
+ * VITE_SUPABASE_ values loads this module without an error; only signing in
+ * or a team call then fails, and says why.
+ */
+export function getSupabase(): SupabaseClient {
+  if (client) return client;
+  const url = import.meta.env?.VITE_SUPABASE_URL ?? "";
+  const key = import.meta.env?.VITE_SUPABASE_ANON_KEY ?? "";
+  if (!url || !key)
+    throw new Error(
+      "Team sign-in is not set up: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are missing.",
+    );
+  client = createClient(url, key);
+  return client;
+}
 
 export type AuthState = {
   user: User | null;
@@ -28,7 +39,7 @@ export async function signInWithEmail(
   email: string,
   password: string,
 ): Promise<AuthState> {
-  const { data, error } = await supabase.auth.signInWithPassword({
+  const { data, error } = await getSupabase().auth.signInWithPassword({
     email,
     password,
   });
@@ -47,7 +58,7 @@ export async function signUpWithEmail(
   password: string,
   displayName: string,
 ): Promise<AuthState> {
-  const { data, error } = await supabase.auth.signUp({
+  const { data, error } = await getSupabase().auth.signUp({
     email,
     password,
     options: { data: { full_name: displayName } },
@@ -65,15 +76,15 @@ export async function signUpWithEmail(
 export async function signInWithOAuth(
   provider: "google" | "github" | "apple",
 ): Promise<void> {
-  await supabase.auth.signInWithOAuth({ provider });
+  await getSupabase().auth.signInWithOAuth({ provider });
 }
 
 export async function signOut(): Promise<void> {
-  await supabase.auth.signOut();
+  await getSupabase().auth.signOut();
 }
 
 export async function getSession(): Promise<AuthState> {
-  const { data, error } = await supabase.auth.getSession();
+  const { data, error } = await getSupabase().auth.getSession();
   if (error)
     return { user: null, session: null, loading: false, error: error.message };
   return {
@@ -87,7 +98,7 @@ export async function getSession(): Promise<AuthState> {
 export function onAuthStateChange(
   callback: (state: AuthState) => void,
 ): () => void {
-  const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+  const { data } = getSupabase().auth.onAuthStateChange((_event, session) => {
     callback({
       user: session?.user ?? null,
       session,

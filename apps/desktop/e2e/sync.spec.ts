@@ -190,6 +190,45 @@ test.describe("note sync", () => {
     await expect(card.locator(".studio-sync-code-text code")).toHaveText(code!);
   });
 
+  test("deleting a note while sync is on says it goes from every device", async ({
+    page,
+  }) => {
+    await serve(page);
+    await installMockTauri(page, [recording], { sync: true });
+    await page.goto("/");
+    const asked: string[] = [];
+    page.on("dialog", (dialog) => {
+      asked.push(dialog.message());
+      void dialog.dismiss();
+    });
+    const askToDelete = async () => {
+      await nav(page, "Library").click();
+      await page
+        .locator("article", { hasText: "Recorded on this desktop." })
+        .getByRole("button", { name: "Delete", exact: true })
+        .click();
+    };
+
+    // Sync is off: the note goes from this device only.
+    await askToDelete();
+    await expect
+      .poll(() => asked)
+      .toEqual(["Delete this recording and its transcript from this device?"]);
+
+    await nav(page, "Settings").click();
+    await syncCard(page).getByRole("button", { name: "Turn on sync" }).click();
+    await expect(syncCard(page).getByText("Sync is on.")).toBeVisible();
+    await askToDelete();
+    await expect
+      .poll(() => asked.at(-1))
+      .toBe(
+        "Delete this note from all your synced devices? Its recording is deleted from this device.",
+      );
+    // Declined both times: nothing was deleted.
+    expect(await nativeCalls(page, "delete_local_capture")).toEqual([]);
+    await expect(page.getByText("Recorded on this desktop.")).toBeVisible();
+  });
+
   test("joining with a code brings the other device's notes, without their audio", async ({
     page,
   }) => {
