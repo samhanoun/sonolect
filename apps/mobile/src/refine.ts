@@ -10,11 +10,34 @@ import type { DictionaryEntry, RefinementMode, Snippet } from "./domain";
 
 // Only sounds that are never content words. "you know", "i mean", "like,",
 // fr "ben" (also a name) and es "este" ("this") carry meaning too often.
-const FILLERS: Record<string, string[]> = {
-  en: ["um", "uh", "erm", "er", "uhm"],
-  fr: ["euh", "heu", "bah", "genre,", "du coup,"],
-  es: ["eh", "o sea,", "pues,"],
-  de: ["äh", "ähm", "halt,"],
+// Each filler is a whole word, with its comma when it has one ("genre,"),
+// and a comma after it goes with it. The patterns are written out, not
+// built from strings.
+const FILLER_PATTERNS: Record<string, readonly RegExp[]> = {
+  en: [
+    /(^|[\s,])um(?=[\s,.!?]|$)[,]?/giu,
+    /(^|[\s,])uh(?=[\s,.!?]|$)[,]?/giu,
+    /(^|[\s,])erm(?=[\s,.!?]|$)[,]?/giu,
+    /(^|[\s,])er(?=[\s,.!?]|$)[,]?/giu,
+    /(^|[\s,])uhm(?=[\s,.!?]|$)[,]?/giu,
+  ],
+  fr: [
+    /(^|[\s,])euh(?=[\s,.!?]|$)[,]?/giu,
+    /(^|[\s,])heu(?=[\s,.!?]|$)[,]?/giu,
+    /(^|[\s,])bah(?=[\s,.!?]|$)[,]?/giu,
+    /(^|[\s,])genre,(?=[\s,.!?]|$)[,]?/giu,
+    /(^|[\s,])du coup,(?=[\s,.!?]|$)[,]?/giu,
+  ],
+  es: [
+    /(^|[\s,])eh(?=[\s,.!?]|$)[,]?/giu,
+    /(^|[\s,])o sea,(?=[\s,.!?]|$)[,]?/giu,
+    /(^|[\s,])pues,(?=[\s,.!?]|$)[,]?/giu,
+  ],
+  de: [
+    /(^|[\s,])äh(?=[\s,.!?]|$)[,]?/giu,
+    /(^|[\s,])ähm(?=[\s,.!?]|$)[,]?/giu,
+    /(^|[\s,])halt,(?=[\s,.!?]|$)[,]?/giu,
+  ],
   ar: [],
 };
 
@@ -51,14 +74,9 @@ function baseLanguage(language: string): string {
   return language.split("-")[0]?.toLowerCase() ?? "en";
 }
 
-/** The filler patterns of a language, built once for many texts. */
-function fillerPatterns(language: string): RegExp[] {
-  const base = baseLanguage(language);
-  const fillers = FILLERS[base] ?? FILLERS.en ?? [];
-  return fillers.map(
-    (filler) =>
-      new RegExp(`(^|[\\s,])${escapeRegExp(filler)}(?=[\\s,.!?]|$)[,]?`, "giu"),
-  );
+/** The filler patterns of a language; English for a language without any. */
+function fillerPatterns(language: string): readonly RegExp[] {
+  return FILLER_PATTERNS[baseLanguage(language)] ?? FILLER_PATTERNS.en ?? [];
 }
 
 function removeFillersWith(
