@@ -8,12 +8,15 @@ import {
   LANGUAGE_NOTICE_KINDS,
   NOTICE_ACTIONS,
   NOTICE_KINDS,
+  REFINE_NOTICE_KINDS,
   STORAGE_NOTICE_KINDS,
   actionLabel,
   emptyEndOutcome,
   isStorageNotice,
+  lateRefineNoticeChange,
   noticeFor,
   noticeText,
+  onlineFailureNotice,
   refineNoticeChange,
   replaceNotice,
   storageBanner,
@@ -97,6 +100,10 @@ describe("notices", () => {
       languageNotSupported: ["typeInstead"],
       modelNotSupported: ["useServiceOnce", "dismiss"],
       modelFailed: ["useServiceOnce", "dismiss"],
+      onlineSetup: ["openOnlineSettings", "dismiss"],
+      onlineKeyRejected: ["openOnlineSettings", "dismiss"],
+      // Its text says to try another model in Settings.
+      onlineModelUnavailable: ["openOnlineSettings", "dismiss"],
     };
     for (const kind of NOTICE_KINDS) {
       assert.deepEqual(
@@ -290,7 +297,7 @@ describe("refineNoticeChange", () => {
   });
 
   it("clears its own earlier notices", () => {
-    for (const kind of ["needsModel", "refineFailed"] as const) {
+    for (const kind of REFINE_NOTICE_KINDS) {
       assert.deepEqual(refineNoticeChange(noticeFor(kind), "ready", null), {
         notice: null,
         resetStatus: false,
@@ -313,5 +320,168 @@ describe("refineNoticeChange", () => {
       notice: failed,
       resetStatus: false,
     });
+  });
+});
+
+describe("lateRefineNoticeChange", () => {
+  const timeout = noticeFor("onlineTimeout");
+
+  it("keeps a notice raised after the tap, and its ATTENTION status", () => {
+    // A newer dictation failed while the provider was answering.
+    const micDenied = noticeFor("micDenied");
+    for (const noteShown of [true, false]) {
+      assert.equal(
+        lateRefineNoticeChange({
+          current: micDenied,
+          atSend: null,
+          status: "error",
+          next: timeout,
+          noteShown,
+        }),
+        null,
+      );
+    }
+    // Not even an equal notice raised again counts as the one from the tap.
+    assert.equal(
+      lateRefineNoticeChange({
+        current: noticeFor("storageWriteError"),
+        atSend: noticeFor("storageWriteError"),
+        status: "ready",
+        next: timeout,
+        noteShown: true,
+      }),
+      null,
+    );
+  });
+
+  it("shows the failure when no other notice would be lost", () => {
+    for (const current of [null, noticeFor("onlineNetwork")]) {
+      for (const noteShown of [true, false]) {
+        assert.deepEqual(
+          lateRefineNoticeChange({
+            current,
+            atSend: null,
+            status: "ready",
+            next: timeout,
+            noteShown,
+          }),
+          { notice: timeout, resetStatus: false },
+        );
+      }
+    }
+  });
+
+  it("replaces the notice from the tap only while that note is shown", () => {
+    const network = noticeFor("network");
+    assert.deepEqual(
+      lateRefineNoticeChange({
+        current: network,
+        atSend: network,
+        status: "error",
+        next: timeout,
+        noteShown: true,
+      }),
+      { notice: timeout, resetStatus: true },
+    );
+    assert.equal(
+      lateRefineNoticeChange({
+        current: network,
+        atSend: network,
+        status: "error",
+        next: timeout,
+        noteShown: false,
+      }),
+      null,
+    );
+  });
+});
+
+describe("online editing notices", () => {
+  const ONLINE_KINDS = NOTICE_KINDS.filter((kind) => kind.startsWith("online"));
+  const FAILURES = [
+    "tooLong",
+    "rejectedKey",
+    "needsCredits",
+    "rateLimited",
+    "modelUnavailable",
+    "timeout",
+    "network",
+    "empty",
+    "failed",
+  ] as const;
+
+  it("has the online kinds, all cleared like refineFailed", () => {
+    assert.deepEqual(ONLINE_KINDS, [
+      "onlineSetup",
+      "onlineKeyRejected",
+      "onlineNeedsCredits",
+      "onlineRateLimited",
+      "onlineModelUnavailable",
+      "onlineTimeout",
+      "onlineNetwork",
+      "onlineEmpty",
+      "onlineTooLong",
+      "onlineNothingToSend",
+      "onlineNoteChanged",
+      "onlineFailed",
+    ]);
+    for (const kind of ONLINE_KINDS) {
+      assert.ok(
+        (REFINE_NOTICE_KINDS as readonly NoticeKind[]).includes(kind),
+        kind,
+      );
+      assert.deepEqual(
+        refineNoticeChange(noticeFor(kind, "en-US"), "ready", null),
+        { notice: null, resetStatus: false },
+        kind,
+      );
+      assert.equal(isStorageNotice(kind), false, kind);
+    }
+  });
+
+  it("has its own text in both languages", () => {
+    for (const ui of UI_LANGUAGES) {
+      const texts = ONLINE_KINDS.map((kind) =>
+        noticeText(STRINGS[ui], noticeFor(kind, "en-US")),
+      );
+      assert.equal(new Set(texts).size, texts.length, ui);
+      for (const text of texts) {
+        assert.doesNotMatch(text, /—/, text);
+        assert.doesNotMatch(text, /undefined|\$\{/, text);
+      }
+    }
+    assert.match(
+      noticeText(STRINGS.en, noticeFor("onlineKeyRejected")),
+      /Your note was not changed\./,
+    );
+    assert.match(
+      noticeText(STRINGS.fr, noticeFor("onlineTooLong")),
+      /12\u00a0000/,
+    );
+  });
+
+  it("maps every failure to a notice of its own", () => {
+    const kinds = FAILURES.map(onlineFailureNotice);
+    assert.equal(new Set(kinds).size, FAILURES.length);
+    for (const kind of kinds) assert.ok(ONLINE_KINDS.includes(kind), kind);
+    assert.equal(onlineFailureNotice("rejectedKey"), "onlineKeyRejected");
+    assert.equal(onlineFailureNotice("needsCredits"), "onlineNeedsCredits");
+    assert.equal(onlineFailureNotice("timeout"), "onlineTimeout");
+  });
+
+  it("sends the user to online editing in Sonolect's Settings", () => {
+    assert.equal(
+      actionLabel(STRINGS.en, "openOnlineSettings"),
+      "Online editing settings",
+    );
+    assert.equal(
+      actionLabel(STRINGS.fr, "openOnlineSettings"),
+      "Réglages de l'édition en ligne",
+    );
+    // Not the phone's settings, which openSettings opens.
+    assert.notEqual(
+      actionLabel(STRINGS.en, "openOnlineSettings"),
+      actionLabel(STRINGS.en, "openSettings"),
+    );
   });
 });

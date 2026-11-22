@@ -3,8 +3,9 @@ import type { DictionaryEntry, RefinementMode, Snippet } from "./domain";
 /**
  * On-device text refinement. These transforms are deterministic and never
  * invent content: they only clean, restructure, or shorten what was said.
- * Generative modes (rewrite, reply) get real model output only when the
- * Sonolect API is configured; see `refineWithApi` in localApi.ts.
+ * Generative modes (rewrite, reply) get real model output only from online
+ * editing with the user's own key (onlineEdit.ts, after consent), or from
+ * the dormant Sonolect API (`refineWithApi` in localApi.ts).
  */
 
 // Only sounds that are never content words. "you know", "i mean", "like,",

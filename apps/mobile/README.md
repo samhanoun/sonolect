@@ -23,10 +23,12 @@ Studio palette (forest `#1F3429`, lime `#DDF39A`), drawn as glass (see
   the `expo-speech-recognition` README only works on Android 13+. The screen
   stays on while dictating; leaving the app stops the dictation and keeps
   its text.
-- **Refinement** is local only in this build (filler removal, casing,
-  dictionary, snippets, summary, task list): no text leaves the phone for it.
-  _Rewrite_ and _Reply_ need a model on the Sonolect API (`/v1/polish`), so
-  the phone-only build does not offer them. The app never invents text.
+- **Refinement** runs on the phone for _Clean up_, _Summarize_ and _Tasks_
+  (filler removal, casing, dictionary, snippets, summary, task list): no
+  text leaves the phone for them. _Rewrite_ and _Reply_ need a language
+  model. They appear only once the user sets up online editing with their
+  own provider key (see [Online editing](#online-editing)), and Sonolect
+  asks before each note is sent. The app never invents text on its own.
 - **Sync** is off in the phone-only build (see below): notes stay on the phone
   and nothing is sent to a Sonolect API. With the API turned back on, sync
   needs an API URL in Settings (`https://`, or `http://` on localhost / private
@@ -102,7 +104,8 @@ in `src/features.ts`, and it is `false`.
 - **Hidden**: the API's plaintext sync, _Rewrite_ and _Reply_ through the
   API, audio upload, and
   the Settings API section (URL, token, connection test). The library shows
-  no LOCAL / QUEUED / SYNCED labels.
+  no LOCAL / QUEUED / SYNCED labels. _Rewrite_ and _Reply_ through online
+  editing do not use the API, so they work in this build.
 - **Ignored**: a saved API URL and `EXPO_PUBLIC_SONOLECT_API_URL`. Every API
   call gets its config from `apiConfig()` in `src/features.ts`, which returns
   no URL while the switch is off.
@@ -180,6 +183,56 @@ phone-readiness audit, so they are parked here. Fix them first:
       public cloud URL (use a LAN example such as `http://192.168.1.20:8080`),
       and the token placeholder `••••••••` looks like a saved token (use an
       i18n "Optional").
+
+## Online editing
+
+_Rewrite_ and _Reply_ can use a language model with the user's own key, the
+same way the desktop Studio does: OpenRouter or OpenCode Zen. The phone
+calls the provider directly. No Sonolect server and no Sonolect account are
+involved, and the provider bills the user's own account.
+
+- **Off by default.** The chips stay hidden until the user picks a provider
+  and a model and saves a key in Settings, _Online editing_. The web
+  preview keeps no keys, so there the section is shown with its controls
+  disabled.
+- **Asks before each note.** A tap on _Rewrite_ or _Reply_ opens a dialog
+  that names the provider and the model. Only _Send_ sends the note, and
+  only to the provider and model the dialog named. The switch _Send without
+  asking each time_ skips the dialog, except in _Ephemeral_, which always
+  asks. A note made in _Ephemeral_ is still asked for after the user leaves
+  it. Picking another provider turns the switch off again.
+- **What is sent.** The text of that one note, after the phone has applied
+  the dictionary and snippets, with a fixed instruction for the mode and
+  the dictation language. Never the audio, other notes or the dictionary
+  itself. Notes over 12,000 characters, or with no text left once cleaned
+  up, are not sent, and the app does not ask for them.
+- **The key** is kept in SecureStore (iOS Keychain or Android Keystore)
+  with `WHEN_UNLOCKED_THIS_DEVICE_ONLY`, one item per provider
+  (`sonolect.mobile.providerKey.openrouter` and `.opencode`). It stays on
+  this phone and is not copied to another phone. On iOS such an item can
+  be in a backup of the same phone; Android backups are off
+  (`allowBackup: false`). The key is read at launch, only to learn whether
+  one is saved (kept as a yes or no), and again when a note is sent. It is
+  never kept in app state, AsyncStorage, notices or logs, and Settings only
+  shows _Key saved_. _Erase all data_ deletes both keys, and a first launch
+  without settings deletes keys an earlier install left in the iOS
+  keychain.
+- **The model list** is the provider's public catalog. It loads only when
+  the user taps _Load models_, and that request carries no key and no note.
+  Nothing goes out at launch.
+- **Results and failures.** The result replaces the note's text and keeps
+  the original, so _Clean up_ brings it back. With sync on, the edited note
+  syncs to the user's other devices like any other edit. A rejected key,
+  missing credits, a rate limit, an unknown model, a timeout (60 seconds) or
+  no network shows a notice, and the note does not change. If the note's
+  text changes while the provider answers (an edit on this phone, or a
+  newer version from another device), the answer is not used: the newer
+  text stays, and a notice says so. Redirects are refused, and the
+  provider's error text is never shown.
+- **Code**: `src/onlineRefine.ts` (endpoints, prompts and checks that mirror
+  `apps/desktop/src-tauri/src/online.rs`), `src/onlineEdit.ts` (consent
+  plan and one send, tested with a mocked fetch), `src/providerKeys.ts`
+  (SecureStore items) and `src/ui/OnlineEditingSection.tsx` (Settings).
 
 ## Run it
 

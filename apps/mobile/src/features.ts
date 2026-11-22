@@ -86,11 +86,16 @@ export function apiConfigFor(
   return resolveMobileLocalApiConfig({ ...settings, apiToken });
 }
 
-/** Refinement modes offered after a capture, in display order. */
+/**
+ * Refinement modes offered after a capture, in display order. Rewrite and
+ * Reply also appear once the user has set up online editing with their own
+ * key (onlineRefine.ts); each use still asks before sending.
+ */
 export function availableRefinementModesFor(
   enabled: boolean,
+  onlineEditingReady = false,
 ): readonly RefinementMode[] {
-  if (enabled) return REFINEMENT_MODES;
+  if (enabled || onlineEditingReady) return REFINEMENT_MODES;
   const apiOnly: readonly RefinementMode[] = API_ONLY_MODES;
   return REFINEMENT_MODES.filter((mode) => !apiOnly.includes(mode));
 }
@@ -145,6 +150,8 @@ export function apiConfig(
   return apiConfigFor(API_FEATURES_ENABLED, settings, apiToken);
 }
 
-export function availableRefinementModes(): readonly RefinementMode[] {
-  return availableRefinementModesFor(API_FEATURES_ENABLED);
+export function availableRefinementModes(
+  onlineEditingReady = false,
+): readonly RefinementMode[] {
+  return availableRefinementModesFor(API_FEATURES_ENABLED, onlineEditingReady);
 }

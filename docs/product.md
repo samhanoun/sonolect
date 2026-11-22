@@ -1,6 +1,6 @@
 # Sonolect Product Specification
 
-Last updated: 2026-11-20
+Last updated: 2026-11-22
 
 ---
 
@@ -65,7 +65,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 - **No telemetry by default** — opt-in analytics only
 - Configurable audio retention (auto-delete after N days or manual purge)
 - One-click "Delete all my data" action
-- All processing local. Note sync, when the user turns it on, sends only end-to-end encrypted notes
+- All processing local unless the user turns on a cloud feature: note sync, which sends only end-to-end encrypted notes, or online editing with their own provider key, which asks before each note is sent unless the user turns on Send without asking (never in Ephemeral)
 
 ### Sync Between Your Devices
 
@@ -133,7 +133,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 | **Open architecture**  | Monorepo, pluggable STT engines    | Proprietary        | Proprietary    | Proprietary                          |
 | **Price**              | Free local tier; paid cloud add-on | Subscription       | Subscription   | Free (Apple only)                    |
 
-**Key differentiator:** Sonolect is the only tool that combines **production-grade transcription editing** with **complete offline operation** and **zero-trust privacy defaults** — no account required, and nothing leaves the device unless the user turns on a cloud feature, such as end-to-end encrypted sync.
+**Key differentiator:** Sonolect is the only tool that combines **production-grade transcription editing** with **complete offline operation** and **zero-trust privacy defaults**. No account is required, and no data leaves the device unless the user turns on a cloud feature, such as end-to-end encrypted sync or online editing with their own provider key.
 
 ---
 

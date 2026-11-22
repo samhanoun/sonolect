@@ -1,5 +1,5 @@
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
 import { create } from "zustand";
 
 import { stopCaptureWithAudio, buildTurn } from "./audioCapture";
@@ -30,10 +30,22 @@ import { createKeepAwake } from "./keepAwake";
 import type { Notice, NoticeChange, NoticeKind } from "./notices";
 import {
   emptyEndOutcome,
+  lateRefineNoticeChange,
   noticeFor,
   refineNoticeChange,
   replaceNotice,
 } from "./notices";
+import type { OnlineChoice, OnlineEditPlan } from "./onlineEdit";
+import { onlineText, planOnlineEdit, runOnlineEdit } from "./onlineEdit";
+import type { OnlineEditing, OnlineProvider } from "./onlineRefine";
+import {
+  isOnlineEditingReady,
+  normalizeOnlineEditing,
+  normalizeProviderKey,
+} from "./onlineRefine";
+import { providerFetch } from "./providerFetch";
+import type { ProviderKeyStatus } from "./providerKeys";
+import { NO_PROVIDER_KEYS } from "./providerKeys";
 import {
   cleanTranscript,
   modeNeedsModel,
@@ -103,6 +115,20 @@ interface CompanionState {
   /** A language pack download is in progress. */
   downloading: boolean;
   refining: boolean;
+  /**
+   * The note being refined. The Capture screen shows the busy state on
+   * that note only: a note made meanwhile keeps its chips.
+   */
+  refiningId: string | null;
+  /** The mode being applied while refining. */
+  refiningMode: RefinementMode | null;
+  /** The provider an online edit is waiting for, if any. */
+  sendingTo: OnlineProvider | null;
+  /**
+   * Which providers have a key saved in SecureStore. Only booleans: the key
+   * itself is read at send time and never kept in state.
+   */
+  onlineKeySaved: ProviderKeyStatus;
   hydrate: () => Promise<void>;
   /**
    * Starts a dictation. allowSystemServiceOnce: the user allowed the system
@@ -118,7 +144,24 @@ interface CompanionState {
    * empty or a dictation listens or is processed.
    */
   saveTyped: (text: string) => Promise<boolean>;
-  refine: (turnId: string, mode: RefinementMode) => Promise<void>;
+  /**
+   * Applies a refinement mode. Rewrite and Reply with online editing send
+   * the note only after consent: consentedTo, the provider and model the
+   * dialog named when the user tapped Send, or "Always allow" outside
+   * Ephemeral. Without it nothing happens, so the Capture screen asks first
+   * (see onlinePlan). Resolves true when an online edit put the model's
+   * text on the note.
+   */
+  refine: (
+    turnId: string,
+    mode: RefinementMode,
+    options?: { consentedTo?: OnlineChoice },
+  ) => Promise<boolean>;
+  /**
+   * What a tap on a note's chip does: refine here, ask, or send. A note
+   * that could never be sent is not asked for: refine shows why.
+   */
+  onlinePlan: (turnId: string, mode: RefinementMode) => OnlineEditPlan;
   deleteTurn: (turnId: string) => Promise<void>;
   togglePin: (turnId: string) => Promise<void>;
   /**
@@ -134,6 +177,21 @@ interface CompanionState {
   eraseAll: (options?: { deleteServerCopy?: boolean }) => Promise<EraseOutcome>;
   updateSettings: (patch: Partial<CompanionSettings>) => Promise<void>;
   setApiToken: (token: string) => Promise<void>;
+  /**
+   * Saves the user's key for a provider in SecureStore. "invalid": not a
+   * key the provider could accept, nothing saved. "failed": SecureStore
+   * refused it, or the web preview, which keeps no keys.
+   */
+  saveProviderKey: (
+    provider: OnlineProvider,
+    key: string,
+  ) => Promise<"saved" | "invalid" | "failed">;
+  removeProviderKey: (provider: OnlineProvider) => Promise<void>;
+  /**
+   * Sets the provider and model for online editing, or turns it off
+   * (undefined). False, with nothing changed, for an invalid choice.
+   */
+  setOnlineEditing: (editing: OnlineEditing | undefined) => Promise<boolean>;
   addDictionaryEntry: (spoken: string, replacement: string) => Promise<boolean>;
   removeDictionaryEntry: (id: string) => Promise<void>;
   addSnippet: (trigger: string, body: string) => Promise<boolean>;
@@ -205,6 +263,12 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
   let dataEpoch = 0;
   const stillAllowed = (epoch: number) =>
     epoch === dataEpoch && keepsHistory(get().settings);
+  /**
+   * The notes dictated or typed in Ephemeral. One can stay on the Capture
+   * screen after the user leaves Ephemeral, and online editing still asks
+   * before sending it.
+   */
+  const ephemeralNotes = new Set<string>();
 
   /**
    * Runs a write to the phone's storage. A failure keeps the change in
@@ -368,6 +432,9 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
   };
 
   const addTurn = async (captured: TranscriptTurn) => {
+    if (get().settings.privacyLevel === "ephemeral") {
+      ephemeralNotes.add(captured.id);
+    }
     const { history, turn } = addNote(get().history, captured, stamp);
     set({ latest: turn });
     if (keepsHistory(get().settings)) {
@@ -383,6 +450,32 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     await persistHistory(history);
     sync?.noteChanged();
   };
+
+  /** A note in the history, or the latest capture (Ephemeral keeps only it). */
+  const findTurn = (turnId: string): TranscriptTurn | undefined => {
+    const { history, latest } = get();
+    return (
+      history.find((turn) => turn.id === turnId) ??
+      (latest?.id === turnId ? latest : undefined)
+    );
+  };
+
+  const doneRefining = {
+    refining: false,
+    refiningId: null,
+    refiningMode: null,
+    sendingTo: null,
+  } as const;
+
+  /**
+   * Ends a note's busy state, unless the screen already shows another
+   * note's refinement, which keeps its own.
+   */
+  const finishRefining = (turnId: string) =>
+    get().refiningId === turnId ? doneRefining : {};
+
+  /** The notes being refined: one refinement at a time for each. */
+  const refiningNotes = new Set<string>();
 
   /**
    * After a 'not-allowed' error, reads the permissions again to tell a denial
@@ -600,6 +693,171 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     }
   };
 
+  /** The store's refine, for one note (see refine below). */
+  const refineNote = async (
+    turnId: string,
+    mode: RefinementMode,
+    options: { consentedTo?: OnlineChoice } | undefined,
+  ): Promise<boolean> => {
+    const web = Platform.OS === "web";
+    const state = get();
+    // Rewrite and Reply need a model: online editing with the user's own
+    // key, or the dormant API. Without one they are not offered.
+    const onlineReady = isOnlineEditingReady(
+      state.settings,
+      state.onlineKeySaved,
+      web,
+    );
+    if (!availableRefinementModes(onlineReady).includes(mode)) return false;
+    const first = findTurn(turnId);
+    if (!first) return false;
+
+    // A refinement clears only its own notices: a dictation's error stays
+    // with its ATTENTION status.
+    const clearOwnNotice = () =>
+      noticePatch(refineNoticeChange(get().notice, get().capture.status, null));
+    // Erase all, Clear history or going Ephemeral bumps the epoch.
+    const epoch = dataEpoch;
+    let sentTo: OnlineProvider | null = null;
+    // The notice when the request went out: one raised later stays.
+    let noticeAtSend = get().notice;
+    const online = await runOnlineEdit({
+      turn: first,
+      mode,
+      consentedTo: options?.consentedTo,
+      web,
+      settings: state.settings,
+      ephemeralNote: ephemeralNotes.has(turnId),
+      keySaved: state.onlineKeySaved,
+      dictionary: state.dictionary,
+      snippets: state.snippets,
+      readKey: (provider) => mobileStorage.loadProviderKey(provider),
+      // Refuses redirects on the phone too (providerFetch.ts).
+      fetchImpl: providerFetch,
+      current: () => (epoch === dataEpoch ? findTurn(turnId) : undefined),
+      onSend: (editing) => {
+        sentTo = editing.provider;
+        set({
+          refining: true,
+          refiningId: turnId,
+          refiningMode: mode,
+          sendingTo: editing.provider,
+          ...clearOwnNotice(),
+        });
+        noticeAtSend = get().notice;
+      },
+    });
+    switch (online.kind) {
+      case "ask":
+        // Nothing was sent: the Capture screen asks first.
+        return false;
+      case "stale":
+        set(finishRefining(turnId));
+        return false;
+      case "failed":
+        set({
+          ...finishRefining(turnId),
+          // The key was not found at send time: the chips go until one is
+          // saved again.
+          ...(online.notice === "onlineSetup" && sentTo
+            ? {
+                onlineKeySaved: {
+                  ...get().onlineKeySaved,
+                  [sentTo]: false,
+                },
+              }
+            : {}),
+          // The answer can come a minute after the tap: a notice raised
+          // since then, such as a newer dictation's error, stays.
+          ...noticePatch(
+            lateRefineNoticeChange({
+              current: get().notice,
+              atSend: noticeAtSend,
+              status: get().capture.status,
+              next: noticeFor(online.notice),
+              noteShown: get().latest?.id === turnId,
+            }),
+          ),
+        });
+        return false;
+      case "applied": {
+        set(finishRefining(turnId));
+        const turn = online.turn;
+        if (get().latest?.id === turnId) set({ latest: turn });
+        if (get().history.some((item) => item.id === turnId)) {
+          await replaceTurn(turn);
+        }
+        return true;
+      }
+      case "local":
+        break;
+    }
+
+    const { history, settings, apiToken, dictionary, snippets } = get();
+    const source = findTurn(turnId);
+    if (!source) return false;
+    set({
+      refining: true,
+      refiningId: turnId,
+      refiningMode: mode,
+      sendingTo: null,
+      ...clearOwnNotice(),
+    });
+
+    let refined: TranscriptTurn | null = null;
+    let notice: Notice | null = null;
+    try {
+      const context = { language: source.language, dictionary, snippets };
+      let refinedText = refineLocally(source.rawText, mode, context);
+
+      const config = apiConfig(settings, apiToken);
+      if (config.apiUrl) {
+        const result = await refineWithApi(
+          source.rawText,
+          stylePresetForMode(mode),
+          config,
+          {
+            locale: source.language,
+            dictionary: dictionary.map((entry) => ({
+              spoken: entry.spoken,
+              written: entry.replacement,
+            })),
+          },
+        );
+        if (result.status === "completed") refinedText = result.text;
+        else if (modeNeedsModel(mode)) notice = noticeFor("needsModel");
+      } else if (modeNeedsModel(mode)) {
+        notice = noticeFor("needsModel");
+      }
+
+      refined = {
+        ...source,
+        mode,
+        refinedText,
+        syncState:
+          source.syncState === "synced" || source.syncState === "queued"
+            ? "queued"
+            : source.syncState,
+      };
+    } catch {
+      // The note stays as it was. The Capture screen calls `void refine()`,
+      // so a throw would only be an unhandled rejection: say so instead.
+      notice = noticeFor("refineFailed");
+    }
+    set({
+      ...finishRefining(turnId),
+      ...noticePatch(
+        refineNoticeChange(get().notice, get().capture.status, notice),
+      ),
+    });
+    if (!refined) return false;
+    if (get().latest?.id === turnId) set({ latest: refined });
+    if (history.some((turn) => turn.id === turnId)) {
+      await replaceTurn(refined);
+    }
+    return false;
+  };
+
   return {
     hydrated: false,
     // Until hydrate reads the stored settings, and if it cannot.
@@ -614,6 +872,10 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
     storageDegraded: false,
     downloading: false,
     refining: false,
+    refiningId: null,
+    refiningMode: null,
+    sendingTo: null,
+    onlineKeySaved: { ...NO_PROVIDER_KEYS },
 
     hydrate: async () => {
       if (!watchingAppState) {
@@ -639,17 +901,36 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       let history: TranscriptTurn[];
       let apiToken: string | undefined;
       try {
-        const [settingsRead, notesRead, dictionaryRead, snippetsRead, token] =
-          await Promise.all([
-            mobileStorage.loadSettings(),
-            mobileStorage.loadNotes(),
-            mobileStorage.loadDictionary(),
-            mobileStorage.loadSnippets(),
-            mobileStorage.loadApiToken(),
-          ]);
+        const [
+          settingsRead,
+          notesRead,
+          dictionaryRead,
+          snippetsRead,
+          token,
+          keyStatus,
+        ] = await Promise.all([
+          mobileStorage.loadSettings(),
+          mobileStorage.loadNotes(),
+          mobileStorage.loadDictionary(),
+          mobileStorage.loadSnippets(),
+          mobileStorage.loadApiToken(),
+          // Booleans only; no network call (nothing is sent at launch).
+          mobileStorage.providerKeyStatus(),
+        ]);
         settings = settingsRead.value;
         history = notesRead.notes;
         apiToken = token;
+        let onlineKeySaved = keyStatus;
+        if (
+          settingsRead.ok &&
+          !settingsRead.stored &&
+          (keyStatus.openrouter || keyStatus.opencode)
+        ) {
+          // No settings: a first run, so these keys were left in the iOS
+          // keychain by an earlier install. They go with it.
+          onlineKeySaved = { ...NO_PROVIDER_KEYS };
+          await mobileStorage.removeProviderKeys().catch(() => undefined);
+        }
         if (!API_FEATURES_ENABLED) {
           // Phone-only build: data from a build with the API (sync on, an
           // API URL, queued notes) becomes local before anything else runs.
@@ -696,6 +977,7 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
           dictionary: dictionaryRead.value,
           snippets: snippetsRead.value,
           ...(apiToken ? { apiToken } : {}),
+          onlineKeySaved,
           latest: history[0],
           storageDegraded: !notesRead.ok,
           ...(readFailed ? { notice: noticeFor("storageReadError") } : {}),
@@ -803,76 +1085,31 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       return true;
     },
 
-    refine: async (turnId: string, mode: RefinementMode) => {
-      // Rewrite and Reply need the API; the phone-only build does not offer
-      // them.
-      if (!availableRefinementModes().includes(mode)) return;
-      const { history, latest, settings, apiToken, dictionary, snippets } =
-        get();
-      const source =
-        history.find((turn) => turn.id === turnId) ??
-        (latest?.id === turnId ? latest : undefined);
-      if (!source) return;
-      // A refinement clears only its own notices: a dictation's error stays
-      // with its ATTENTION status.
-      set({
-        refining: true,
-        ...noticePatch(
-          refineNoticeChange(get().notice, get().capture.status, null),
-        ),
-      });
-
-      let refined: TranscriptTurn | null = null;
-      let notice: Notice | null = null;
+    refine: async (turnId, mode, options) => {
+      // One refinement at a time for each note: its chips are disabled
+      // meanwhile. Another note, such as one dictated while an online edit
+      // waits for the provider, can still be refined.
+      if (refiningNotes.has(turnId)) return false;
+      refiningNotes.add(turnId);
       try {
-        const context = { language: source.language, dictionary, snippets };
-        let refinedText = refineLocally(source.rawText, mode, context);
-
-        const config = apiConfig(settings, apiToken);
-        if (config.apiUrl) {
-          const result = await refineWithApi(
-            source.rawText,
-            stylePresetForMode(mode),
-            config,
-            {
-              locale: source.language,
-              dictionary: dictionary.map((entry) => ({
-                spoken: entry.spoken,
-                written: entry.replacement,
-              })),
-            },
-          );
-          if (result.status === "completed") refinedText = result.text;
-          else if (modeNeedsModel(mode)) notice = noticeFor("needsModel");
-        } else if (modeNeedsModel(mode)) {
-          notice = noticeFor("needsModel");
-        }
-
-        refined = {
-          ...source,
-          mode,
-          refinedText,
-          syncState:
-            source.syncState === "synced" || source.syncState === "queued"
-              ? "queued"
-              : source.syncState,
-        };
-      } catch {
-        // The note stays as it was. The Capture screen calls `void refine()`,
-        // so a throw would only be an unhandled rejection: say so instead.
-        notice = noticeFor("refineFailed");
+        return await refineNote(turnId, mode, options);
+      } finally {
+        refiningNotes.delete(turnId);
       }
-      set({
-        refining: false,
-        ...noticePatch(
-          refineNoticeChange(get().notice, get().capture.status, notice),
-        ),
+    },
+
+    onlinePlan: (turnId, mode) => {
+      const { settings, onlineKeySaved, dictionary, snippets } = get();
+      const turn = findTurn(turnId);
+      return planOnlineEdit({
+        mode,
+        settings,
+        keySaved: onlineKeySaved,
+        web: Platform.OS === "web",
+        consentedNow: false,
+        ephemeralNote: ephemeralNotes.has(turnId),
+        text: turn ? onlineText(turn, mode, dictionary, snippets) : undefined,
       });
-      if (!refined) return;
-      if (get().latest?.id === turnId) set({ latest: refined });
-      if (history.some((turn) => turn.id === turnId)) {
-        await replaceTurn(refined);
-      }
     },
 
     deleteTurn: async (turnId: string) => {
@@ -944,6 +1181,8 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
         dictionary: [],
         snippets: [],
         apiToken: undefined,
+        onlineKeySaved: { ...NO_PROVIDER_KEYS },
+        ...doneRefining,
         capture: idleCapture,
         level: 0,
         notice: null,
@@ -993,6 +1232,40 @@ export const useCompanionStore = create<CompanionState>((set, get) => {
       ) {
         set(trimmed ? { apiToken: trimmed } : { apiToken: undefined });
       }
+    },
+
+    saveProviderKey: async (provider, key) => {
+      if (Platform.OS === "web") return "failed";
+      if (!normalizeProviderKey(key)) return "invalid";
+      // Saved settings mark this install: a launch that finds none removes
+      // any provider key the iOS keychain kept from an earlier install.
+      await persist(() => mobileStorage.saveSettings(get().settings));
+      let saved = false;
+      const written = await persist(async () => {
+        saved = await mobileStorage.saveProviderKey(provider, key);
+      });
+      if (!written) return "failed";
+      if (!saved) return "invalid";
+      set({ onlineKeySaved: { ...get().onlineKeySaved, [provider]: true } });
+      return "saved";
+    },
+
+    removeProviderKey: async (provider) => {
+      if (await persist(() => mobileStorage.removeProviderKey(provider))) {
+        set({
+          onlineKeySaved: { ...get().onlineKeySaved, [provider]: false },
+        });
+      }
+    },
+
+    setOnlineEditing: async (editing) => {
+      // Normalized, so only the provider, the model and the switch are
+      // ever stored.
+      const onlineEditing =
+        editing === undefined ? undefined : normalizeOnlineEditing(editing);
+      if (editing !== undefined && !onlineEditing) return false;
+      await get().updateSettings({ onlineEditing });
+      return true;
     },
 
     addDictionaryEntry: async (spoken: string, replacement: string) => {

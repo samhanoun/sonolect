@@ -1,6 +1,9 @@
 import type { Hlc } from "@sonolect/sync-core";
 import type { SonolectMode } from "@sonolect/types";
 
+import type { OnlineEditing } from "./onlineRefine";
+import { normalizeOnlineEditing } from "./onlineRefine";
+
 export type CaptureStatus =
   "idle" | "listening" | "processing" | "ready" | "error";
 export type PrivacyLevel = "standard" | "local_first" | "ephemeral";
@@ -95,6 +98,11 @@ export interface CompanionSettings {
   hapticsEnabled: boolean;
   speechRate: number;
   onboarded: boolean;
+  /**
+   * Rewrite and Reply with the user's own provider key. Undefined (the
+   * default) keeps every refinement on the phone.
+   */
+  onlineEditing?: OnlineEditing | undefined;
 }
 
 /** Refinement modes offered after a capture, in display order. */
@@ -203,6 +211,10 @@ export function normalizeSettings(
     merged.speechRate = 1;
   }
   merged.speechRate = Math.min(2, Math.max(0.5, merged.speechRate));
+  // Anything but a valid provider and model turns online editing off.
+  const onlineEditing = normalizeOnlineEditing(merged.onlineEditing);
+  if (onlineEditing) merged.onlineEditing = onlineEditing;
+  else delete merged.onlineEditing;
   return merged;
 }
 
