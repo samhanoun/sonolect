@@ -811,7 +811,69 @@ describe("createCaptureLoop", () => {
     ]);
   });
 
-  it("ignores timings between sessions and after the end", () => {
+  it("keeps the interim text of a session that ends without a final", () => {
+    const h = harness();
+    h.clock.set(1_000);
+    h.loop.begin();
+    h.loop.started();
+    h.clock.set(1_800);
+    h.loop.result("buy milk", false);
+    h.clock.set(2_500);
+    // The session ends with interim text only, and restarts.
+    h.loop.ended();
+    h.clock.tick(RESTART_DELAY_MS);
+    h.loop.started();
+    h.clock.tick(700);
+    h.loop.result("and bread", false);
+    h.clock.tick(600);
+    h.loop.result("and bread", true);
+    h.loop.stop();
+    h.loop.ended();
+    const [end] = h.ends;
+    assert.equal(end?.text, "buy milk and bread");
+    assert.deepEqual(end?.segments, [
+      { startMs: 800, endMs: 1_500, text: "buy milk", approx: true },
+      {
+        startMs: 1_500 + RESTART_DELAY_MS + 700,
+        endMs: 1_500 + RESTART_DELAY_MS + 1_300,
+        text: "and bread",
+        approx: true,
+      },
+    ]);
+  });
+
+  it("ignores audio and speech starts between sessions", () => {
+    const h = harness();
+    h.clock.set(1_000);
+    h.loop.begin();
+    h.loop.audioStarted(1_040);
+    h.loop.started();
+    h.clock.set(3_000);
+    // A session without words ends, and restarts after the delay.
+    h.loop.ended();
+    // Late events of the session that ended: time 0 stays 1_040.
+    h.loop.audioStarted(3_100);
+    h.loop.speechStarted();
+    h.clock.tick(RESTART_DELAY_MS);
+    // The next session sends no 'audiostart'.
+    h.loop.started();
+    h.clock.tick(800);
+    h.loop.result("hello", false);
+    h.clock.tick(400);
+    h.loop.result("hello", true);
+    h.loop.stop();
+    h.loop.ended();
+    assert.deepEqual(h.ends[0]?.segments, [
+      {
+        startMs: 3_000 + RESTART_DELAY_MS + 800 - 1_040,
+        endMs: 3_000 + RESTART_DELAY_MS + 1_200 - 1_040,
+        text: "hello",
+        approx: true,
+      },
+    ]);
+  });
+
+  it("ignores timings before the start and after the end", () => {
     const h = harness({ restartOnEnd: false });
     h.loop.audioStarted(5);
     h.loop.speechStarted();
