@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Download, UsersRound } from "lucide-react";
 import { useT } from "../i18n";
 import { isTauriRuntime } from "../desktopNative";
+import { hasPlayableAudio, useAudiolessCaptures } from "../captureAudio";
 import { formatSize } from "../captureStorage";
 import { singleCaptureId, type TranscriptSegment } from "../segmentEditor";
 import { useSpeakerDetection } from "../speakerDetection";
@@ -22,12 +23,18 @@ const messageOf = (error: unknown) =>
 
 /**
  * "Detect speakers" and how many there are. Only the desktop app can
- * detect, and only in a transcript of one saved recording.
+ * detect, and only in a transcript of one saved recording whose audio is on
+ * this device: a note that came through sync has none.
  */
 export function SpeakerTools({ segments }: { segments: TranscriptSegment[] }) {
   const t = useT();
   const { current, speakers, setSpeakers, start } = useSpeakerDetection();
-  if (!isTauriRuntime() || !singleCaptureId(segments)) return null;
+  const audioless = useAudiolessCaptures((state) => state.ids);
+  if (
+    !isTauriRuntime() ||
+    !hasPlayableAudio(singleCaptureId(segments), audioless)
+  )
+    return null;
   const busy = current.step !== "idle";
   return (
     <div className="studio-speaker-tools">

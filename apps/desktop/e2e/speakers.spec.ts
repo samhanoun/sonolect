@@ -115,6 +115,39 @@ test.describe("speaker detection", () => {
     expect(await nativeCalls(desktop, "speaker_model_status")).toEqual([]);
   });
 
+  test("is not offered for a synced note whose audio stays on another device", async ({
+    page,
+  }) => {
+    // Recordings do not sync: this note's audio is on the phone.
+    const fromPhone: MockCapture = {
+      ...talk,
+      id: "1700000000000-9",
+      transcript: "From the phone.\n\nIt has no audio here.",
+      segments: [
+        { startMs: 0, endMs: 2000, text: "From the phone.", speaker: "Ana" },
+        { startMs: 2000, endMs: 4000, text: "It has no audio here." },
+      ],
+      origin: "mobile",
+      hasAudio: false,
+    };
+    await installMockTauri(page, [fromPhone, interview]);
+    await page.goto("/");
+    await openRecording(page, "From the phone.");
+    await expect(
+      page.getByRole("list", { name: "Transcript segments" }),
+    ).toBeVisible();
+    await expect(detectButton(page)).toHaveCount(0);
+    await expect(speakerCount(page)).toHaveCount(0);
+    // Its names can still be renamed by hand.
+    await expect(legend(page)).toBeVisible();
+
+    // A recording made here still has the button.
+    await openInterview(page);
+    await expect(detectButton(page)).toBeEnabled();
+    expect(await nativeCalls(page, "speaker_model_status")).toEqual([]);
+    expect(await nativeCalls(page, "detect_speakers")).toEqual([]);
+  });
+
   test("asks before downloading, keeps typed names, and renames everywhere in one undo step", async ({
     page,
   }) => {

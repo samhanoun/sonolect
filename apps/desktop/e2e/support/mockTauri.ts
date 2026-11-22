@@ -442,8 +442,12 @@ export async function installMockTauri(
                 if (!speakerModelReady)
                   throw "Download the speaker model first.";
                 const id = args.id as string;
-                if (!library.some((item) => item.id === id))
+                const recording = library.find((item) => item.id === id);
+                if (!recording)
                   throw "This recording is no longer in your library.";
+                // As speakers.rs: a note without its audio here cannot be read.
+                if (recording.hasAudio === false)
+                  throw "The audio of this recording is no longer on this device.";
                 detectionCancelled = false;
                 emit("speaker-progress", 0);
                 emit("speaker-progress", 40);

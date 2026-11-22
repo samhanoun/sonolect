@@ -49,7 +49,7 @@ Sonolect is a **privacy-first, offline-capable voice-to-text desktop tool** that
 - Inline text corrections with undo/redo
 - Segment merge, split, and reorder
 - Speaker label assignment and colour coding, with a legend that renames a speaker on every segment at once
-- On-device speaker detection on desktop: **Detect speakers** labels the segments of a saved recording Speaker 1, Speaker 2 and so on, in one undo step. The number of speakers is found automatically or chosen (2 to 8), and names you typed are kept unless you choose to replace them. Its 28 MB model is downloaded once, only after you agree, and the audio never leaves the device.
+- On-device speaker detection on desktop: **Detect speakers** labels the segments of a saved recording Speaker 1, Speaker 2 and so on, in one undo step. The number of speakers is found automatically or chosen (2 to 8), and names you typed are kept unless you choose to replace them. Its 28 MB model is downloaded once, only after you agree, and the audio never leaves the device. A note that came through sync has no audio here, so it is not offered there.
 - Timestamp-linked playback (click a segment to jump to audio)
 
 ### Internationalization (i18n)
