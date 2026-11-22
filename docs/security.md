@@ -32,7 +32,7 @@ The paid `/v1/transcribe` and `/v1/polish` routes are limited per verified accou
 
 ## Production mode
 
-In production the API and the agent, audio, billing and worker services never answer with made-up results and never take data they would lose. The full list of routes is in [api.md](api.md#what-production-serves). The sync service is not covered by this rule yet: it keeps records in memory.
+In production the API and the agent, audio, billing and worker services never answer with made-up results and never take data they would lose. The full list of routes is in [api.md](api.md#what-production-serves). The sync service follows it too: in production it refuses the in-memory store and keeps vaults in SQLite or Firestore (see [Note sync](#note-sync)).
 
 - The API does not register its preview routes in production: the profile, audio job, transcript, command, quota and sync manifest routes. They keep data only in the process, so a restart or a second instance loses it, and some answer with fixed values. `SONOLECT_API_PREVIEW_ROUTES=1` turns them on; leave it unset on Cloud Run.
 - The agent, audio, billing and worker services answer 501 `not_implemented` or 503 `not_configured` where they would otherwise return a placeholder or keep data only in memory: a local "rewrite" without a provider key, a mock transcript, a template summary, a command or task that never runs, usage events and plan changes. The Stripe webhook answers 501 too, so Stripe retries the event instead of dropping it.

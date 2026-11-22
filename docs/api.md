@@ -56,7 +56,7 @@ The agent, audio, billing and worker services run in production only when `NODE_
 | billing | `GET /billing/plans`, `GET /billing/users/:userId/quota`, `POST /billing/usage`, `POST /webhooks/stripe`                    | 501 `not_implemented`: usage, plans and Stripe customer links are kept only in memory, and no plan can be bought yet. A 501 tells Stripe the event was not delivered, so Stripe sends it again later.                        |
 | worker  | `GET /tasks`, `POST /tasks`, `POST /events/audio`, `POST /events/agent`, `POST /events/billing`, `POST /tasks/:id/dispatch` | 501 `not_implemented`: the task handlers are placeholders and the queue lives in memory.                                                                                                                                     |
 
-The sync service always runs in production; its protocol is in the next section.
+The sync service's protocol is in the next section.
 
 ## Note sync vault API
 
