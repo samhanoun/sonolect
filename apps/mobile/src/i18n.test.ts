@@ -157,8 +157,8 @@ describe("online editing copy", () => {
     const t = STRINGS.en.settings.onlineEditing;
     assert.equal(t.consentTitle("OpenRouter"), "Send this note to OpenRouter?");
     assert.equal(
-      t.consentMessage("Rewrite", "OpenRouter", "openai/gpt-6-mini"),
-      "Rewrite sends the text of this note to OpenRouter (openai/gpt-6-mini) with your API key. OpenRouter's terms apply. Nothing else leaves this phone.",
+      t.consentMessage("Rewrite", "OpenRouter", "openai/gpt-example-mini"),
+      "Rewrite sends the text of this note to OpenRouter (openai/gpt-example-mini) with your API key. OpenRouter's terms apply. Nothing else leaves this phone.",
     );
     const fr = STRINGS.fr.settings.onlineEditing;
     assert.equal(

@@ -19,7 +19,7 @@ const KEY = "test-key-not-real-0000";
 
 const EDITING: OnlineEditing = {
   provider: "openrouter",
-  model: "openai/gpt-6-mini",
+  model: "openai/gpt-example-mini",
   alwaysAllow: false,
 };
 
@@ -169,7 +169,7 @@ describe("asking first", () => {
 
   it("takes a consent only for the provider and model it named", async () => {
     for (const consentedTo of [
-      { provider: "openrouter", model: "anthropic/claude-sonnet-5-5" },
+      { provider: "openrouter", model: "anthropic/claude-example-1" },
       { provider: "opencode", model: EDITING.model },
     ] as const) {
       const { input, calls, keyReads } = setup({ consentedTo });
@@ -215,7 +215,7 @@ describe("after consent", () => {
     const zen: OnlineEditing = {
       ...EDITING,
       provider: "opencode",
-      model: "claude-sonnet-5-5",
+      model: "claude-example-1",
     };
     const opencode = setup({
       settings: { onlineEditing: zen },

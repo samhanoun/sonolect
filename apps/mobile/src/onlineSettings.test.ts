@@ -12,7 +12,7 @@ import {
 
 const EDITING: OnlineEditing = {
   provider: "openrouter",
-  model: "openai/gpt-6-mini",
+  model: "openai/gpt-example-mini",
   alwaysAllow: true,
 };
 
@@ -35,14 +35,14 @@ describe("online editing status", () => {
   it("names the provider and the model in use", () => {
     assert.equal(
       onlineEditingStatus(t, EDITING, { openrouter: true, opencode: false }),
-      "Rewrite and Reply use OpenRouter (openai/gpt-6-mini).",
+      "Rewrite and Reply use OpenRouter (openai/gpt-example-mini).",
     );
   });
 
   it("asks for the key of the chosen provider only", () => {
     assert.equal(
       onlineEditingStatus(t, EDITING, { openrouter: false, opencode: true }),
-      "Rewrite and Reply use OpenRouter (openai/gpt-6-mini). Save your OpenRouter key to turn it on.",
+      "Rewrite and Reply use OpenRouter (openai/gpt-example-mini). Save your OpenRouter key to turn it on.",
     );
     const fr = strings("fr").settings.onlineEditing;
     assert.equal(
