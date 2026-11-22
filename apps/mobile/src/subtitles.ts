@@ -34,41 +34,73 @@ export interface Cue {
 export const MIN_CUE_MS = 700;
 /** One subtitle line. */
 export const MAX_LINE_CHARS = 42;
+/** Lines in one cue. */
+export const MAX_CUE_LINES = 2;
 
-/** Splits text at sentence ends, then at spaces, into parts that fit a cue. */
-function splitText(text: string, max: number): string[] {
-  const words = text.split(/\s+/).filter(Boolean);
-  const parts: string[] = [];
-  let current = "";
+/**
+ * Words packed into lines of at most `max` characters, each line as full
+ * as it can be. A word longer than a line is a line of its own.
+ */
+function packLines(words: readonly string[], max: number): string[] {
+  const lines: string[] = [];
   for (const word of words) {
-    const next = current ? `${current} ${word}` : word;
-    if (current && next.length > max) {
-      parts.push(current);
-      current = word;
+    const last = lines.at(-1);
+    if (last !== undefined && last.length + 1 + word.length <= max) {
+      lines[lines.length - 1] = `${last} ${word}`;
     } else {
-      current = next;
-    }
-    if (/[.!?…؟]$/.test(word) && current.length >= max / 2) {
-      parts.push(current);
-      current = "";
+      lines.push(word);
     }
   }
-  if (current) parts.push(current);
+  return lines;
+}
+
+/**
+ * Splits text into parts that fit a cue: at most two lines of 42
+ * characters, and a part ends at a sentence end once it is half full.
+ */
+function splitText(text: string): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const parts: string[] = [];
+  let current: string[] = [];
+  for (const word of words) {
+    if (
+      current.length > 0 &&
+      packLines([...current, word], MAX_LINE_CHARS).length > MAX_CUE_LINES
+    ) {
+      parts.push(current.join(" "));
+      current = [];
+    }
+    current.push(word);
+    if (
+      /[.!?…؟]$/.test(word) &&
+      current.join(" ").length >= MAX_CUE_CHARS / 2
+    ) {
+      parts.push(current.join(" "));
+      current = [];
+    }
+  }
+  if (current.length > 0) parts.push(current.join(" "));
   return parts;
 }
 
-/** At most two lines, broken at the space nearest the middle. */
+/**
+ * At most two lines of `max` characters, broken at the space nearest the
+ * middle that keeps both lines short enough. A cue that cannot fit two
+ * lines (a word longer than a line) is packed line by line.
+ */
 export function wrapCueText(text: string, max = MAX_LINE_CHARS): string {
   if (text.length <= max) return text;
   const middle = text.length / 2;
   let best = -1;
   for (let index = 0; index < text.length; index += 1) {
     if (text[index] !== " ") continue;
+    if (index > max || text.length - index - 1 > max) continue;
     if (best < 0 || Math.abs(index - middle) < Math.abs(best - middle)) {
       best = index;
     }
   }
-  return best < 0 ? text : `${text.slice(0, best)}\n${text.slice(best + 1)}`;
+  if (best >= 0) return `${text.slice(0, best)}\n${text.slice(best + 1)}`;
+  return packLines(text.split(" ").filter(Boolean), max).join("\n");
 }
 
 /**
@@ -84,7 +116,7 @@ export function subtitleCues(
   for (const segment of segments) {
     const text = clean(segment.text).replace(/\s+/g, " ").trim();
     if (!text) continue;
-    const parts = splitText(text, MAX_CUE_CHARS);
+    const parts = splitText(text);
     const span = Math.max(0, segment.endMs - segment.startMs);
     const total = parts.reduce((sum, part) => sum + part.length, 0);
     let at = segment.startMs;
@@ -155,7 +187,7 @@ export function toVtt(cues: readonly Cue[], note?: string): string {
   return `${header}\n${cues
     .map(
       (cue) =>
-        `${formatCueTime(cue.startMs, ".")} --> ${formatCueTime(cue.endMs, ".")}\n${wrapCueText(escapeVtt(cueSafe(cue.text)))}`,
+        `${formatCueTime(cue.startMs, ".")} --> ${formatCueTime(cue.endMs, ".")}\n${escapeVtt(wrapCueText(cueSafe(cue.text)))}`,
     )
     .join("\n\n")}\n`;
 }

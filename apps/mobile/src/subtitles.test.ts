@@ -40,6 +40,54 @@ describe("wrapCueText", () => {
     const word = "x".repeat(MAX_LINE_CHARS + 5);
     assert.equal(wrapCueText(word), word);
   });
+
+  it("keeps both lines of a nearly full cue within 42 characters", () => {
+    // The space nearest the middle would make a first line of 44.
+    const text = `${"a".repeat(40)} bb ${"c".repeat(38)}`;
+    assert.equal(text.length, 82);
+    assert.deepEqual(wrapCueText(text).split("\n"), [
+      `${"a".repeat(40)}`,
+      `bb ${"c".repeat(38)}`,
+    ]);
+  });
+});
+
+describe("cue lines", () => {
+  it("gives each cue at most two lines of 42 characters", () => {
+    const text =
+      "So the plan for this week is to finish the onboarding screens first, " +
+      "then the settings page, and after that we look at notifications. " +
+      "Marie said the design for the reminder sheet is almost ready, " +
+      "but she still wants to test the wording with two or three people. " +
+      "I will write the release notes on Thursday, and we ship on Friday " +
+      "if the beta testers do not find anything serious in the export flow.";
+    const cues = subtitleCues([{ startMs: 0, endMs: 60_000, text }]);
+    // Each SRT block: its number, its times, then its lines.
+    const blocks = toSrt(cues)
+      .trim()
+      .split("\n\n")
+      .map((block) => block.split("\n").slice(2));
+    assert.ok(cues.length > 3);
+    for (const block of blocks) {
+      assert.ok(block.length <= 2, block.join("|"));
+      assert.ok(
+        block.every((line) => line.length <= MAX_LINE_CHARS),
+        block.join("|"),
+      );
+    }
+  });
+
+  it("wraps a cue the same way in SRT and WebVTT, whatever the escapes", () => {
+    const text = "I like A & B & C & D & E very much, says x";
+    assert.equal(text.length, MAX_LINE_CHARS);
+    const cues = [{ startMs: 0, endMs: 1_000, text }];
+    assert.equal(toSrt(cues).split("\n")[2], text);
+    assert.equal(
+      toVtt(cues).split("\n")[3],
+      "I like A &amp; B &amp; C &amp; D &amp; E very much, says x",
+    );
+    assert.equal(toVtt(cues).split("\n").length, 5);
+  });
 });
 
 describe("subtitleCues", () => {
