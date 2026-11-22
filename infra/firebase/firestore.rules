@@ -9,18 +9,33 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
-    function tenantRole(tenantId) {
+    function memberPath(tenantId) {
+      return /databases/$(database)/documents/tenants/$(tenantId)/members/$(request.auth.uid);
+    }
+
+    // Every part stays a boolean, so a user with no member document is
+    // denied instead of failing on a role that is not there.
+    function hasTenantRole(tenantId, roles) {
       return signedIn()
-        && exists(/databases/$(database)/documents/tenants/$(tenantId)/members/$(request.auth.uid))
-        && get(/databases/$(database)/documents/tenants/$(tenantId)/members/$(request.auth.uid)).data.role;
+        && exists(memberPath(tenantId))
+        && get(memberPath(tenantId)).data.role in roles;
     }
 
     function isTenantMember(tenantId) {
-      return tenantRole(tenantId) in ['owner', 'admin', 'member'];
+      return hasTenantRole(tenantId, ['owner', 'admin', 'member']);
     }
 
     function isTenantAdmin(tenantId) {
-      return tenantRole(tenantId) in ['owner', 'admin'];
+      return hasTenantRole(tenantId, ['owner', 'admin']);
+    }
+
+    function isTenantOwner(tenantId) {
+      return hasTenantRole(tenantId, ['owner']);
+    }
+
+    // Admins give the admin and member roles; only an owner makes an owner.
+    function canGiveRole(tenantId, role) {
+      return role in ['admin', 'member'] || (role == 'owner' && isTenantOwner(tenantId));
     }
 
     match /users/{userId} {
@@ -34,11 +49,24 @@ service cloud.firestore {
     match /tenants/{tenantId} {
       allow read: if isTenantMember(tenantId);
       allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
-      allow update, delete: if isTenantAdmin(tenantId);
+      allow update: if isTenantAdmin(tenantId)
+        && (request.resource.data.ownerId == resource.data.ownerId || isTenantOwner(tenantId));
+      allow delete: if isTenantOwner(tenantId);
 
       match /members/{userId} {
         allow read: if isTenantMember(tenantId);
-        allow create, update, delete: if isTenantAdmin(tenantId);
+        // The user who creates a tenant adds themself as its first owner, in
+        // the same batch or right after.
+        allow create: if (isOwner(userId)
+            && request.resource.data.role == 'owner'
+            && !exists(memberPath(tenantId))
+            && getAfter(/databases/$(database)/documents/tenants/$(tenantId)).data.ownerId == request.auth.uid)
+          || (isTenantAdmin(tenantId) && canGiveRole(tenantId, request.resource.data.role));
+        allow update: if isTenantAdmin(tenantId)
+          && canGiveRole(tenantId, request.resource.data.role)
+          && (resource.data.role != 'owner' || isTenantOwner(tenantId));
+        allow delete: if isTenantAdmin(tenantId)
+          && (resource.data.role != 'owner' || isTenantOwner(tenantId));
       }
 
       match /projects/{projectId} {

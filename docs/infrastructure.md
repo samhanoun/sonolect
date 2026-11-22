@@ -82,7 +82,12 @@ CI's "Terraform formatting" job checks the formatting of every directory under `
 firebase deploy --only firestore:rules,firestore:indexes,storage --project <project-id>
 ```
 
-Rules deny all unrecognized paths. Product changes that add collections or object prefixes must update rules in the same pull request.
+Rules deny all unrecognized paths. Product changes that add collections or object prefixes must update rules, and `infra/firebase/rules.test.mjs`, in the same pull request. To run that test locally (Java 21 needed):
+
+```bash
+npx firebase-tools@15.37.0 emulators:exec --only firestore,storage --project demo-sonolect \
+  "node --test infra/firebase/rules.test.mjs"
+```
 
 ## Environment defaults
 

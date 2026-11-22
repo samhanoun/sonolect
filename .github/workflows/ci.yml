@@ -619,6 +619,16 @@ jobs:
           "pnpm --filter @sonolect/sync-service test:firestore
           && pnpm --filter @sonolect/sync-service smoke"
 
+      # firebase.json points the emulators at infra/firebase, so this checks
+      # the Firestore and Storage rules a `firebase deploy` would publish.
+      - name: Test the Firebase rules on the emulators
+        env:
+          GCLOUD_PROJECT: demo-sonolect
+        run: >-
+          npx --yes firebase-tools@15.37.0 emulators:exec
+          --only firestore,storage --project demo-sonolect
+          "node --test infra/firebase/rules.test.mjs"
+
   security:
     name: Dependency and secret scanning
     runs-on: ubuntu-latest

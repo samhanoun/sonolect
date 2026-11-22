@@ -74,9 +74,12 @@ Note sync is end-to-end encrypted. The apps call `services/sync-service` directl
 
 Rules live in `infra/firebase`:
 
-- `firestore.rules`: denies by default, permits user-owned documents and tenant documents only to members/admins.
-- `storage.rules`: denies by default, permits user-owned and tenant-owned object paths with size limits.
+- `firestore.rules`: denies by default, permits user-owned documents and tenant documents only to members/admins. The user who creates a tenant adds themself as its first owner; admins manage admins and members, and only an owner can make an owner, change a tenant's owner or delete the tenant.
+- `storage.rules`: denies by default, permits user-owned and tenant-owned object paths with size limits on uploads.
+- `rules.test.mjs`: CI checks both rule files on the Firebase emulators ("Sync service (Firestore emulator)" job).
 - `firestore.indexes.json`: expected composite indexes for sessions, transcripts, agent runs, and projects.
+
+No app or service uses these rules today: the shipped apps keep notes on the device, the sync service reaches its own Firestore database with a service account (rules do not apply to it), and the API keeps transcripts in memory or a file. They matter once a client reads Firestore or Storage directly.
 
 ## Secret handling
 
