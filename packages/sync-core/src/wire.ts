@@ -5,9 +5,11 @@
  * (`@sonolect/sync-core/wire`) without pulling the client crypto into its
  * bundle. Every byte string travels as unpadded base64url.
  *
- * What the server sees: vault ids, the bearer token (it stores only its
- * SHA-256), record ids, revisions, sequence numbers, sizes, timestamps, IP
- * addresses and ciphertext. Never a key, a note id or a word of a note.
+ * What the server sees: vault ids, the bearer token (one per vault, shared
+ * by every device; it stores only its SHA-256), record ids, revisions,
+ * sequence numbers, the vault's epoch, which records are deletes and when,
+ * sizes, timestamps, the user agent, IP addresses and ciphertext. Never a
+ * key, a note id or a word of a note.
  */
 
 /** A vault id: 16 bytes as base64url. */

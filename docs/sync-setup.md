@@ -488,7 +488,12 @@ the other devices.
 - **Turning sync off** on a device offers to keep the server copy (the
   other devices keep syncing) or to delete it (the vault is erased; the
   other devices say "This sync was deleted", turn sync off and keep their
-  notes).
+  notes). Keeping it, the device first tries to upload the deletes made
+  there; those it could not send are kept and go out when it joins the
+  same sync again, so the deleted notes do not come back.
+- **A keychain the desktop cannot read at launch** (locked, or a prompt
+  declined) leaves sync on with a device problem that retries; Turn on and
+  Join stay hidden, so they cannot replace the saved key.
 - **Rotating the admin token**: with Terraform, run
   `terraform apply -replace=random_password.service_token`; without it, add
   a new secret version and deploy again. The apps never use this token.

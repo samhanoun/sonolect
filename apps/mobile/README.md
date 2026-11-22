@@ -72,9 +72,14 @@ server stores only ciphertext. Recordings don't sync (the phone keeps none).
   whoever holds it.
 - **Code** (`src/sync/`): `keyStore.ts` keeps the key in SecureStore
   (`WHEN_UNLOCKED_THIS_DEVICE_ONLY`); `noteStore.ts` and `noteMapping.ts`
-  map notes to note/1, keeping other devices' fields in
-  `sonolect.mobile.sync.note.<id>`; `transport.ts` is `fetch` with a 30 s
-  timeout and size caps; `controller.ts` syncs at launch, in the
+  map notes to note/1, keeping other devices' fields whole in
+  `sonolect.mobile.sync.note.<id>` (split over `<key>~1`… past 1.5 MB);
+  `transport.ts` is `fetch` with a 30 s timeout and size caps (an answer up
+  to a full page of changes, sync-core's `MAX_RESPONSE_BYTES`);
+  `keptDeletes.ts` keeps the deletes not uploaded yet when the sync state
+  is forgotten (sync turned off with the server copy kept, history turned
+  off, notes cleared on this phone), and the next engine of that vault
+  sends them; `controller.ts` syncs at launch, in the
   foreground, about 5 s after a change and every 2 minutes, backing off on
   errors. `src/store.ts` stamps each create, edit, refine and pin, and sends
   a delete for a note's _Delete_ and _Clear history_; retention never does.
