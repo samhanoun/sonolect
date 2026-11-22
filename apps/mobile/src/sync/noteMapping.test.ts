@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { type Hlc, type SyncNote, parseSyncNote } from "@sonolect/sync-core";
+import {
+  type Hlc,
+  type SyncNote,
+  noteFingerprint,
+  parseSyncNote,
+} from "@sonolect/sync-core";
 
-import type { TranscriptTurn } from "../domain";
-import { MAX_TEXT_LENGTH } from "../storageCore";
+import type { NoteSegment, TranscriptTurn } from "../domain";
+import { MAX_SEGMENTS } from "../noteSegments";
+import { MAX_TEXT_LENGTH, sanitizeTurn } from "../storageCore";
 import { noteToTurn, parseCompanion, turnToNote } from "./noteMapping";
 
 const NOW = Date.parse("2026-11-20T12:00:00.000Z");
@@ -42,6 +48,16 @@ const desktopNote = (patch: Partial<SyncNote> = {}): SyncNote => ({
   futureField: { nested: [1, 2, 3] },
   ...patch,
 });
+
+/** A dictation's segments, as the capture loop records them. */
+const SEGMENTS: NoteSegment[] = [
+  { startMs: 400, endMs: 1_300, text: "buy milk" },
+  { startMs: 1_900, endMs: 2_600, text: "and bread", approx: true },
+];
+
+/** The turn as the next launch reads it back from storage. */
+const reloaded = (turn: TranscriptTurn): TranscriptTurn =>
+  sanitizeTurn(JSON.parse(JSON.stringify(turn)), NOW)!;
 
 /** What the phone sends back for a note it received and did not change. */
 function roundTrip(note: SyncNote, id = "note-1") {
@@ -271,6 +287,7 @@ describe("note mapping: the companion value", () => {
     const note = desktopNote({ rawText: huge, segments });
     const { turn, companion } = noteToTurn("note-1", note, HLC, NOW);
     assert.ok(companion !== null && companion.length > 1_500_000);
+    assert.equal(turn.segments, undefined, "too many for the phone to show");
     const pinned = turnToNote(
       { ...turn, pinned: true },
       parseCompanion(companion),
@@ -278,5 +295,151 @@ describe("note mapping: the companion value", () => {
     assert.equal(pinned.rawText, huge, "the whole transcript");
     assert.deepEqual(pinned.segments, segments, "every segment");
     assert.equal(pinned.pinned, true);
+    assert.equal(
+      noteFingerprint(pinned),
+      noteFingerprint(note),
+      "a pin changes no content",
+    );
+  });
+});
+
+describe("note mapping: segments", () => {
+  it("sends a dictation's segments, with the approx mark, and reads them back with no companion", () => {
+    const turn = phoneTurn({ segments: SEGMENTS });
+    const note = turnToNote(turn, null);
+    assert.deepEqual(note.segments, SEGMENTS);
+    assert.deepEqual(parseSyncNote(note), note, "a valid note/1");
+    const back = noteToTurn(turn.id, note, HLC, NOW);
+    assert.deepEqual(back.turn, { ...turn, hlc: HLC });
+    assert.equal(back.companion, null);
+    // Read again after a launch, it is the same note: same content hash.
+    assert.deepEqual(turnToNote(reloaded(back.turn), null), note);
+    assert.equal(
+      noteFingerprint(turnToNote(reloaded(back.turn), null)),
+      noteFingerprint(note),
+    );
+  });
+
+  it("keeps a dictation's segments through a refine, which changes only the refined text", () => {
+    const turn = phoneTurn({ segments: SEGMENTS });
+    for (const mode of ["summarize", "task_creation", "rewrite"] as const) {
+      const refined: TranscriptTurn = {
+        ...turn,
+        mode,
+        refinedText: "- Buy milk\n- Buy bread",
+      };
+      const sent = turnToNote(refined, null);
+      assert.deepEqual(sent.segments, SEGMENTS, mode);
+      assert.equal(sent.rawText, turn.rawText);
+    }
+  });
+
+  it("does not send segments that do not say the note's words, and keeps them here", () => {
+    const turn = phoneTurn({
+      segments: [{ startMs: 0, endMs: 900, text: "buy oat milk" }],
+    });
+    const note = turnToNote(turn, null);
+    assert.equal("segments" in note, false);
+    assert.equal(turn.segments?.length, 1);
+  });
+
+  it("shows a desktop note's segments without speakers, and sends them back with them", () => {
+    const note = desktopNote();
+    const { turn, back } = roundTrip(note);
+    assert.deepEqual(turn.segments, [
+      { startMs: 0, endMs: 1_200, text: "first" },
+      { startMs: 1_200, endMs: 3_000, text: "speaker said hello" },
+    ]);
+    assert.deepEqual(back.segments, note.segments);
+    assert.equal(noteFingerprint(back), noteFingerprint(note));
+  });
+
+  it("sends a desktop note's segments back as they came after a refine, a pin and a launch", () => {
+    const note = desktopNote();
+    const { turn, companion } = noteToTurn("note-1", note, HLC, NOW);
+    const changed = reloaded({
+      ...turn,
+      mode: "summarize",
+      refinedText: "A summary.",
+      pinned: true,
+    });
+    const sent = turnToNote(changed, parseCompanion(companion));
+    assert.deepEqual(sent.segments, note.segments);
+    assert.equal(sent.refinedText, "A summary.");
+    // Even if the phone came to show them otherwise, they go back whole.
+    assert.ok(changed.segments);
+    const shownOtherwise = turnToNote(
+      { ...changed, segments: changed.segments.slice(0, 1) },
+      parseCompanion(companion),
+    );
+    assert.deepEqual(shownOtherwise.segments, note.segments);
+  });
+
+  it("shows no segments when one would not fit, and keeps every one for sync", () => {
+    const segments = Array.from({ length: MAX_SEGMENTS + 1 }, (_, i) => ({
+      startMs: i * 1_000,
+      endMs: i * 1_000 + 900,
+      text: `word${i}`,
+    }));
+    const note = desktopNote({
+      rawText: segments.map((segment) => segment.text).join(" "),
+      segments,
+    });
+    const { turn, back } = roundTrip(note);
+    assert.equal(turn.segments, undefined, "no Subtitles for part of a note");
+    assert.deepEqual(back.segments, segments);
+    // Past six hours on the phone's clock: none shown, all kept.
+    const late = desktopNote({
+      segments: [
+        { startMs: 0, endMs: 1_000, text: "first" },
+        { startMs: 7 * 3_600_000, endMs: 7 * 3_600_000 + 900, text: "late" },
+      ],
+    });
+    const lateTrip = roundTrip(late);
+    assert.equal(lateTrip.turn.segments, undefined);
+    assert.deepEqual(lateTrip.back.segments, late.segments);
+  });
+
+  it("keeps an empty segment list and a note without segments as they came", () => {
+    const empty = desktopNote({ segments: [] });
+    const { turn, back } = roundTrip(empty);
+    assert.equal(turn.segments, undefined);
+    assert.deepEqual(back.segments, []);
+    const { segments: _segments, ...without } = desktopNote();
+    const none = roundTrip(without);
+    assert.equal(none.turn.segments, undefined);
+    assert.equal("segments" in none.back, false);
+  });
+
+  it("shows a phone dictation that came from another phone, and keeps the approx mark", () => {
+    const fromPhone = turnToNote(phoneTurn({ segments: SEGMENTS }), null);
+    const { turn, companion } = noteToTurn("other", fromPhone, HLC, NOW);
+    assert.deepEqual(turn.segments, SEGMENTS);
+    assert.equal(companion, null);
+  });
+
+  it("sends the segments a companion kept in extra before the phone showed them", () => {
+    const note = desktopNote();
+    const { turn, companion } = noteToTurn("note-1", note, HLC, NOW);
+    // The turn and companion an earlier build stored: no segments shown,
+    // and the segments in extra.
+    const { segments: _shown, ...oldTurn } = turn;
+    const { segments: _kept, ...oldKept } = parseCompanion(companion)!.kept;
+    assert.ok(_kept, "this build keeps them in kept");
+    const oldCompanion = JSON.stringify({
+      v: 1,
+      extra: {
+        title: note.title,
+        updatedAt: note.updatedAt,
+        origin: note.origin,
+        segments: note.segments,
+        futureField: note.futureField,
+      },
+      kept: oldKept,
+    });
+    const parsed = parseCompanion(oldCompanion);
+    assert.equal("segments" in parsed!.extra, false);
+    const sent = turnToNote(oldTurn, parsed);
+    assert.deepEqual(sent, note);
   });
 });

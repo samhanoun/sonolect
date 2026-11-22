@@ -244,7 +244,7 @@ back unchanged.
 | `origin`                 | `"desktop"`                                                              | `"mobile"`                                                          |
 | `source?`                | `"microphone"`, `"system"` or `"file"`                                   | `source` (`"microphone"`, `"typed"` or `"remote"`)                  |
 | `pinned?`                | keep                                                                     | `pinned`                                                            |
-| `segments?`              | `segments` (`startMs`, `endMs`, `text`, `speaker?`, extra keys kept)     | keep                                                                |
+| `segments?`              | `segments` (`startMs`, `endMs`, `text`, `speaker?`, extra keys kept)     | `segments` of a dictation; another device's kept as received        |
 | `conflictOf?`            | show as "conflict copy of …"                                             | show as "conflict copy of …"                                        |
 | (passthrough)            | everything else, such as `privacyMode`                                   | `privacyMode`, and everything else                                  |
 | local only, never synced | `error`, the audio file                                                  | `syncState`                                                         |
@@ -253,6 +253,9 @@ back unchanged.
   The app does not have to show it.
 - Recordings do not sync in v1, so an app must handle notes that have no
   audio.
+- A phone dictation's segments say the note's words. The phone marks a
+  segment its own clock timed with `approx: true`; a reader keeps it like
+  any field of a segment it does not know.
 - `isPastRetention(note, days, now)` is the shared retention rule. It keeps
   pinned notes and notes whose date cannot be read.
 

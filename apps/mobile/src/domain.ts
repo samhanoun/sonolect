@@ -59,8 +59,10 @@ export interface TranscriptTurn {
   /** A conflict copy made by sync: the id of the note it was copied from. */
   conflictOf?: string;
   /**
-   * When each part was said, for subtitles. Dictations from this version on;
-   * typed notes and older notes have none.
+   * When each part was said, for subtitles. Dictations from this version on,
+   * and a synced note's segments when they all fit (sync/noteMapping.ts);
+   * typed notes and older notes have none. Never changed after the capture:
+   * a refine leaves them as they are.
    */
   segments?: NoteSegment[];
 }

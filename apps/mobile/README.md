@@ -60,6 +60,15 @@ Notes sync between the user's own devices through `packages/sync-core`, with
 no account: a random 32-byte key, shared by QR code or a typed code. The
 server stores only ciphertext. Recordings don't sync (the phone keeps none).
 
+- **Segments**: a dictation sends its segments with it, so the desktop gets
+  when each part was said and its studio can save the note's subtitles. A
+  segment the phone's clock timed carries `approx: true`, which sync-core
+  and the desktop keep like any field they do not know. The phone shows a
+  synced note's segments (without speakers) for its _Subtitles_ when they
+  all fit its limits (2,000 segments, 200,000 characters, six hours), and
+  none otherwise. It never changes them: a refine changes the refined text
+  only, and another device's segments go back as they came.
+
 - **Off unless the build sets a server**: `EXPO_PUBLIC_SONOLECT_SYNC_URL`
   (`src/features.ts`, checked by `config/release.cjs`). It must be https;
   development builds may also use `http://127.0.0.1`, `http://localhost` or,

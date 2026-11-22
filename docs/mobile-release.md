@@ -386,7 +386,8 @@ URL in the build (see [Note sync](#note-sync)).
     Settings.
 - **Notes, dictionary and snippets** stay on the phone (AsyncStorage). A
   dictated note keeps when each part was said (text and times, no audio),
-  for its subtitles; sync does not send it.
+  for its subtitles. With sync on, those times go with the note, end-to-end
+  encrypted like its text (see [Note sync](#note-sync)).
   Android backups are off (`allowBackup: false`). _Ephemeral_ saves nothing.
   _Clear history_ and _Erase all data_ delete them. _Keep notes for_
   (forever by default; 1, 7, 30 or 90 days) deletes older notes at launch
@@ -420,7 +421,8 @@ nothing to the sync server. Sync adds no permission.
   owner picked ([sync-setup.md](sync-setup.md)). Only over HTTPS.
 - **Sent end-to-end encrypted, unreadable by the server and the developer**:
   every note's text and its other fields (title, language, mode, times,
-  duration, pinned, segments, and fields other devices added), plus a
+  duration, pinned, segments with when each part was said, and fields other
+  devices added), plus a
   random per-install device id inside each note's clock. Each note is
   sealed on the phone with XChaCha20-Poly1305 under a key that exists only
   on the user's devices. Dictionary entries, snippets and settings do not
