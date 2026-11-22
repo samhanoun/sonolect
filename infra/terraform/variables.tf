@@ -43,8 +43,14 @@ variable "bucket_location" {
   default     = "EU"
 }
 
+variable "enable_cloud_sql" {
+  description = "Create the Cloud SQL PostgreSQL instance and its database. Off until a service needs relational state. Needs private_network_self_link."
+  type        = bool
+  default     = false
+}
+
 variable "private_network_self_link" {
-  description = "Self-link of the VPC network used for private Cloud SQL connectivity."
+  description = "Self-link of the VPC network used for private Cloud SQL connectivity. Required when enable_cloud_sql is true."
   type        = string
   default     = null
 }
@@ -111,6 +117,19 @@ variable "allowed_origins" {
     "http://tauri.localhost",
     "https://tauri.localhost"
   ]
+}
+
+variable "vertex_location" {
+  description = "Vertex AI region of the API's polish requests (SONOLECT_VERTEX_LOCATION). Defaults to region, so transcripts stay in the platform's region. It must offer gemini_model."
+  type        = string
+  default     = null
+}
+
+variable "gemini_model" {
+  description = "Gemini model of the API's polish requests (SONOLECT_GEMINI_MODEL). Google retires models on fixed dates: keep this on one with no announced shutdown date, the same as DEFAULT_GEMINI_MODEL in services/api/src/ai.ts. Null means the default."
+  type        = string
+  default     = "gemini-2.5-flash"
+  nullable    = false
 }
 
 variable "api_image" {

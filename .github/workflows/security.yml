@@ -90,8 +90,17 @@ jobs:
 
       - name: Scan lockfiles
         # Reports every known vulnerability to code scanning. Blocking is done
-        # by dependency-review (new deps) and the audit jobs below.
-        run: ./osv-scanner scan source --recursive --format sarif --output osv.sarif . || true
+        # by dependency-review (new deps) and the audit jobs below. Exit code 1
+        # means vulnerabilities were found, which is expected. Any other
+        # failure (127 a general error, 128 no packages found) fails the job,
+        # so a broken scan cannot pass with no results.
+        run: |
+          status=0
+          ./osv-scanner scan source --recursive --format sarif --output osv.sarif . || status=$?
+          if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+            echo "::error::osv-scanner failed with exit code $status"
+            exit "$status"
+          fi
 
       - name: Upload SARIF to code scanning
         if: github.actor != 'dependabot[bot]'
@@ -110,6 +119,7 @@ jobs:
           name: osv-sarif
           path: osv.sarif
           retention-days: 14
+          if-no-files-found: error
 
   cargo-audit:
     name: cargo-audit (desktop Rust crates)

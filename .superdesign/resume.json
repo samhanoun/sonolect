@@ -8,14 +8,14 @@
       "designSystemPath": ".superdesign/design-system.md",
       "contextFiles": [
         ".superdesign/design-system.md",
-        "apps/desktop/src/components/LocalSettingsPanel.tsx",
-        "apps/desktop/src/components/Sidebar.tsx",
+        "apps/desktop/src/components/StudioModels.tsx",
+        "apps/desktop/src/components/StudioShell.tsx",
         "apps/desktop/src/tailwind.css"
       ],
       "fingerprints": {
         ".superdesign/design-system.md": "c0c56ecc1157f598788093993a257ce3f0372096f5d05d9c592703ed2f3b5823",
-        "apps/desktop/src/components/LocalSettingsPanel.tsx": "764b2fc30c5af3de035c45f4dd65f2222a21b24a39e1a245e2016b0297f91270",
-        "apps/desktop/src/components/Sidebar.tsx": "5f06f908b9299860c51ac0efa651a66f287805ba55cf252a10d9d8b8b8240931",
+        "apps/desktop/src/components/StudioModels.tsx": "fc76abbec14aa35668511379577780e87353fece96776ee5751ee71ea75b079a",
+        "apps/desktop/src/components/StudioShell.tsx": "e42f07669072e97095f500e9e46311ec689a3f8a1f70f9b852c8fe5a3148aa5e",
         "apps/desktop/src/tailwind.css": "fbb7d7972aa7e5613238e6c69e716614d861cc3e5da88c714c473067cfb91fc0"
       },
       "drafts": {

@@ -19,5 +19,10 @@ apps/mobile/.expo/
 infra/terraform/**/.terraform/
 infra/terraform/**/*.tfstate
 infra/terraform/**/*.tfstate.*
+# A saved plan holds the generated service token in plain text, like the
+# state. Local variable files hold the owner's settings.
+infra/terraform/**/*.tfplan
+infra/terraform/**/terraform.tfvars
+infra/terraform/**/*.auto.tfvars
 apps/desktop/test-results/
 apps/desktop/playwright-report/

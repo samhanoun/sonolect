@@ -85,7 +85,7 @@ No app or service uses these rules today: the shipped apps keep notes on the dev
 
 1. Add new secret names to Terraform only as Secret Manager metadata.
 2. Populate secret versions outside Git using the GCP console, `gcloud secrets versions add`, or an approved vault integration.
-3. Grant access to runtime service accounts only when needed.
+3. Grant `roles/secretmanager.secretAccessor` on the secret itself, and only to the runtime service account whose service mounts it. Never grant it on the whole project.
 4. Rotate provider keys and webhook secrets on role changes, suspected compromise, or at least every 180 days.
 
 ## CI and supply chain
