@@ -20,7 +20,7 @@
     "@tailwindcss/vite": "^4",
     "@tauri-apps/api": "^2.12.5",
     "@tauri-apps/plugin-global-shortcut": "^2.4.1",
-    "lucide-react": "^1.76",
+    "lucide-react": "^1.77",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "zustand": "^5.1.0"
